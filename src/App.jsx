@@ -848,6 +848,54 @@ function useSharedStore(storageKey, loader, initial) {
 /* ------------------------------------------------------------------ */
 /* 공용 UI                                                             */
 /* ------------------------------------------------------------------ */
+/* 글씨 크기: 컴퓨터마다 따로 저장합니다 (화면 크기가 다르므로). '자동'은 창 너비에 맞춰 줄입니다. */
+const TEXT_SIZE_KEY = 'ui-text-size';
+const TEXT_SIZE_OPTIONS = [['auto', '자동'], ['0.7', '70%'], ['0.8', '80%'], ['0.9', '90%'], ['1', '100%'], ['1.1', '110%'], ['1.25', '125%'], ['1.5', '150%']];
+function textScale(v) {
+  if (v !== 'auto') return Number(v) || 1;
+  return Math.max(0.75, Math.min(1, window.innerWidth / 1100));
+}
+function applyTextSize(v) {
+  document.documentElement.style.fontSize = `${Math.round(textScale(v) * 1000) / 10}%`;
+}
+function useTextSize() {
+  const [value, setValue] = useState(() => {
+    try { return localStorage.getItem(TEXT_SIZE_KEY) || 'auto'; } catch { return 'auto'; }
+  });
+  useEffect(() => {
+    const onChange = (e) => setValue(e.detail);
+    window.addEventListener('ui-text-size', onChange);
+    return () => window.removeEventListener('ui-text-size', onChange);
+  }, []);
+  const change = useCallback((v) => {
+    try { localStorage.setItem(TEXT_SIZE_KEY, v); } catch { /* 저장 못 해도 지금 화면에는 적용 */ }
+    window.dispatchEvent(new CustomEvent('ui-text-size', { detail: v }));
+  }, []);
+  return [value, change];
+}
+// App 에서 한 번만 사용: 선택한 크기를 적용하고, '자동'이면 창 크기가 바뀔 때마다 다시 계산
+function useApplyTextSize() {
+  const [value] = useTextSize();
+  useEffect(() => {
+    applyTextSize(value);
+    if (value !== 'auto') return undefined;
+    const onResize = () => applyTextSize('auto');
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [value]);
+}
+function TextSizeControl({ className = '' }) {
+  const [value, change] = useTextSize();
+  return (
+    <label className={`flex items-center gap-1 text-xs text-slate-500 ${className}`} title="이 컴퓨터의 글씨 크기 (컴퓨터마다 따로 저장됩니다)">
+      글씨
+      <select value={value} onChange={e => change(e.target.value)} className="text-xs border border-slate-300 rounded-lg px-1.5 py-1.5 bg-white text-slate-600">
+        {TEXT_SIZE_OPTIONS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function ScreenShell({ title, color, onBack, lastSync, count, extra, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
@@ -863,6 +911,7 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {extra}
+            <TextSizeControl />
             <button type="button" onClick={onBack} className="text-sm px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
               화면 전환
             </button>
@@ -1798,6 +1847,7 @@ function RoleSelect({ settings, onSelect }) {
         <div className="text-center mb-8">
           <div className="text-sm text-slate-400 mb-1">Ophthalmology Flow</div>
           <h1 className="text-2xl font-semibold text-slate-900">이 컴퓨터의 화면을 선택하세요</h1>
+          <div className="flex justify-center mt-3"><TextSizeControl /></div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {items.map(({ key, label, sub, icon: Icon, color }) => {
@@ -3255,6 +3305,7 @@ function BoardShell({ title, onBack, wide, extra, children }) {
             {extra}
             <span className="text-2xl text-slate-500 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
             <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-500">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
+            <TextSizeControl />
             <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-400">화면 전환</button>
           </div>
         </div>
@@ -3947,6 +3998,7 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
 export default function App() {
   const [role, setRole] = useState(null);
   const [directoryOpen, setDirectoryOpen] = useState(false);
+  useApplyTextSize();
   // 메인 화면의 '전체 환자 명단'은 화면 전환 없이 명단 창만 엽니다.
   const selectRole = (key) => (key === 'directory' ? setDirectoryOpen(true) : setRole(key));
   const [patients, mutatePatients, syncPatients, markPatients] = useSharedStore('daily-patients', loadDaily, []);
