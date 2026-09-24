@@ -2295,7 +2295,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     ))}
                   </div>
                 )}
-                <TestPicker p={p} tests={allTests} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)} />
+                <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)} />
               </PatientRow>
             );
           }}
@@ -3471,7 +3471,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
                 </button>
                 <ConfirmButton label="삭제" onConfirm={() => removeOne(patientKey(p))} />
               </div>
-              <TestPicker p={p} tests={allTests} onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }} onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }} />
+              <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }} onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }} />
               <DilationRow showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
               </>}
             </div>
@@ -4065,7 +4065,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         return (
           <div className="bg-white border border-slate-200 rounded-xl p-5 mt-4">
             <div className="font-medium text-slate-900 mb-1">검사 선택 창 순서</div>
-            <p className="text-sm text-slate-500 mb-3">진료 중 추가 검사, 설명 완료(다음 내원 검사), 처치실 검사 지정, FU 지정 창에서 검사가 이 순서로 나옵니다. 검사실 대기 순서에는 영향이 없어요.</p>
+            <p className="text-sm text-slate-500 mb-3">환자 카드의 '오늘 검사' 버튼과, 진료 중 추가 검사·설명 완료(다음 내원 검사)·처치실 검사 지정·FU 지정 창에서 검사가 이 순서로 나옵니다. 검사실 대기 순서에는 영향이 없어요.</p>
             <div className="space-y-1.5">
               {picked.map((t, i) => (
                 <div key={t.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
