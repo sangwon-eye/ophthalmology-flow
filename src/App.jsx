@@ -2519,6 +2519,14 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
     return prev.map(x => (patientKey(x) === pk ? { ...x, ...extra(x), seen: false, seenAt: null, calledRoom: someoneIn ? null : doctor } : x));
   });
 
+  // 실수로 진료 완료를 눌렀을 때: 설명 대기에서 다시 진료 중(또는 진료 대기 앞)으로
+  const undoFinishConsult = (p) => {
+    const pk = patientKey(p);
+    const someoneIn = allPatients.some(x => patientKey(x) !== pk && x.doctor === doctor && inConsult(x));
+    backToRoom(pk);
+    showToast(`${p.name} 진료 완료 취소, ${someoneIn ? '진료 대기로' : '다시 진료 중으로'}`, () => patch(pk, () => ({ seen: true, seenAt: p.seenAt || Date.now(), calledRoom: null })));
+  };
+
   const finishConsult = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
@@ -2671,6 +2679,9 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                   {nextVisitNote(p)}
                   <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
                     설명 완료
+                  </button>
+                  <button type="button" onClick={() => undoFinishConsult(p)} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600 flex items-center gap-1">
+                    <RotateCcw size={14} /> 진료 완료 취소
                   </button>
                 </SimpleCard>
               ))}
