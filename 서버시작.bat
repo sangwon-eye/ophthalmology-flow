@@ -3,8 +3,8 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title 안과 환자 흐름 - 공유 서버
 
-rem 백업을 공유폴더에도 남기려면 아래 줄 맨 앞의 rem 을 지우고 경로를 바꾸세요.
-rem set BACKUP_DIR=\\공유PC이름\공유폴더\안과백업
+rem 창이 떠 있는 방식으로 켭니다. 창 없이 켜려면 서버켜기_창없이.bat 을 사용하세요.
+rem 백업 폴더 등 설정은 서버설정.txt 에서 바꿉니다.
 
 rem 설치하지 않은 Node.js(압축 파일 버전)를 이 폴더 안의 node 폴더에 넣어두면 그것을 사용합니다.
 if exist "%~dp0node\node.exe" set "PATH=%~dp0node;%PATH%"
@@ -20,6 +20,13 @@ call npm.cmd run build
 if errorlevel 1 goto :fail
 
 :run
+node scripts\health.js
+if errorlevel 1 goto :start
+echo 서버가 이미 (창 없이) 켜져 있습니다. 끄려면 서버끄기.bat 을 실행하세요.
+pause
+exit /b 0
+
+:start
 node server.js
 echo.
 echo 서버가 멈췄습니다. 위의 메시지를 확인하세요.

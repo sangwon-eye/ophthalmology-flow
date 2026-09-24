@@ -5,17 +5,32 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { ROOT, loadConfig, configuredPort, lanAddresses } from './scripts/common.js';
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT) || 3000;
+const CONFIG = loadConfig();
+const PORT = configuredPort();
 const DIST_DIR = path.join(ROOT, 'dist');
 const DATA_DIR = path.join(ROOT, 'data');
 const KEYS_DIR = path.join(DATA_DIR, 'keys');
 const OLD_STORE_FILE = path.join(DATA_DIR, 'store.json');
-// 백업 폴더. 공유폴더에 백업하려면 서버시작.bat 에서 BACKUP_DIR 을 지정하세요.
-const BACKUP_DIR = process.env.BACKUP_DIR || path.join(DATA_DIR, 'backups');
+// 백업 폴더. 공유폴더에 백업하려면 서버설정.txt 에서 BACKUP_DIR 을 지정하세요.
+const BACKUP_DIR = CONFIG.BACKUP_DIR || process.env.BACKUP_DIR || path.join(DATA_DIR, 'backups');
+// 종료 코드: 0 = 정상 종료(서버끄기), 2 = 데이터 파일 손상, 3 = 이미 켜져 있음. 그 외에는 자동으로 다시 켭니다.
+const EXIT_DATA_ERROR = 2;
+const EXIT_PORT_IN_USE = 3;
+
+// 창 없이 실행하면 화면 대신 data\server-log.txt 에 기록합니다.
+if (process.env.OPH_HIDDEN === '1') {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const logFile = path.join(DATA_DIR, 'server-log.txt');
+  try { if (fs.statSync(logFile).size > 5 * 1024 * 1024) fs.renameSync(logFile, `${logFile}.old`); } catch { /* 처음 */ }
+  const write = (args) => {
+    const line = `[${new Date().toLocaleString('ko-KR')}] ${args.map(a => (a instanceof Error ? a.stack : String(a))).join(' ')}\n`;
+    try { fs.appendFileSync(logFile, line); } catch { /* 기록 실패는 무시 */ }
+  };
+  console.log = (...a) => write(a);
+  console.error = (...a) => write(a);
+}
 const BACKUP_KEEP_DAYS = 30;
 const MAX_BODY = 50 * 1024 * 1024;
 // 실시간으로 주고받는 명단은 어제~앞으로의 날짜만. 그보다 지난 명단은 월별 보관 파일로 옮깁니다.
@@ -53,7 +68,7 @@ function readItem(key) {
       console.error(`\n[오류] ${file} 파일이 손상되어 읽을 수 없습니다.`);
       console.error('데이터를 덮어쓰지 않도록 서버를 멈춥니다.');
       console.error(`백업 폴더(${BACKUP_DIR})의 가장 최근 날짜 폴더에서 같은 이름의 파일을 복사해 넣은 뒤 다시 실행하세요.\n`);
-      process.exit(1);
+      process.exit(EXIT_DATA_ERROR);
     }
   }
   cache.set(key, item);
@@ -86,7 +101,7 @@ function migrateOldStore() {
   let old;
   try { old = JSON.parse(fs.readFileSync(OLD_STORE_FILE, 'utf8')); } catch {
     console.error('\n[오류] data\\store.json 파일이 손상되어 옮길 수 없습니다. 서버를 멈춥니다.\n');
-    process.exit(1);
+    process.exit(EXIT_DATA_ERROR);
   }
   for (const [key, item] of Object.entries(old)) {
     if (KEY_RE.test(key) && !fs.existsSync(keyFile(key))) writeFileSafely(keyFile(key), JSON.stringify(item));
@@ -188,6 +203,16 @@ function buildId() {
 async function handleApi(req, res, pathname) {
   if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId() });
 
+  // 서버끄기.bat 에서 사용. 서버 PC 자신에서만 끌 수 있습니다.
+  if (pathname === '/api/shutdown') {
+    const from = req.socket.remoteAddress || '';
+    if (req.method !== 'POST' || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(from)) return sendJson(res, 403, { error: 'forbidden' });
+    sendJson(res, 200, { ok: true });
+    console.log('서버끄기 요청으로 서버를 끕니다.');
+    setTimeout(() => process.exit(0), 200);
+    return;
+  }
+
   const m = pathname.match(/^\/api\/storage\/([^/]+)$/);
   if (!m) return sendJson(res, 404, { error: 'not found' });
   const key = decodeURIComponent(m[1]);
@@ -259,28 +284,31 @@ const server = http.createServer(async (req, res) => {
 server.on('error', e => {
   if (e.code === 'EADDRINUSE') {
     console.error(`\n[오류] ${PORT}번 포트를 이미 사용 중입니다. 서버가 이미 켜져 있는지 확인하세요.\n`);
-  } else {
-    console.error(e);
+    process.exit(EXIT_PORT_IN_USE);
   }
+  console.error(e);
   process.exit(1);
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  const addrs = Object.values(os.networkInterfaces()).flat()
-    .filter(a => a && a.family === 'IPv4' && !a.internal)
-    .map(a => a.address);
+  const { main, virtual } = lanAddresses();
+  const hidden = process.env.OPH_HIDDEN === '1';
   console.log('');
   console.log('========================================================');
   console.log(' 안과 환자 흐름 공유 서버가 켜졌습니다.');
   console.log('');
   console.log(` 이 컴퓨터에서 접속:   http://localhost:${PORT}`);
-  for (const a of addrs) console.log(` 다른 컴퓨터에서 접속: http://${a}:${PORT}`);
+  for (const a of main) console.log(` 다른 컴퓨터에서 접속: http://${a}:${PORT}`);
+  if (!main.length) for (const a of virtual) console.log(` 다른 컴퓨터에서 접속: http://${a}:${PORT}`);
   console.log('');
   console.log(` 데이터 폴더: ${KEYS_DIR}`);
   console.log(` 백업 폴더:   ${BACKUP_DIR}`);
   console.log('');
-  console.log(' 이 창을 닫으면 모든 컴퓨터에서 사용할 수 없습니다.');
-  console.log(' 끄려면 이 창에서 Ctrl+C 를 누르세요.');
+  if (!hidden) {
+    console.log(' 이 창을 닫으면 모든 컴퓨터에서 사용할 수 없습니다.');
+    console.log(' 끄려면 이 창에서 Ctrl+C 를 누르세요.');
+    console.log(' (창 없이 켜려면 이 창을 닫고 서버켜기_창없이.bat 을 사용하세요)');
+  }
   console.log('========================================================');
   console.log('');
 });
