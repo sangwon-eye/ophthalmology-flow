@@ -3778,7 +3778,8 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
             </label>
           </div>
           <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-sky-50 p-5">
-            <div className="text-lg font-semibold text-slate-900 mb-3">개발자 한상원 <span className="text-sm font-normal text-slate-500">(2023년 입국)</span></div>
+            <div className="text-xs font-medium text-indigo-500 mb-1">개발자 정보</div>
+            <div className="text-lg font-semibold text-slate-900 mb-3">한상원 <span className="text-sm font-normal text-slate-500">(2023년 입국)</span></div>
             <p className="text-sm text-slate-700 leading-relaxed mb-2">
               Ophthalmology Flow의 완성을 진심으로 축하합니다.
             </p>
