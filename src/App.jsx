@@ -2191,12 +2191,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         <div className="text-sm font-medium text-slate-500">{isVision ? `검사 대기 · ${roomList.length}명` : ''}</div>
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
       </div>
-      {nameSort && shown.length > 1 && <div className="text-xs text-slate-500 mb-2">가나다순으로 보는 중입니다. 번호는 실제 대기 순서이고, 순서를 바꾸려면 예약시간순으로 돌아가세요.</div>}
-      {isVision && (
-        <div className="t-hint text-xs text-slate-400 mb-3">
-          측정값 입력에서 값을 넣고 저장하고 완료를 누르세요. 순서는 왼쪽 손잡이를 끌거나 화살표로 바꿔요. 단안이나 검사 프로토콜은 검사 버튼을 오른쪽 클릭(터치스크린은 길게 누르기)해서 지정해요.
-        </div>
-      )}
 
       {shown.length === 0 ? (
         <EmptyState text="대기 중인 환자가 없습니다" />
@@ -2348,7 +2342,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 </div>
               </div>
               <div className="mt-2">
-                <MeasureLine label="이전" m={previousMeasure(p, history)} emptyText="이전 값 없음 (이전 값 버튼으로 입력)" />
+                <MeasureLine label="이전" m={previousMeasure(p, history)} emptyText="이전 값 없음" />
               </div>
             </div>
           ))}
@@ -2422,8 +2416,7 @@ function DoctorPicker({ doctors, value, onChange }) {
 function SectionTitle({ children, hint }) {
   return (
     <div className="mb-3">
-      <div className="text-sm font-medium text-slate-600">{children}</div>
-      {hint && <div className="t-hint text-xs text-slate-400 mt-0.5">{hint}</div>}
+      <div className="text-sm font-medium text-slate-600" title={hint || undefined}>{children}</div>
     </div>
   );
 }
@@ -2801,7 +2794,6 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                       진료 호출
                     </button>
                     <button type="button" onClick={() => setSendFor(p)} className="text-sm px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700">보내기</button>
-                    {inRoom && i === 0 && <span className="text-xs text-slate-400">현재 환자 진료를 마친 뒤 호출할 수 있어요</span>}
                   </PatientRow>
                 );
               }}
@@ -3430,7 +3422,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       {tab === 'upload' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">엑셀 명단 올리기</div>
-          <p className="t-hint text-sm text-slate-500 mb-3">첫 줄에 예약 · 환자번호 · 환자명 · 초재진 제목을 적어주세요. 초재진 칸에 '재진'이라고 적힌 환자 외에는 모두 초진으로 올라갑니다. 위에서 고른 날짜와 교수가 파일 속 모든 환자에게 적용되고, 저장된 FU 검사는 환자번호로 자동으로 붙습니다. 같은 명단을 다시 올려도 이미 있는 환자는 지정해둔 검사·진행 상황이 그대로 유지되고, 예약시간만 바뀐 경우 새 시간으로 고쳐집니다.</p>
+          <p className="text-sm text-slate-500 mb-3">엑셀 첫 줄: 예약 · 환자번호 · 환자명 · 초재진 (재진 외에는 초진)</p>
           <div className="flex gap-3 flex-wrap items-center">
             <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium cursor-pointer">
               <Upload size={16} /> 엑셀 올리기
@@ -3508,7 +3500,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
           )}
           {checkCount > 0 && (
             <div className="bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 mb-4 text-sm text-orange-900">
-              <span className="font-semibold">확인 필요 {checkCount}명</span> · 재진인데 오늘 검사가 하나도 지정되지 않았거나(프로그램 사용 전 진료 환자일 수 있음), 지난 진료에서 FU를 나중에 정하기로 한 환자입니다. 검사를 확인해주세요.
+              <span className="font-semibold">확인 필요 {checkCount}명</span> · 검사 미지정 또는 지난 진료 FU 미지정
             </div>
           )}
           {byDate.length === 0 ? <EmptyState text={readOnly && archived.loading ? '불러오는 중…' : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
@@ -3553,7 +3545,6 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
 
       {tab === 'fu' && (
         <div>
-          <p className="t-hint text-sm text-slate-500 mb-3">진료실에서 지정하지 못한 환자는 여기서 환자번호나 이름으로 찾아 다음 방문 검사를 지정할 수 있어요.</p>
           <div className="flex items-center gap-2 mb-4 bg-white border border-slate-300 rounded-lg px-3 py-2">
             <Search size={16} className="text-slate-400" />
             <input placeholder="환자번호 또는 이름으로 찾기" value={fuSearch} onChange={e => setFuSearch(e.target.value)} className="flex-1 outline-none text-sm" />
@@ -3564,7 +3555,6 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
             return (
               <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-4 mb-4">
                 <div className="font-medium text-orange-900 mb-1">FU 나중에 지정할 환자 · {later.length}명</div>
-                <p className="t-hint text-xs text-orange-800 mb-2">진료실에서 '설명 완료 · FU 나중에'로 보낸 환자입니다. 지정하면 이 목록에서 빠지고, 이미 올라간 다음 명단에도 반영됩니다.</p>
                 {later.map(([id, r]) => (
                   <div key={id} className="flex items-center justify-between gap-2 py-1.5 border-t border-orange-200 first:border-t-0">
                     <span className="flex items-center gap-2 flex-wrap">
@@ -4401,7 +4391,7 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
     }}>
       <div className="sticky top-0 z-10 border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-5xl px-5 py-4 flex items-center justify-between gap-3">
-          <div><h2 id="directory-title" className="text-xl font-semibold text-slate-900">전체 환자 명단</h2><p className="t-hint text-sm text-slate-500">현재 등록된 대기 명단을 조회합니다. 여러 검사실에 대기 중이면 모두 표시됩니다.</p></div>
+          <div><h2 id="directory-title" className="text-xl font-semibold text-slate-900">전체 환자 명단</h2></div>
           <button ref={closeRef} type="button" onClick={onClose} className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm">닫기</button>
         </div>
       </div>
