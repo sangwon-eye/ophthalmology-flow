@@ -1,0 +1,203 @@
+// 안과 환자 흐름 - 내부망 공유 서버
+// 서버 PC 한 대에서 실행하면, 같은 내부망의 다른 컴퓨터는 브라우저로 접속해서 같은 데이터를 봅니다.
+// Node.js 기본 기능만 사용하므로 인터넷 없이도 실행됩니다 (dist 폴더가 이미 있어야 합니다).
+
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT) || 3000;
+const DIST_DIR = path.join(ROOT, 'dist');
+const DATA_DIR = path.join(ROOT, 'data');
+const STORE_FILE = path.join(DATA_DIR, 'store.json');
+// 백업 폴더. 공유폴더에 백업하려면 서버시작.bat 에서 BACKUP_DIR 을 지정하세요.
+const BACKUP_DIR = process.env.BACKUP_DIR || path.join(DATA_DIR, 'backups');
+const BACKUP_KEEP_DAYS = 30;
+const MAX_BODY = 20 * 1024 * 1024;
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+};
+
+/* ---------------- 데이터 저장 ---------------- */
+// store = { [key]: { version, value, updatedAt } }
+function loadStore() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(STORE_FILE)) return {};
+  const text = fs.readFileSync(STORE_FILE, 'utf8');
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error('\n[오류] data\\store.json 파일이 손상되어 읽을 수 없습니다.');
+    console.error('데이터를 덮어쓰지 않도록 서버를 멈춥니다.');
+    console.error(`백업 폴더(${BACKUP_DIR})의 최근 파일을 data\\store.json 으로 복사한 뒤 다시 실행하세요.\n`);
+    process.exit(1);
+  }
+}
+
+const store = loadStore();
+
+function writeStore() {
+  const text = JSON.stringify(store);
+  const tmp = `${STORE_FILE}.tmp`;
+  fs.writeFileSync(tmp, text);
+  try {
+    fs.renameSync(tmp, STORE_FILE);
+  } catch {
+    // 백신 프로그램 등이 파일을 잡고 있으면 이름 바꾸기가 실패할 수 있어 직접 씁니다.
+    fs.writeFileSync(STORE_FILE, text);
+    fs.rmSync(tmp, { force: true });
+  }
+  backupOncePerDay();
+}
+
+let lastBackupDay = null;
+function backupOncePerDay() {
+  const day = localDate();
+  if (lastBackupDay === day) return;
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    fs.copyFileSync(STORE_FILE, path.join(BACKUP_DIR, `store-${day}.json`));
+    lastBackupDay = day;
+    const files = fs.readdirSync(BACKUP_DIR).filter(f => /^store-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
+    for (const f of files.slice(0, Math.max(0, files.length - BACKUP_KEEP_DAYS))) {
+      fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+    }
+  } catch (e) {
+    console.error(`[경고] 백업에 실패했습니다 (${BACKUP_DIR}): ${e.message}`);
+  }
+}
+
+function localDate() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/* ---------------- HTTP ---------------- */
+function sendJson(res, status, body) {
+  res.writeHead(status, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(body));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', c => {
+      size += c.length;
+      if (size > MAX_BODY) { reject(new Error('too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
+// 새 버전을 빌드하면 index.html 수정 시각이 바뀌므로, 브라우저가 이것으로 업데이트를 알아챕니다.
+function buildId() {
+  try { return String(fs.statSync(path.join(DIST_DIR, 'index.html')).mtimeMs); } catch { return 'none'; }
+}
+
+async function handleApi(req, res, pathname) {
+  if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId() });
+
+  const m = pathname.match(/^\/api\/storage\/([^/]+)$/);
+  if (!m) return sendJson(res, 404, { error: 'not found' });
+  const key = decodeURIComponent(m[1]);
+
+  if (req.method === 'GET') {
+    const item = store[key];
+    if (!item) return sendJson(res, 404, { version: 0 });
+    return sendJson(res, 200, { key, value: item.value, version: item.version });
+  }
+
+  if (req.method === 'PUT') {
+    let body;
+    try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
+    if (typeof body?.value !== 'string') return sendJson(res, 400, { error: 'value must be a string' });
+    const current = store[key]?.version || 0;
+    // 다른 컴퓨터가 그 사이에 먼저 저장했다면 거절하고, 브라우저가 최신 내용으로 다시 적용합니다.
+    if (body.version !== undefined && body.version !== null && Number(body.version) !== current) {
+      return sendJson(res, 409, { error: 'conflict', version: current });
+    }
+    store[key] = { version: current + 1, value: body.value, updatedAt: new Date().toISOString() };
+    try {
+      writeStore();
+    } catch (e) {
+      console.error(`[오류] 저장 실패: ${e.message}`);
+      return sendJson(res, 500, { error: 'write failed' });
+    }
+    return sendJson(res, 200, { key, version: store[key].version });
+  }
+
+  return sendJson(res, 405, { error: 'method not allowed' });
+}
+
+function serveStatic(req, res, pathname) {
+  let file = path.normalize(path.join(DIST_DIR, pathname));
+  if (file !== DIST_DIR && !file.startsWith(DIST_DIR + path.sep)) { res.writeHead(403); res.end(); return; }
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST_DIR, 'index.html');
+  if (!fs.existsSync(file)) {
+    res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('화면 파일(dist)이 없습니다. 서버 PC에서 업데이트.bat 을 실행해주세요.');
+    return;
+  }
+  const ext = path.extname(file).toLowerCase();
+  // index.html 은 매번 새로 받아서 업데이트가 바로 반영되게 하고, 이름에 해시가 붙은 파일은 오래 저장합니다.
+  const cache = ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable';
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache });
+  fs.createReadStream(file).pipe(res);
+}
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const { pathname } = new URL(req.url, 'http://localhost');
+    if (pathname.startsWith('/api/')) return await handleApi(req, res, pathname);
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
+    serveStatic(req, res, decodeURIComponent(pathname));
+  } catch (e) {
+    console.error(e);
+    if (!res.headersSent) sendJson(res, 500, { error: 'server error' });
+  }
+});
+
+server.on('error', e => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\n[오류] ${PORT}번 포트를 이미 사용 중입니다. 서버가 이미 켜져 있는지 확인하세요.\n`);
+  } else {
+    console.error(e);
+  }
+  process.exit(1);
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  const addrs = Object.values(os.networkInterfaces()).flat()
+    .filter(a => a && a.family === 'IPv4' && !a.internal)
+    .map(a => a.address);
+  console.log('');
+  console.log('========================================================');
+  console.log(' 안과 환자 흐름 공유 서버가 켜졌습니다.');
+  console.log('');
+  console.log(` 이 컴퓨터에서 접속:   http://localhost:${PORT}`);
+  for (const a of addrs) console.log(` 다른 컴퓨터에서 접속: http://${a}:${PORT}`);
+  console.log('');
+  console.log(` 데이터 파일: ${STORE_FILE}`);
+  console.log(` 백업 폴더:   ${BACKUP_DIR}`);
+  console.log('');
+  console.log(' 이 창을 닫으면 모든 컴퓨터에서 사용할 수 없습니다.');
+  console.log(' 끄려면 이 창에서 Ctrl+C 를 누르세요.');
+  console.log('========================================================');
+  console.log('');
+});

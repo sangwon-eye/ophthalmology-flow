@@ -561,20 +561,22 @@ function sampleRows() {
 /* ------------------------------------------------------------------ */
 /* 저장소 (window.storage, 공유)                                        */
 /* ------------------------------------------------------------------ */
-async function loadKey(key, fallback) {
-  try {
-    const r = await window.storage.get(key, true);
-    return r ? JSON.parse(r.value) : fallback;
-  } catch { return fallback; }
+// 서버에 연결되지 않으면 오류를 그대로 던집니다. 빈 값으로 착각해 공유 데이터를 덮어쓰지 않기 위해서입니다.
+// meta 를 넘기면 불러온 값의 버전을 담아 줍니다 (저장할 때 다른 컴퓨터와 겹쳤는지 확인용).
+async function loadKey(key, fallback, meta) {
+  const r = await window.storage.get(key, true);
+  if (meta) meta.version = r?.version ?? 0;
+  if (!r) return fallback;
+  try { return JSON.parse(r.value); } catch { return fallback; }
 }
-async function saveKey(key, value) {
-  try { await window.storage.set(key, JSON.stringify(value), true); } catch (e) { console.error(e); }
+async function saveKey(key, value, version) {
+  await window.storage.set(key, JSON.stringify(value), true, version);
 }
-const loadDaily = () => loadKey('daily-patients', []);
-const loadFu = () => loadKey('fu-designations', {});
-const loadDoctors = () => loadKey('doctors', []);
-const loadHistory = () => loadKey('measure-history', {});
-const loadDoctorPrefs = () => loadKey('doctor-prefs', {});
+const loadDaily = (meta) => loadKey('daily-patients', [], meta);
+const loadFu = (meta) => loadKey('fu-designations', {}, meta);
+const loadDoctors = (meta) => loadKey('doctors', [], meta);
+const loadHistory = (meta) => loadKey('measure-history', {}, meta);
+const loadDoctorPrefs = (meta) => loadKey('doctor-prefs', {}, meta);
 
 function ensureBuiltins(s) {
   s = { ...s, tests: s.tests.some(t => t.id === 'ark') ? s.tests.map(t => t.id === 'ark' ? { ...t, roomId: 'vision', builtin: 'ark' } : t) : [ARK_TEST, ...s.tests] };
@@ -586,8 +588,8 @@ function ensureBuiltins(s) {
   const max = Math.max(-1, ...s.tests.filter(t => t.roomId === room.id).map(t => t.order));
   return { ...s, tests: [...s.tests, { ...GAT_TEST, roomId: room.id, order: max + 1 }] };
 }
-async function loadSettings() {
-  const s = await loadKey('settings', null);
+async function loadSettings(meta) {
+  const s = await loadKey('settings', null, meta);
   if (!s) return DEFAULT_SETTINGS;
   const base = ensureBuiltins({
     ...DEFAULT_SETTINGS,
@@ -616,11 +618,20 @@ function useSharedStore(storageKey, loader, initial) {
     seq.current += 1;
     const run = queue.current.then(async () => {
       try {
-        const latest = await loader();
-        const next = updater(latest);
-        await saveKey(storageKey, next);
-        if (pending.current === 1) setValue(next);
-        return next;
+        // 다른 컴퓨터가 같은 순간에 저장했으면, 최신 내용을 다시 불러와 이 변경을 다시 적용합니다.
+        for (let attempt = 0; ; attempt++) {
+          const meta = {};
+          const latest = await loader(meta);
+          const next = updater(latest);
+          try {
+            await saveKey(storageKey, next, meta.version);
+          } catch (e) {
+            if (e?.conflict && attempt < 5) continue;
+            throw e;
+          }
+          if (pending.current === 1) setValue(next);
+          return next;
+        }
       } finally {
         pending.current -= 1;
       }
@@ -3389,7 +3400,12 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs()];
-    const [p, f, d, s, h, dp] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs()]);
+    let p, f, d, s, h, dp;
+    try {
+      [p, f, d, s, h, dp] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs()]);
+    } catch {
+      return; // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다.
+    }
     syncPatients(p, marks[0]);
     syncFu(f, marks[1]);
     syncDoctors(d, marks[2]);
