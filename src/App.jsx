@@ -146,12 +146,17 @@ function orderForPicking(tests, settings) {
   return [...tests].sort((a, b) => pos(a) - pos(b));
 }
 
-/* 검사 처방: 검사실에서 전산 처방을 넣은 뒤 [처방 완료]를 누릅니다 (직원 화면에만 표시).
-   처방 완료 뒤 이 검사실 검사가 새로 추가되거나 다시 하게 되면 '처방 전'으로 돌아갑니다. */
+/* 검사 처방: 처방은 모든 검사실 검사를 한 번에 넣으므로, 어느 검사실에서 [처방 완료]를 눌러도
+   그 환자의 모든 검사가 처방 완료로 표시됩니다 (직원 화면에만 표시).
+   처방 완료 뒤 검사가 새로 추가되거나 다시 하게 되면 그 검사는 '처방 전'으로 돌아갑니다. */
+function orderedTests(p) {
+  return [...new Set(Object.values(p.orders || {}).flatMap(r => r?.tests || []))];
+}
 function orderState(p, settings, roomId) {
   const needed = roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
-  const rec = p.orders?.[roomId];
-  const covered = rec?.tests || [];
+  const covered = orderedTests(p);
+  const at = Math.max(0, ...Object.values(p.orders || {}).map(r => r?.at || 0));
+  const rec = at ? { at } : null;
   const missing = needed.filter(t => !covered.includes(t.id));
   return { needed, rec, missing, complete: needed.length > 0 && missing.length === 0 };
 }
@@ -2017,14 +2022,10 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
     const before = p.orders;
     const at = Date.now();
     patchPatient(mutatePatients, pk, x => {
-      const orders = { ...(x.orders || {}) };
-      if (on) {
-        const ids = roomTests(settings, room.id).filter(t => x.assigned?.[t.id]).map(t => t.id);
-        orders[room.id] = { at, tests: [...new Set([...(orders[room.id]?.tests || []), ...ids])] };
-      } else {
-        delete orders[room.id];
-      }
-      return { orders };
+      if (!on) return { orders: {} };
+      // 모든 검사실의 지정된 검사를 한 번에 처방 완료로
+      const ids = sortedTests(settings).filter(t => x.assigned?.[t.id]).map(t => t.id);
+      return { orders: { all: { at, tests: [...new Set([...orderedTests(x), ...ids])] } } };
     });
     showToast(`${p.name} ${on ? '처방 완료' : '처방 완료 취소'}`, () => patchPatient(mutatePatients, pk, () => ({ orders: before })));
   };
