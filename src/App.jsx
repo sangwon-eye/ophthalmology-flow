@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
@@ -227,8 +227,15 @@ function inProfProcedure(p) {
 function inResidentProcedure(p) {
   return !p.consultDone && pendingProcedures(p, 'prof').length === 0 && pendingProcedures(p, 'resident').length > 0;
 }
+// 진료 완료 후 설명 대기. 처치가 남아 있어도 설명 대기에 '처치 중'으로 함께 보입니다.
+// explainedEarly: 처치 중에 설명을 먼저 끝낸 환자 → 처치가 끝나면 진찰실에서 [귀가]
 function awaitingExplain(p) {
-  return !p.consultDone && !!p.seen && pendingProcedures(p).length === 0;
+  return !p.consultDone && !!p.seen;
+}
+function procedureStatus(p) {
+  const list = p.procedures || [];
+  if (!list.length) return '';
+  return pendingProcedures(p).length ? 'doing' : 'done';
 }
 function inConsult(p) {
   return !p.consultDone && !p.seen && !!p.calledRoom;
@@ -248,8 +255,9 @@ function getStage(p, settings) {
   const rooms = pendingRooms(p, settings);
   if (rooms.length) return { label: `${rooms.map(r => r.name).join(', ')} 검사 대기`, area: 'exam' };
   if (needsTriageExam(p, settings)) return { label: '처치실 대기 (예진)', area: 'triageExam' };
-  if (inProfProcedure(p)) return { label: '교수님 처치 대기', area: 'profProc' };
-  if (inResidentProcedure(p)) return { label: '처치실 대기 (처치)', area: 'resProc' };
+  if (inProfProcedure(p)) return { label: p.explainedEarly ? '설명 완료 · 교수님 처치 후 귀가' : '교수님 처치 중 (설명 대기)', area: 'profProc' };
+  if (inResidentProcedure(p)) return { label: p.explainedEarly ? '처치실 (설명 완료 · 처치 후 귀가)' : '처치실 대기 (처치)', area: 'resProc' };
+  if (p.seen && p.explainedEarly) return { label: '처치 완료 · 귀가 대기', area: 'explain' };
   if (p.seen) return { label: '설명 대기', area: 'explain' };
   if (p.calledRoom) return { label: `${p.calledRoom} 진료 중`, area: 'inRoom' };
   return { label: '진료 대기', area: 'consult' };
@@ -1455,6 +1463,40 @@ function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSa
   );
 }
 
+/* 직원 메모: 환자별 자유 메모 (예: 타과 진료 다녀오심, YAG 후 10:30 IOP 확인). 직원 화면에만 표시 */
+const PatientMemoContext = createContext(null);
+function PatientMemo({ p, readOnly = false }) {
+  const mutatePatients = useContext(PatientMemoContext);
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState('');
+  const memo = String(p.staffMemo || '').trim();
+  const canEdit = !!mutatePatients && !readOnly;
+  const save = () => {
+    const pk = patientKey(p);
+    const text = v.trim();
+    mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, staffMemo: text } : x)));
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <div className="w-full flex items-center gap-2 mt-1">
+        <input autoFocus value={v} onChange={e => setV(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+          placeholder="직원 메모 (예: 타과 진료 다녀오심, YAG 후 10:30 IOP 확인)" className={`${INPUT} flex-1`} />
+        <button type="button" onClick={save} className="text-sm px-3 py-2 rounded-lg bg-sky-600 text-white font-medium shrink-0">저장</button>
+        <button type="button" onClick={() => setEditing(false)} className="text-sm px-2 py-2 text-slate-500 shrink-0">취소</button>
+      </div>
+    );
+  }
+  if (!memo && !canEdit) return null;
+  return (
+    <div className="w-full flex items-center gap-2 mt-1 flex-wrap">
+      {memo && <span className="text-sm bg-sky-50 border border-sky-200 text-sky-900 rounded-lg px-3 py-1"><span className="font-semibold">메모</span> {memo}</span>}
+      {canEdit && <button type="button" onClick={() => { setV(memo); setEditing(true); }} className="text-xs text-slate-400 hover:text-slate-600 underline">{memo ? '메모 수정' : '+ 메모'}</button>}
+    </div>
+  );
+}
+
 /* 명단 보기 방식: 정렬(예약시간순·가나다순), 오전·오후 */
 function byName(a, b) {
   return String(a.name).localeCompare(String(b.name), 'ko') || String(a.id).localeCompare(String(b.id));
@@ -1515,6 +1557,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
         </div>
         <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</div>
         {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
+        <PatientMemo p={p} />
         <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
       </div>
       {(onUp || onDown) && (
@@ -2326,6 +2369,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'}</div>
+                  <PatientMemo p={p} />
                 </div>
                 <div className="flex gap-2 shrink-0 items-center">
                   {firstVisitChip(p)}
@@ -2425,6 +2469,7 @@ function SimpleCard({ p, tone = 'slate', children }) {
         {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
       </div>
       {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
+      <PatientMemo p={p} />
       <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
     </div>
   );
@@ -2496,7 +2541,6 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
   const waitMin = settings.dilationWaitMin;
   const mine = patients.filter(p => p.doctor === selectedDoctor);
   const explainList = mine.filter(awaitingExplain).sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0));
-  const procList = mine.filter(inProfProcedure).sort((a, b) => (a.procOrderedAt || 0) - (b.procOrderedAt || 0));
   const inRoom = mine.find(inConsult);
   const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
   const onHold = mine.filter(p => p.consultHold && !p.consultDone && !p.seen && (!allDone(p, settings) || p.treatRequest));
@@ -2540,15 +2584,15 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
       uid: newId('pr'), procId: c.id, name: c.name, performer: c.performer, note, done: false, doneAt: null, orderedAt: at,
     }));
     patch(pk, x => ({ seen: true, seenAt: at, calledRoom: null, procOrderedAt: at, procedures: [...(x.procedures || []), ...items] }));
-    const where = items.some(i => i.performer === 'prof') ? '처치 대기로' : '처치실로';
-    showToast(`${p.name} 처치 지정, ${where}`, () => backToRoom(pk, x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at) })));
+    const where = items.some(i => i.performer === 'prof') ? '설명 대기에서 교수님 처치' : '처치실로';
+    showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => backToRoom(pk, x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at) })));
   };
 
   const finishProfProcedure = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
     patch(pk, x => ({ procedures: (x.procedures || []).map(i => (i.performer === 'prof' && !i.done ? { ...i, done: true, doneAt: at } : i)) }));
-    const next = pendingProcedures(p, 'resident').length ? '처치실로' : '설명 대기로';
+    const next = pendingProcedures(p, 'resident').length ? '처치실로' : p.explainedEarly ? '귀가 대기' : '설명 가능';
     showToast(`${p.name} 처치 완료, ${next}`, () => patch(pk, x => ({
       procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
     })));
@@ -2577,6 +2621,21 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
       try { fu = await loadFu(); } catch { /* 이전 정보 없이 추가 */ }
       extra = buildPatient({ id: p.id, name: p.name, date: p.date, doctor: linkDoctor, reservation: '', firstVisit: false }, fu, settings);
     }
+    // 처치가 아직 남아 있으면: 설명만 끝내고 처치 후 [귀가] 로 마무리 (2차 진료도 귀가 때 시작)
+    const current = allPatients.find(x => patientKey(x) === pk) || p;
+    if (pendingProcedures(current).length) {
+      mutatePatients(prev => {
+        let next = prev.map(x => (patientKey(x) === pk ? { ...x, explainedEarly: at, fuLater: later }
+          : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x));
+        if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
+        return next;
+      });
+      showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : ''}`, () => {
+        patch(pk, () => ({ explainedEarly: null, fuLater: false }));
+        if (later) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+      });
+      return;
+    }
     const undoDone = () => {
       mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false } : x)), pk));
       if (later) mutateFu(prev => unmarkFollowupLater(prev, p.id));
@@ -2590,6 +2649,14 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
     const nextVisit = linkDoctor || allPatients.find(x => x.primaryKey === pk && x.linkWaiting)?.doctor;
     const via = settings.linkCheckAdded !== false && linkDoctor ? '처치실 추가 검사 확인 후 ' : '';
     showToast(`${p.name} 설명 완료${later ? ' · FU는 관리자 > FU 지정 관리에서 나중에' : ''}${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
+  };
+
+  const goHome = (p) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    mutatePatients(prev => activateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at } : x)), pk, settings, at));
+    const nextVisit = allPatients.find(x => x.primaryKey === pk && x.linkWaiting)?.doctor;
+    showToast(`${p.name} 귀가${nextVisit ? `, ${nextVisit} 2차 진료로` : ''}`, () => mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null } : x)), pk)));
   };
 
   const confirmExtra = (sel, detail) => {
@@ -2676,37 +2743,38 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
           {explainList.length > 0 && (
             <div className="mb-6">
               <SectionTitle hint="안내가 끝나면 설명 완료를 누르고 다음 내원 검사를 지정하세요">설명 대기 · {explainList.length}명</SectionTitle>
-              {explainList.map(p => (
+              {explainList.map(p => {
+                const ps = procedureStatus(p);
+                const early = !!p.explainedEarly;
+                return (
                 <SimpleCard key={patientKey(p)} p={p} tone="emerald">
-                  <ProcedureList p={p} />
+                  {ps === 'doing' && <span className="text-sm px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">처치 중</span>}
+                  {ps === 'done' && <span className="text-sm px-2.5 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold">처치 완료</span>}
+                  {early && <span className="text-sm px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-medium">설명 완료{p.fuLater ? ' · FU 나중에' : ''}</span>}
+                  <ProcedureList p={p} onCancel={early ? undefined : uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
+                  {pendingProcedures(p, 'prof').length > 0 && (
+                    <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
+                  )}
                   {nextVisitNote(p)}
-                  <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
-                    설명 완료
-                  </button>
-                  <button type="button" onClick={() => completeExplain(null, null, null, false, '', { later: true, patient: p })} title="다음 내원 검사는 관리자 > FU 지정 관리에서 나중에 지정합니다"
-                    className="text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 font-medium">
-                    설명 완료 · FU 나중에
-                  </button>
-                  <button type="button" onClick={() => undoFinishConsult(p)} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600 flex items-center gap-1">
-                    <RotateCcw size={14} /> 진료 완료 취소
-                  </button>
+                  {early ? (
+                    ps === 'doing'
+                      ? <span className="text-sm text-slate-500">처치가 끝나면 귀가 처리할 수 있어요</span>
+                      : <button type="button" onClick={() => goHome(p)} className="text-sm px-4 py-2 rounded-lg bg-slate-800 text-white font-medium">귀가</button>
+                  ) : <>
+                    <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
+                      설명 완료
+                    </button>
+                    <button type="button" onClick={() => completeExplain(null, null, null, false, '', { later: true, patient: p })} title="다음 내원 검사는 관리자 > FU 지정 관리에서 나중에 지정합니다"
+                      className="text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 font-medium">
+                      설명 완료 · FU 나중에
+                    </button>
+                    <button type="button" onClick={() => undoFinishConsult(p)} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600 flex items-center gap-1">
+                      <RotateCcw size={14} /> 진료 완료 취소
+                    </button>
+                  </>}
                 </SimpleCard>
-              ))}
-            </div>
-          )}
-
-          {procList.length > 0 && (
-            <div className="mb-6">
-              <SectionTitle hint="교수님이 직접 하는 처치입니다">처치 대기 · {procList.length}명</SectionTitle>
-              {procList.map(p => (
-                <SimpleCard key={patientKey(p)} p={p} tone="rose">
-                  <ProcedureList p={p} onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
-                  <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
-                  <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">
-                    처치 완료
-                  </button>
-                </SimpleCard>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -2719,7 +2787,8 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                 {inRoom.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-normal">2차 진료 · {inRoom.primaryDoctor} 후</span>}
                 {nextVisitNote(inRoom)}
               </div>
-              <div className="text-sm text-slate-400 mb-4">{inRoom.id} · 예약 {inRoom.reservation}</div>
+              <div className="text-sm text-slate-400 mb-1">{inRoom.id} · 예약 {inRoom.reservation}</div>
+              <div className="mb-3"><PatientMemo p={inRoom} /></div>
               <div className="bg-slate-50 rounded-xl p-3 mb-3">
                 <MeasureTable today={inRoom.measure} prev={previousMeasure(inRoom, history)} />
               </div>
@@ -2953,7 +3022,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
     patchPatient(mutatePatients, pk, x => ({
       procedures: (x.procedures || []).map(i => (i.performer === 'resident' && !i.done ? { ...i, done: true, doneAt: at } : i)),
     }));
-    showToast(`${p.name} 처치 완료, 설명 대기로`, () => patchPatient(mutatePatients, pk, x => ({
+    showToast(`${p.name} 처치 완료, ${p.explainedEarly ? '진찰실에서 귀가 처리' : '설명 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
       procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
     })));
   };
@@ -3017,6 +3086,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
           <div className="text-sm text-slate-400 py-3">처치 대기 환자가 없습니다</div>
         ) : procs.map(p => (
           <SimpleCard key={patientKey(p)} p={p} tone="indigo">
+            {p.explainedEarly && inResidentProcedure(p) && <span className="text-sm px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-medium">설명 완료 · 처치 후 귀가</span>}
             {needsTriageExam(p, settings) && <>
               <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
@@ -3519,6 +3589,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · {readOnly ? p.doctor : getStage(p, settings).label}</div>
+                <PatientMemo p={p} readOnly={readOnly} />
                 {!readOnly && p.linkWaiting && p.linkType === 'planned' && <div className="text-xs text-fuchsia-700 mt-0.5">검사는 1차 진료 전에 함께 합니다. 추가할 검사는 1차 진료 카드에 지정해주세요.</div>}
               </div>
               {!readOnly && <>
@@ -4356,7 +4427,7 @@ function patientQueueLabels(p, settings) {
   if (needsTriageExam(p, settings)) labels.push('처치실 · 예진 대기');
   if (inProfProcedure(p)) labels.push('진료실 · 교수님 처치 대기');
   if (inResidentProcedure(p)) labels.push('처치실 · 전공의 처치 대기');
-  if (awaitingExplain(p)) labels.push('진료실 · 설명 대기');
+  if (awaitingExplain(p)) labels.push(p.explainedEarly ? (procedureStatus(p) === 'doing' ? '설명 완료 · 처치 후 귀가' : '진료실 · 처치 완료 · 귀가 대기') : `진료실 · 설명 대기${procedureStatus(p) === 'doing' ? ' (처치 중)' : ''}`);
   if (inConsult(p)) labels.push(`${p.calledRoom} · 진료 중`);
   if (consultWaiting(p, settings)) labels.push('진료실 · 진료 대기');
   if (p.consultHold && !p.seen && !allDone(p, settings)) labels.push('진료실 · 추가 검사 중 (진료 보류)');
@@ -4442,6 +4513,7 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
           <div key={patientKey(p)} className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="flex flex-wrap items-center gap-2"><span className="t-name text-slate-900">{p.name}</span><span className="text-sm text-slate-500">{p.id} · {p.doctor || '담당 교수 미지정'}</span>{p.firstVisit && <span className="text-xs text-sky-700">초진</span>}</div>
             <div className="mt-1 text-xs text-slate-500">{p.date} · 예약 {p.reservation || '-'} · 접수 {p.checkin || '미접수'}</div>
+            <PatientMemo p={p} readOnly />
             <div className="mt-3 flex flex-wrap gap-2">{patientQueueLabels(p, settings).map(label => <span key={label} className={`rounded-lg border px-3 py-2 text-sm ${p.consultDone ? 'border-slate-200 bg-slate-50 text-slate-600' : activeVf(p) ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{label}</span>)}</div>
             {pendingProcedures(p).length > 0 && <div className="mt-2 text-xs text-slate-600">남은 처치: {pendingProcedures(p).map(x => `${x.name} (${PERFORMER_LABEL[x.performer] || x.performer})`).join(', ')}</div>}
           </div>
@@ -4591,10 +4663,10 @@ export default function App() {
   }
   return <RoleSelect settings={settings} onSelect={selectRole} />;
   };
-  return <>
+  return <PatientMemoContext.Provider value={mutatePatients}>
     <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
     {directoryOpen && <PatientDirectory patients={patients} settings={settings} lastSync={lastSync} onClose={() => setDirectoryOpen(false)} />}
-  </>;
+  </PatientMemoContext.Provider>;
 }
 
 
