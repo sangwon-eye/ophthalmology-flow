@@ -310,7 +310,16 @@ function saveFollowup(prev, id, doctor, value) {
   if (old.doctor && !byDoctor[old.doctor]) { const { byDoctor: ignored, ...legacy } = old; byDoctor[old.doctor] = legacy; }
   const next = { ...value, doctor };
   if (doctor) byDoctor[doctor] = next;
-  return { ...prev, [id]: { ...next, byDoctor } };
+  return { ...prev, [id]: { ...next, name: value.name || old.name, byDoctor } };
+}
+// 이름이 없는 FU 기록에 명단의 환자 이름을 채웁니다 (예전에 저장된 기록용)
+function fillFollowupNames(prev, list) {
+  let changed = false;
+  const next = { ...prev };
+  list.forEach(p => {
+    if (p?.id && p.name && next[p.id] && !next[p.id].name) { next[p.id] = { ...next[p.id], name: p.name }; changed = true; }
+  });
+  return changed ? next : prev;
 }
 function buildPatient(raw, fuMap, settings) {
   const fu = followupForDoctor(fuMap[raw.id], raw.doctor);
@@ -2289,6 +2298,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
         dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
+        name: p.name,
         updatedAt: at,
     }));
     // 오늘 다른 교수 진료 추가: 그 교수님의 이전 정보(FU)를 붙여 2차 진료로 연결
@@ -2954,7 +2964,14 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   const swapOrder = (p) => mutatePatients(prev => swapLinkOrder(prev, patientKey(p), doctorPrefs));
   const crAnywhere = Object.values(doctorPrefs || {}).some(v => v?.cr);
 
-  const fuIds = Object.keys(fuMap).filter(id => id.includes(fuSearch.trim())).slice(0, 30);
+  // FU 기록에 이름이 없으면 명단에서 찾아 보여줍니다
+  const nameOf = (id) => fuMap[id]?.name || patients.find(p => p.id === id)?.name || '';
+  const fuQuery = fuSearch.trim();
+  const fuIds = Object.keys(fuMap).filter(id => !fuQuery || id.includes(fuQuery) || nameOf(id).includes(fuQuery)).slice(0, 30);
+  useEffect(() => {
+    // 명단에 있는 환자인데 FU 기록에 이름이 비어 있으면 채워 둡니다 (한 번만 저장)
+    if (patients.some(p => fuMap[p.id] && !fuMap[p.id].name && p.name)) mutateFu(prev => fillFollowupNames(prev, patients));
+  }, [patients, fuMap, mutateFu]);
   const saveFuEdit = (sel, detail, dil) => {
     const id = fuEdit.id;
     setFuEdit(null);
@@ -2964,6 +2981,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
         dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
+        name: fuEdit.name || nameOf(id),
         updatedAt: Date.now(),
     }));
   };
@@ -3133,10 +3151,10 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
 
       {tab === 'fu' && (
         <div>
-          <p className="text-sm text-slate-500 mb-3">진료실에서 지정하지 못한 환자는 여기서 환자번호로 찾아 다음 방문 검사를 지정할 수 있어요.</p>
+          <p className="text-sm text-slate-500 mb-3">진료실에서 지정하지 못한 환자는 여기서 환자번호나 이름으로 찾아 다음 방문 검사를 지정할 수 있어요.</p>
           <div className="flex items-center gap-2 mb-4 bg-white border border-slate-300 rounded-lg px-3 py-2">
             <Search size={16} className="text-slate-400" />
-            <input placeholder="환자번호로 찾기" value={fuSearch} onChange={e => setFuSearch(e.target.value)} className="flex-1 outline-none text-sm" />
+            <input placeholder="환자번호 또는 이름으로 찾기" value={fuSearch} onChange={e => setFuSearch(e.target.value)} className="flex-1 outline-none text-sm" />
           </div>
           {fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
           {fuIds.map(id => {
@@ -3149,7 +3167,11 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
             return (
               <div key={id} className="bg-white border border-slate-200 rounded-xl p-4 mb-2 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium text-slate-900">{id}{fu.doctor ? ` · 다음 내원 ${fu.doctor}` : ''}</div>
+                  <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
+                    {nameOf(id) || <span className="text-slate-400 font-normal">이름 정보 없음</span>}
+                    <span className="text-xs text-slate-400 font-normal">{id}</span>
+                    {fu.doctor && <span className="text-xs text-slate-500 font-normal">· 다음 내원 {fu.doctor}</span>}
+                  </div>
                   <div className="text-xs text-slate-500 mt-0.5">{names || '지정된 검사 없음'}</div>
                   {fuNotes.map(n => (
                     <div key={n.id} className="text-xs text-yellow-800 mt-0.5"><span className="font-medium">{n.short}</span> {n.note}</div>
@@ -3159,8 +3181,8 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
               </div>
             );
           })}
-          {fuSearch.trim() && !fuMap[fuSearch.trim()] && (
-            <button type="button" onClick={() => setFuEdit({ id: fuSearch.trim() })} className="mt-3 text-sm px-4 py-2 rounded-lg bg-slate-800 text-white">
+          {fuQuery && !fuMap[fuQuery] && /^[0-9A-Za-z-]+$/.test(fuQuery) && (
+            <button type="button" onClick={() => setFuEdit({ id: fuQuery, name: nameOf(fuQuery) })} className="mt-3 text-sm px-4 py-2 rounded-lg bg-slate-800 text-white">
               {fuSearch.trim()} 새로 지정하기
             </button>
           )}
@@ -3174,7 +3196,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       {fuEdit && (
         <TestCheckModal
           key={`fu-${fuEdit.id}`}
-          title={`환자 ${fuEdit.id} 다음 방문 검사`}
+          title={`${fuEdit.name || nameOf(fuEdit.id) ? `${fuEdit.name || nameOf(fuEdit.id)}님 (${fuEdit.id})` : `환자 ${fuEdit.id}`} 다음 방문 검사`}
           subtitle="다음에 내원했을 때 할 검사를 체크해주세요"
           tests={allTests}
           settings={settings}
