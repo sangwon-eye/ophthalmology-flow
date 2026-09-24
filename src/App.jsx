@@ -648,6 +648,9 @@ function fieldText(m, key) {
 function hasIop(p) {
   return !!(String(p.measure?.nct?.od ?? '').trim() || String(p.measure?.nct?.os ?? '').trim() || p.assigned?.[GAT_ID]);
 }
+function hasVisionValue(m) {
+  return ['ucva', 'bcva'].some(f => ['od', 'os'].some(e => String(m?.[f]?.[e] ?? '').trim()));
+}
 function previousMeasure(p, history) {
   if (hasAnyValue(p.prevManual)) return { ...p.prevManual, source: 'manual' };
   const list = Array.isArray(history?.[p.id]) ? history[p.id] : [];
@@ -2279,11 +2282,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     onSpecial={isVision ? undefined : () => openSpecial(p, t)}
                   />
                 ))}
-                {isVision && (
-                  <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'prev' })} className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-500">
-                    이전 값 수정
-                  </button>
-                )}
                 {isVision && firstVisitChip(p)}
                 {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="text-xs px-3 py-1.5 rounded-lg border border-rose-200 text-rose-700">접수 취소</button>}
                 <DilationRow p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
@@ -2331,7 +2329,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 </div>
                 <div className="flex gap-2 shrink-0 items-center">
                   {firstVisitChip(p)}
-                  <button type="button" onClick={() => setMeasureFor({ key: patientKey(p), mode: 'prev' })} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600">이전 값</button>
                   <button type="button" onClick={() => checkIn(p)} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">접수</button>
                 </div>
               </div>
@@ -3142,7 +3139,7 @@ function UploadResult({ result, patients, onRemove, onShowList }) {
 /* ------------------------------------------------------------------ */
 /* 관리자 화면                                                          */
 /* ------------------------------------------------------------------ */
-function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePatients, mutateFu, mutateDoctors, mutateDoctorPrefs, onBack, lastSync }) {
+function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, mutatePatients, mutateFu, mutateDoctors, mutateDoctorPrefs, onBack, lastSync }) {
   const [todayDetail, setTodayDetail] = useState(null);
   const todayEdit = patients.find(p => patientKey(p) === todayDetail?.key);
   const todayTest = settings.tests.find(t => t.id === todayDetail?.testId);
@@ -3327,6 +3324,9 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   };
   const toggleFirst = (pk) => updateOne(pk, p => ({ ...p, firstVisit: !p.firstVisit }));
   const [infoEdit, setInfoEdit] = useState(null);
+  // 이전 시력 입력 (관리자에서만)
+  const [prevFor, setPrevFor] = useState(null);
+  const prevPatient = prevFor ? patients.find(x => patientKey(x) === prevFor) : null;
   const saveInfo = (p, info) => {
     const id = info.id.trim();
     if (!id || !info.name.trim()) { setMessage('환자번호와 이름을 입력해주세요.'); return; }
@@ -3536,6 +3536,21 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
                 </button>
                 <ConfirmButton label="삭제" onConfirm={() => removeOne(patientKey(p))} />
               </div>
+              {(() => {
+                const prev = previousMeasure(p, history);
+                const missing = !hasVisionValue(prev);
+                return (
+                  <div className="w-full flex items-center gap-2 flex-wrap">
+                    <MeasureLine label="이전" m={prev} emptyText="이전 시력 없음" />
+                    {missing && (
+                      <button type="button" onClick={() => setPrevFor(patientKey(p))} className="text-xs px-2.5 py-1 rounded-lg border border-orange-300 text-orange-700 bg-orange-50 font-medium">이전 시력 입력</button>
+                    )}
+                    {!missing && prev?.source === 'manual' && (
+                      <button type="button" onClick={() => setPrevFor(patientKey(p))} className="text-xs text-slate-400 underline">수정</button>
+                    )}
+                  </div>
+                );
+              })()}
               <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }} onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }} />
               <DilationRow showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
               </>}
@@ -3609,6 +3624,23 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       {todayEdit && todayTest && <TestDetailModal key={`${todayDetail.key}-${todayTest.id}`} test={todayTest} patientName={todayEdit.name} on={!!todayEdit.assigned?.[todayTest.id]} value={todayEdit.detail?.[todayTest.id]}
         onApply={d => { const kept = pickDetail({ [todayTest.id]: d }, { [todayTest.id]: true }, [todayTest])[todayTest.id] || null; setTodayTest(todayDetail.key, todayTest, true, kept); setTodayDetail(null); }}
         onRemove={() => { setTodayTest(todayDetail.key, todayTest, false); setTodayDetail(null); }} onCancel={() => setTodayDetail(null)} />}
+      {prevPatient && (
+        <MeasureModal
+          key={`prev-${prevFor}`}
+          mode="prev"
+          patient={prevPatient}
+          previous={previousMeasure(prevPatient, history)}
+          gatAvailable={false}
+          gatAssigned={false}
+          onSave={({ measure, date }) => {
+            const pk = prevFor;
+            setPrevFor(null);
+            const prevManual = hasAnyValue(measure) ? { ...measure, date } : null;
+            mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, prevManual } : x)));
+          }}
+          onCancel={() => setPrevFor(null)}
+        />
+      )}
       {infoEdit && <PatientInfoModal patient={infoEdit} onSave={info => saveInfo(infoEdit, info)} onCancel={() => setInfoEdit(null)} />}
       {fuEdit && (
         <TestCheckModal
@@ -4514,6 +4546,7 @@ export default function App() {
     return (
       <AdminView
         patients={patients}
+        history={history}
         doctors={doctors}
         doctorPrefs={doctorPrefs}
         settings={settings}
