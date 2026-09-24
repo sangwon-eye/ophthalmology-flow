@@ -1360,7 +1360,7 @@ function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSa
   const fields = mode === 'gat' ? ['gat'] : mode === 'vision' ? ['ucva', 'bcva', 'nct'] : ['ucva', 'bcva', 'nct', 'gat'];
   const noIop = mode === 'vision' && !gat && !m.nct.od.trim() && !m.nct.os.trim();
   const title = mode === 'prev' ? '이전 시력·안압' : mode === 'gat' ? 'GAT 안압' : '오늘 시력·안압';
-  const completeLabel = mode === 'gat' ? '저장하고 GAT 완료' : '저장하고 완료';
+  const completeLabel = mode === 'gat' ? 'GAT 완료' : '저장하고 완료';
 
   const submit = (complete) => {
     if (complete && noIop && !warned) { setWarned(true); return; }
@@ -1442,7 +1442,7 @@ function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSa
 
         <div className="flex gap-2 mt-6">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
-          <button type="button" onClick={() => submit(false)} className={`flex-1 py-3 rounded-xl font-medium ${mode === 'prev' ? 'bg-slate-800 text-white' : 'border border-slate-300 text-slate-700'}`}>저장</button>
+          {mode !== 'gat' && <button type="button" onClick={() => submit(false)} className={`flex-1 py-3 rounded-xl font-medium ${mode === 'prev' ? 'bg-slate-800 text-white' : 'border border-slate-300 text-slate-700'}`}>저장</button>}
           {mode !== 'prev' && (
             <button type="button" onClick={() => submit(true)} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-medium">{completeLabel}</button>
           )}
@@ -2208,7 +2208,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
             const topTest = showPriority && !runningVf ? pendingTests(p, settings, room.id)[0] : null;
             const otherRooms = isVision ? [] : pendingRooms(p, settings).filter(r => r.id !== room.id);
             const prev = previousMeasure(p, history);
-            const needsGatHere = roomHasGat && p.assigned?.[GAT_ID] && !p.done?.[GAT_ID];
             const notes = notesOf(p, allTests);
             return (
               <PatientRow
@@ -2261,11 +2260,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     측정값 입력
                   </button>
                 )}
-                {needsGatHere && !runningVf && (
-                  <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'gat' })} className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium">
-                    GAT 입력
-                  </button>
-                )}
                 {tests.filter(t => p.assigned?.[t.id] && (!isVision || t.id === 'ark')).map(t => (
                   isVfTest(t) && !p.done?.[t.id] ? (
                     <div key={t.id} className="flex flex-wrap items-center gap-2">
@@ -2281,7 +2275,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     label={testLabelWithOptions(t, p.detail?.[t.id])}
                     done={!!p.done?.[t.id]}
                     emphasize={topTest?.id === t.id}
-                    onToggle={v => markDone(p, t.id, v)}
+                    onToggle={v => (v && t.id === GAT_ID && roomHasGat ? setMeasureFor({ key: pk, mode: 'gat' }) : markDone(p, t.id, v))}
                     onSpecial={isVision ? undefined : () => openSpecial(p, t)}
                   />
                 ))}
