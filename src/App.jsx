@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, Activity, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe,
+  ChevronUp, ChevronDown, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -342,6 +342,18 @@ function saveFollowup(prev, id, doctor, value) {
   if (doctor) byDoctor[doctor] = next;
   return { ...prev, [id]: { ...next, name: value.name || old.name, byDoctor } };
 }
+// 바빠서 다음 내원 검사를 못 정하고 보낸 환자: FU 기록에 '나중에 지정' 표시만 남깁니다 (기존 지정은 그대로).
+// FU 지정 관리에서 지정해 저장하면 saveFollowup 이 이 표시를 지웁니다.
+function markFollowupLater(prev, id, { doctor, name, date, at }) {
+  const old = prev[id] || {};
+  return { ...prev, [id]: { ...old, name: name || old.name, fuLater: { doctor, date, at } } };
+}
+function unmarkFollowupLater(prev, id) {
+  if (!prev[id]?.fuLater) return prev;
+  const { fuLater, ...rest } = prev[id];
+  return { ...prev, [id]: rest };
+}
+
 // 한 교수님의 FU 지정만 지웁니다. 다른 교수님 기록이 남아 있으면 그중 가장 최근 것이 대표 기록이 됩니다.
 function deleteFollowup(prev, id, doctor) {
   const old = prev[id];
@@ -354,6 +366,12 @@ function deleteFollowup(prev, id, doctor) {
   const latest = [...rest].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
   next[id] = { ...latest, name: old.name, byDoctor };
   return next;
+}
+function fuVisitDate(fu) {
+  if (fu?.visitDate) return fu.visitDate;
+  if (!fu?.updatedAt) return '';
+  const d = new Date(fu.updatedAt);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 // FU 지정 관리에 보여줄 줄: 교수님별로 한 줄씩
 function followupRows(id, record) {
@@ -395,6 +413,8 @@ function buildPatient(raw, fuMap, settings) {
     doneAt: {},
     dilateOverride: fu?.dilate === 'yes' ? true : fu?.dilate === 'no' ? false : undefined,
     dilateEye: fu?.dilate === 'yes' ? dilateEyeOf(fu.dilateEye) : undefined,
+    // 지난 진료에서 'FU 나중에'로 보내고 아직 지정하지 않은 환자
+    fuMissing: !!fuMap[raw.id]?.fuLater && String(fuMap[raw.id].fuLater.date || '') < String(raw.date || ''),
     cr: !!fu?.cr,
     drops: [],
     procedures: [],
@@ -555,7 +575,9 @@ function hasFollowupApplied(p) {
 }
 // 재진인데 오늘 할 검사(CR 포함)가 하나도 없는 환자 → 프로그램 도입 전 환자일 가능성이 높아 확인 필요
 function needsTestCheck(p, prefs) {
-  if (p.firstVisit || p.consultDone || p.linkType === 'added') return false;
+  if (p.consultDone) return false;
+  if (p.fuMissing) return true; // 지난 진료에서 FU 를 나중에 정하기로 하고 아직 안 정함
+  if (p.firstVisit || p.linkType === 'added') return false;
   if (Object.entries(p.assigned || {}).some(([k, v]) => v && k !== VISION_KEY)) return false;
   return !crActive(p, prefs);
 }
@@ -1481,6 +1503,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
           {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
           {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
           {p.late && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">지각</span>}
+          {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
           {p.consultHold && !p.consultDone && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 flex items-center gap-1">
               <AlertTriangle size={11} /> 진료 후 추가검사
@@ -1589,21 +1612,6 @@ function DraggableList({ items, getKey, onMove, renderItem, locked = false }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function PriorityBanner({ groups, patients }) {
-  const counts = groups.map(g => ({ g, n: patients.filter(p => groupPending(p, g)).length }));
-  const top = counts.find(c => c.n > 0);
-  if (!top) return null;
-  return (
-    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex items-start gap-3">
-      <Activity className="text-amber-600 shrink-0 mt-0.5" size={20} />
-      <div className="text-sm text-amber-900">
-        <div className="font-medium mb-0.5">{top.g.key}부터 채워주세요</div>
-        <div>{counts.map(c => `${c.g.key} ${c.n}명`).join(', ')} 대기 중. {top.g.key} 장비가 쉬지 않도록 먼저 진행하고, 기다리는 동안 나머지 검사를 진행하세요.</div>
-      </div>
     </div>
   );
 }
@@ -1788,7 +1796,7 @@ function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, confirmLabel, onConfirm, onCancel }) {
+function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, confirmLabel, onConfirm, onLater, onCancel }) {
   const tests = orderForPicking(rawTests, settings);
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
   const [linkDoctor, setLinkDoctor] = useState('');
@@ -1931,6 +1939,11 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
           <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor }, triageRequired, linkDoctor)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>
         </div>
+        {onLater && (
+          <button type="button" onClick={() => onLater(linkDoctor)} className="w-full mt-2 py-2.5 rounded-xl border border-emerald-300 text-emerald-700 text-sm font-medium">
+            설명 완료 · FU 나중에 <span className="font-normal text-emerald-600">(위 체크는 저장하지 않음)</span>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2159,7 +2172,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
 
   return (
     <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length}>
-      {showPriority && roomList.length > 0 && <PriorityBanner groups={groups} patients={roomList} />}
 
       {!isVision && groups.length >= 2 && (
         <div className="flex flex-wrap gap-2 mb-4">
@@ -2180,12 +2192,11 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
       </div>
       {nameSort && shown.length > 1 && <div className="text-xs text-slate-500 mb-2">가나다순으로 보는 중입니다. 번호는 실제 대기 순서이고, 순서를 바꾸려면 예약시간순으로 돌아가세요.</div>}
-      <div className="t-hint text-xs text-slate-400 mb-3">
-        {isVision
-          ? '측정값 입력에서 값을 넣고 저장하고 완료를 누르세요. 순서는 왼쪽 손잡이를 끌거나 화살표로 바꿔요.'
-          : 'VF는 시작 후 종료를 누르세요. VF 검사 중에는 다른 장비에서 호출하지 마세요. 나머지 검사는 버튼을 눌러 완료합니다. 순서는 손잡이나 화살표로 바꿔요.'}
-        {' '}단안이나 검사 프로토콜은 검사 버튼을 오른쪽 클릭(터치스크린은 길게 누르기)해서 지정해요.
-      </div>
+      {isVision && (
+        <div className="t-hint text-xs text-slate-400 mb-3">
+          측정값 입력에서 값을 넣고 저장하고 완료를 누르세요. 순서는 왼쪽 손잡이를 끌거나 화살표로 바꿔요. 단안이나 검사 프로토콜은 검사 버튼을 오른쪽 클릭(터치스크린은 길게 누르기)해서 지정해요.
+        </div>
+      )}
 
       {shown.length === 0 ? (
         <EmptyState text="대기 중인 환자가 없습니다" />
@@ -2325,6 +2336,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 <div>
                   <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                     <span className="t-name">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
+                    {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
                     {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'}</div>
@@ -2426,6 +2438,7 @@ function SimpleCard({ p, tone = 'slate', children }) {
         {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
         {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
+        {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
       </div>
       {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
       <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
@@ -2557,18 +2570,20 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
     })));
   };
 
-  const completeExplain = async (sel, detail, dil, _triage, linkDoctor) => {
-    const p = explainFor;
+  const completeExplain = async (sel, detail, dil, _triage, linkDoctor, { later = false, patient } = {}) => {
+    const p = patient || explainFor;
     const pk = patientKey(p);
     const at = Date.now();
     setExplainFor(null);
-    mutateFu(prev => saveFollowup(prev, p.id, dil?.doctor || p.doctor, {
+    if (later) mutateFu(prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
+    else mutateFu(prev => saveFollowup(prev, p.id, dil?.doctor || p.doctor, {
         ...sel,
         detail,
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
         dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
         name: p.name,
+        visitDate: p.date,
         updatedAt: at,
     }));
     // 오늘 다른 교수 진료 추가: 그 교수님의 이전 정보(FU)를 붙여 2차 진료로 연결
@@ -2578,15 +2593,19 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
       try { fu = await loadFu(); } catch { /* 이전 정보 없이 추가 */ }
       extra = buildPatient({ id: p.id, name: p.name, date: p.date, doctor: linkDoctor, reservation: '', firstVisit: false }, fu, settings);
     }
-    const undoDone = () => mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null } : x)), pk));
+    const undoDone = () => {
+      mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false } : x)), pk));
+      if (later) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+    };
     mutatePatients(prev => {
-      let next = prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at } : x));
+      let next = prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at, fuLater: later }
+        : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x));
       if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
       return activateLinked(next, pk, settings, at);
     });
     const nextVisit = linkDoctor || allPatients.find(x => x.primaryKey === pk && x.linkWaiting)?.doctor;
     const via = settings.linkCheckAdded !== false && linkDoctor ? '처치실 추가 검사 확인 후 ' : '';
-    showToast(`${p.name} 설명 완료${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
+    showToast(`${p.name} 설명 완료${later ? ' · FU는 관리자 > FU 지정 관리에서 나중에' : ''}${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
   };
 
   const confirmExtra = (sel, detail) => {
@@ -2679,6 +2698,10 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                   {nextVisitNote(p)}
                   <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
                     설명 완료
+                  </button>
+                  <button type="button" onClick={() => completeExplain(null, null, null, false, '', { later: true, patient: p })} title="다음 내원 검사는 관리자 > FU 지정 관리에서 나중에 지정합니다"
+                    className="text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 font-medium">
+                    설명 완료 · FU 나중에
                   </button>
                   <button type="button" onClick={() => undoFinishConsult(p)} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600 flex items-center gap-1">
                     <RotateCcw size={14} /> 진료 완료 취소
@@ -2800,7 +2823,11 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
           <RecentDone count={recent.length}>
             {recent.map(p => (
               <RecentRow key={patientKey(p)} p={p} time={fmtClock(p.consultDoneAt)}>
-                <UndoButton label="설명 완료 취소" onClick={() => mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === patientKey(p) ? { ...x, consultDone: false, consultDoneAt: null } : x)), patientKey(p)))} />
+                {p.fuLater && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">FU 나중에</span>}
+                <UndoButton label="설명 완료 취소" onClick={() => {
+                  mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === patientKey(p) ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false } : x)), patientKey(p)));
+                  if (p.fuLater) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+                }} />
               </RecentRow>
             ))}
           </RecentDone>
@@ -2821,6 +2848,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
           dilation={{ crAvailable: !!doctorPrefs?.[explainFor.doctor]?.cr, initial: dilationInitial(explainFor) }}
           confirmLabel="설명 완료"
           onConfirm={completeExplain}
+          onLater={(linkDoctor) => completeExplain(null, null, null, false, linkDoctor, { later: true })}
           onCancel={() => setExplainFor(null)}
         />
       )}
@@ -3335,6 +3363,22 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   const saveFuEdit = (sel, detail, dil) => {
     const id = fuEdit.id;
     setFuEdit(null);
+    // 'FU 미지정'으로 이미 올라가 있는 다음 명단: 표시를 지우고, 접수 전이면 새로 정한 검사로 바꿉니다
+    if (patients.some(p => p.id === id && p.fuMissing)) {
+      mutatePatients(prev => prev.map(p => {
+        if (p.id !== id || !p.fuMissing) return p;
+        if (p.checkin || (fuEdit.doctor && p.doctor !== fuEdit.doctor)) return { ...p, fuMissing: false };
+        const assigned = { [VISION_KEY]: true };
+        const nextDetail = {};
+        settings.tests.forEach(t => { assigned[t.id] = !!sel[t.id]; if (sel[t.id] && detail?.[t.id]) nextDetail[t.id] = cleanDetail(detail[t.id]); });
+        return {
+          ...p, fuMissing: false, assigned, detail: nextDetail,
+          dilateOverride: dil?.mode === 'yes' ? true : dil?.mode === 'no' ? false : undefined,
+          dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
+          cr: !!dil?.cr,
+        };
+      }));
+    }
     mutateFu(prev => saveFollowup(prev, id, fuEdit.doctor || '', {
         ...sel,
         detail,
@@ -3342,6 +3386,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
         dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
         name: fuEdit.name || nameOf(id),
+        visitDate: fuEdit.visitDate || fuMap[id]?.fuLater?.date,
         updatedAt: Date.now(),
     }));
   };
@@ -3463,7 +3508,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
           )}
           {checkCount > 0 && (
             <div className="bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 mb-4 text-sm text-orange-900">
-              <span className="font-semibold">확인 필요 {checkCount}명</span> · 재진인데 오늘 검사가 하나도 지정되지 않았습니다. 프로그램 사용 전에 진료받은 환자일 수 있으니 검사를 지정해주세요.
+              <span className="font-semibold">확인 필요 {checkCount}명</span> · 재진인데 오늘 검사가 하나도 지정되지 않았거나(프로그램 사용 전 진료 환자일 수 있음), 지난 진료에서 FU를 나중에 정하기로 한 환자입니다. 검사를 확인해주세요.
             </div>
           )}
           {byDate.length === 0 ? <EmptyState text={readOnly && archived.loading ? '불러오는 중…' : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
@@ -3473,7 +3518,8 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
               <div>
                 <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                   <span className="t-name">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
-                  {flag && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
+                  {flag && !p.fuMissing && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
+                  {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
                   {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
@@ -3512,6 +3558,26 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
             <Search size={16} className="text-slate-400" />
             <input placeholder="환자번호 또는 이름으로 찾기" value={fuSearch} onChange={e => setFuSearch(e.target.value)} className="flex-1 outline-none text-sm" />
           </div>
+          {(() => {
+            const later = Object.entries(fuMap).filter(([, r]) => r?.fuLater).sort((a, b) => String(a[1].fuLater.date).localeCompare(String(b[1].fuLater.date)));
+            if (!later.length) return null;
+            return (
+              <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-4 mb-4">
+                <div className="font-medium text-orange-900 mb-1">FU 나중에 지정할 환자 · {later.length}명</div>
+                <p className="t-hint text-xs text-orange-800 mb-2">진료실에서 '설명 완료 · FU 나중에'로 보낸 환자입니다. 지정하면 이 목록에서 빠지고, 이미 올라간 다음 명단에도 반영됩니다.</p>
+                {later.map(([id, r]) => (
+                  <div key={id} className="flex items-center justify-between gap-2 py-1.5 border-t border-orange-200 first:border-t-0">
+                    <span className="flex items-center gap-2 flex-wrap">
+                      <span className="t-name">{r.name || nameOf(id) || '이름 정보 없음'}</span>
+                      <span className="text-xs text-slate-500">{id} · 최근 진료 {r.fuLater.date} · {r.fuLater.doctor}</span>
+                    </span>
+                    <button type="button" onClick={() => setFuEdit({ ...(r.byDoctor?.[r.fuLater.doctor] || {}), id, doctor: r.fuLater.doctor, name: r.name || nameOf(id), visitDate: r.fuLater.date })}
+                      className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium shrink-0">지정</button>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           {fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
           {fuIds.flatMap(id => followupRows(id, fuMap[id])).map(({ id, doctor: fuDoctor, fu }) => {
             const dilText = [fu.dilate === 'yes' ? `산동 함${dilateEyeOf(fu.dilateEye) ? ` (${DILATE_EYE_LABEL[fu.dilateEye]})` : ''}` : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
@@ -3526,6 +3592,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
                     {nameOf(id) ? <span className="t-name">{nameOf(id)}</span> : <span className="text-slate-400 font-normal">이름 정보 없음</span>}
                     <span className="text-xs text-slate-400 font-normal">{id}</span>
                     {fuDoctor && <span className="text-xs text-slate-500 font-normal">· 다음 내원 {fuDoctor}</span>}
+                    {fuVisitDate(fu) && <span className="text-xs text-slate-500 font-normal">· 최근 진료 {fuVisitDate(fu)}</span>}
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5">{names || '지정된 검사 없음'}</div>
                   {fuNotes.map(n => (
@@ -3991,8 +4058,8 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                 <label className="flex items-start gap-2 text-sm text-slate-700 mb-4 cursor-pointer">
                   <input type="checkbox" checked={!!r.showPriority} onChange={e => updateRoom(r.id, { showPriority: e.target.checked })} className="w-4 h-4 mt-0.5" />
                   <span>
-                    우선순위 안내 보이기
-                    <span className="block text-xs text-slate-400">검사가 2개 이상일 때, 맨 위 검사부터 채우도록 검사실 화면에 안내합니다</span>
+                    우선 검사 표시
+                    <span className="block text-xs text-slate-400">검사가 2개 이상일 때, 환자마다 먼저 할 검사 버튼에 '우선' 표시를 붙입니다</span>
                   </span>
                 </label>
 
