@@ -1394,6 +1394,43 @@ function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSa
   );
 }
 
+/* 명단 보기 방식: 정렬(예약시간순·가나다순), 오전·오후 */
+function byName(a, b) {
+  return String(a.name).localeCompare(String(b.name), 'ko') || String(a.id).localeCompare(String(b.id));
+}
+// 예약 12:00 전은 오전, 12:00부터 오후. 예약시간이 없으면 양쪽 모두에 보입니다.
+const NOON = 12 * 60;
+function inSession(p, session) {
+  if (session === 'all' || !p.reservation) return true;
+  const m = timeToMin(p.reservation);
+  return session === 'am' ? m < NOON : m >= NOON;
+}
+// 화면마다 고른 정렬을 이 컴퓨터에 기억합니다
+function useSortMode(storageKey) {
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem(storageKey) === 'name' ? 'name' : 'time'; } catch { return 'time'; }
+  });
+  const change = (m) => {
+    setMode(m);
+    try { localStorage.setItem(storageKey, m); } catch { /* 저장 못 해도 동작에는 문제 없음 */ }
+  };
+  return [mode, change];
+}
+function SegmentedToggle({ value, onChange, options, className = '' }) {
+  return (
+    <div className={`inline-flex gap-1 bg-slate-100 rounded-lg p-1 ${className}`}>
+      {options.map(([k, label]) => (
+        <button key={k} type="button" aria-pressed={value === k} onClick={() => onChange(k)}
+          className={`px-3 py-1.5 rounded-md text-sm whitespace-nowrap ${value === k ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+const SORT_OPTIONS = [['time', '예약시간순'], ['name', '가나다순']];
+const SESSION_OPTIONS = [['all', '전체'], ['am', '오전'], ['pm', '오후']];
+
 function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
@@ -1432,7 +1469,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
 }
 
 // 손잡이(⋮⋮)를 잡고 끌어서 순서를 바꾸는 목록. 마우스·터치 모두 지원
-function DraggableList({ items, getKey, onMove, renderItem }) {
+function DraggableList({ items, getKey, onMove, renderItem, locked = false }) {
   const wrapRef = useRef(null);
   const dragRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -1511,7 +1548,7 @@ function DraggableList({ items, getKey, onMove, renderItem }) {
         const lifted = drag && i === drag.index;
         return (
           <div key={getKey(item)} className="pb-3" style={style}>
-            <div className={lifted ? 'shadow-xl rounded-xl' : ''}>{renderItem(item, i, handle)}</div>
+            <div className={lifted ? 'shadow-xl rounded-xl' : ''}>{renderItem(item, i, locked ? null : handle)}</div>
           </div>
         );
       })}
@@ -1913,6 +1950,9 @@ function RoleSelect({ settings, onSelect }) {
 /* ------------------------------------------------------------------ */
 function StationView({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistory, onBack, lastSync }) {
   const [filter, setFilter] = useState('all');
+  const [sortMode, changeSort] = useSortMode(mode === 'vision' ? 'sort-vision' : `sort-room-${mode}`);
+  const nameSort = sortMode === 'name';
+  const [session, setSession] = useState('all');
   const [query, setQuery] = useState('');
   const [measureFor, setMeasureFor] = useState(null);
   const [detailFor, setDetailFor] = useState(null);
@@ -1940,7 +1980,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
 
   const q = query.trim();
   const notCheckedIn = isVision
-    ? patients.filter(p => !p.consultDone && !p.checkin && (!q || (p.name || '').includes(q) || String(p.id).includes(q))).sort(byQueue)
+    ? patients.filter(p => !p.consultDone && !p.checkin && inSession(p, session) && (!q || (p.name || '').includes(q) || String(p.id).includes(q))).sort(nameSort ? byName : byQueue)
     : [];
   const roomList = (isVision
     ? patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p))
@@ -2083,8 +2123,12 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         </div>
       )}
 
-      {isVision && <div className="text-sm font-medium text-slate-500 mb-2">검사 대기 · {roomList.length}명</div>}
-      <div className="text-xs text-slate-400 mb-3">
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="text-sm font-medium text-slate-500">{isVision ? `검사 대기 · ${roomList.length}명` : ''}</div>
+        <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
+      </div>
+      {nameSort && shown.length > 1 && <div className="text-xs text-slate-500 mb-2">가나다순으로 보는 중입니다. 번호는 실제 대기 순서이고, 순서를 바꾸려면 예약시간순으로 돌아가세요.</div>}
+      <div className="t-hint text-xs text-slate-400 mb-3">
         {isVision
           ? '측정값 입력에서 값을 넣고 저장하고 완료를 누르세요. 순서는 왼쪽 손잡이를 끌거나 화살표로 바꿔요.'
           : 'VF는 시작 후 종료를 누르세요. VF 검사 중에는 다른 장비에서 호출하지 마세요. 나머지 검사는 버튼을 눌러 완료합니다. 순서는 손잡이나 화살표로 바꿔요.'}
@@ -2095,10 +2139,13 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         <EmptyState text="대기 중인 환자가 없습니다" />
       ) : (
         <DraggableList
-          items={shown}
+          items={nameSort ? [...shown].sort(byName) : shown}
+          locked={nameSort}
           getKey={patientKey}
           onMove={(key, to) => moveInQueue(mutatePatients, shown, key, to)}
-          renderItem={(p, idx, handle) => {
+          renderItem={(p, _i, handle) => {
+            // 가나다순으로 보여도 번호는 실제 대기 순서
+            const idx = shown.indexOf(p);
             const pk = patientKey(p);
             const runningVf = activeVf(p);
             const topTest = showPriority && !runningVf ? pendingTests(p, settings, room.id)[0] : null;
@@ -2112,8 +2159,8 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 index={idx}
                 color={color}
                 handle={handle}
-                onUp={() => moveInQueue(mutatePatients, shown, pk, idx - 1)}
-                onDown={() => moveInQueue(mutatePatients, shown, pk, idx + 1)}
+                onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
+                onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
               >
                 {runningVf && (
                   <div role="status" className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
@@ -2192,6 +2239,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         <div className="mb-8">
           <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
             <div className="text-sm font-medium text-slate-500">접수 대기 · {notCheckedIn.length}명</div>
+            <SegmentedToggle value={session} onChange={setSession} options={SESSION_OPTIONS} />
             <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5">
               <Search size={14} className="text-slate-400" />
               <input placeholder="이름·환자번호 찾기" value={query} onChange={e => setQuery(e.target.value)} className="outline-none text-sm w-36" />
@@ -2204,7 +2252,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
-                    {p.name} <span className="text-xs text-slate-400">{p.id}</span>
+                    <span className="t-name">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
                     {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'}</div>
@@ -2651,12 +2699,14 @@ function defaultTriageRequired(p, doctorPrefs) {
 
 function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePatients, onBack, lastSync }) {
   const [triageFor, setTriageFor] = useState(null);
+  const [sortMode, changeSort] = useSortMode('sort-procedure');
+  const order = sortMode === 'name' ? byName : byQueue;
   const [toastNode, showToast] = useUndoToast();
   const allTests = sortedTests(settings);
   const waitMin = settings.dilationWaitMin;
 
-  const triage = patients.filter(needsTriageAssign).sort(byQueue);
-  const procs = patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)).sort(byQueue);
+  const triage = patients.filter(needsTriageAssign).sort(order);
+  const procs = patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)).sort(order);
   const recent = [
     ...patients.filter(p => p.firstVisit && p.triageDone).map(p => ({ p, kind: 'triage', at: p.triageAt || 0 })),
     ...patients
@@ -2718,6 +2768,9 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
 
   return (
     <ScreenShell title="처치실" color="indigo" onBack={onBack} lastSync={lastSync} count={triage.length + procs.length}>
+      <div className="flex justify-end mb-3">
+        <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
+      </div>
       <div className="mb-8">
         <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
           검사 지정 대기 (초진 · 2차 진료) · {triage.length}명
@@ -2880,13 +2933,8 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   const allTests = sortedTests(settings);
 
   const [uploadResult, setUploadResult] = useState(null);
-  const [sortMode, setSortMode] = useState(() => {
-    try { return localStorage.getItem('admin-sort') === 'name' ? 'name' : 'time'; } catch { return 'time'; }
-  });
-  const changeSort = (mode) => {
-    setSortMode(mode);
-    try { localStorage.setItem('admin-sort', mode); } catch { /* 저장 못 해도 동작에는 문제 없음 */ }
-  };
+  const [sortMode, changeSort] = useSortMode('admin-sort');
+  const [session, setSession] = useState('all');
 
   // 이미 명단에 있는 환자는 덮어쓰지 않습니다 (mergePatientList 참고). 저장된 결과의 통계를 돌려줍니다.
   const upsert = async (news) => {
@@ -2995,18 +3043,18 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
 
   const archived = useArchivedPatients(manageDate);
   const readOnly = archived.isArchived;
-  const byName = (a, b) => String(a.name).localeCompare(String(b.name), 'ko') || String(a.id).localeCompare(String(b.id));
   const [manageDoctor, setManageDoctor] = useState('');
   const dayAll = (readOnly ? archived.list : patients).filter(p => p.date === manageDate);
   const dayDoctors = [...new Set([...doctors, ...dayAll.map(p => p.doctor)].filter(Boolean))];
-  const byDate = dayAll.filter(p => !manageDoctor || p.doctor === manageDoctor).sort(sortMode === 'name' ? byName : byQueue);
+  const byDate = dayAll.filter(p => (!manageDoctor || p.doctor === manageDoctor) && inSession(p, session)).sort(sortMode === 'name' ? byName : byQueue);
   // 전체 삭제: 지금 보이는 명단(날짜 + 선택한 교수)을 한 번에 지웁니다. 바로 되돌릴 수 있습니다.
   const [bulkConfirm, setBulkConfirm] = useState(false);
+  const sessionLabel = session === 'am' ? ' 오전' : session === 'pm' ? ' 오후' : '';
   const [bulkDeleted, setBulkDeleted] = useState(null);
   const bulkDelete = () => {
     const keys = byDate.map(patientKey);
     const snapshot = dayAll;
-    const label = `${manageDate}${manageDoctor ? ` ${manageDoctor}` : ' 전체'} 명단 ${keys.length}명`;
+    const label = `${manageDate}${manageDoctor ? ` ${manageDoctor}` : ' 전체'}${sessionLabel} 명단 ${keys.length}명`;
     setBulkConfirm(false);
     mutatePatients(prev => keys.reduce((list, k) => removeVisit(list, k), prev));
     setBulkDeleted({ keys, snapshot, label });
@@ -3157,16 +3205,12 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
             <span className="text-sm text-slate-400">{byDate.length}명</span>
             {!readOnly && byDate.length > 0 && (
               <button type="button" onClick={() => setBulkConfirm(true)} className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 bg-white flex items-center gap-1">
-                <Trash2 size={14} /> {manageDoctor ? `${manageDoctor} 전체 삭제` : '전체 삭제'}
+                <Trash2 size={14} /> {`${manageDoctor ? `${manageDoctor} ` : ''}${sessionLabel.trim() ? `${sessionLabel.trim()} ` : ''}전체 삭제`}
               </button>
             )}
-            <div className="ml-auto inline-flex gap-1 bg-slate-100 rounded-lg p-1">
-              {[['time', '예약시간순'], ['name', '가나다순']].map(([k, label]) => (
-                <button key={k} type="button" aria-pressed={sortMode === k} onClick={() => changeSort(k)}
-                  className={`px-3 py-1.5 rounded-md text-sm ${sortMode === k ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}>
-                  {label}
-                </button>
-              ))}
+            <div className="ml-auto flex gap-2 flex-wrap">
+              <SegmentedToggle value={session} onChange={setSession} options={SESSION_OPTIONS} />
+              <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
             </div>
           </div>
           {bulkDeleted && (
@@ -3180,7 +3224,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
               <div className="bg-white rounded-2xl p-6 w-full max-w-md">
                 <h3 className="text-lg font-medium text-slate-900 mb-1">명단 전체 삭제</h3>
                 <p className="text-sm text-slate-600 mb-2">
-                  <b>{manageDate} {manageDoctor || '모든 교수님'}</b> 명단 <b>{byDate.length}명</b>을 모두 삭제합니다.
+                  <b>{manageDate} {manageDoctor || '모든 교수님'}{sessionLabel}</b> 명단 <b>{byDate.length}명</b>을 모두 삭제합니다.
                 </p>
                 {byDate.some(p => p.checkin) && <p className="text-sm text-red-600 mb-2">이미 접수한 환자 {byDate.filter(p => p.checkin).length}명도 함께 삭제됩니다.</p>}
                 <p className="text-xs text-slate-500">삭제 직후 화면에 나오는 [되돌리기]로 복구할 수 있습니다. 환자별 다음 내원 정보(FU)는 지워지지 않습니다.</p>
