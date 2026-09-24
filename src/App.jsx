@@ -1781,6 +1781,7 @@ function RoleSelect({ settings, onSelect }) {
     { key: 'board', label: '환자용 화면', sub: '대기 명단 모니터', icon: Monitor, color: 'slate' },
     { key: 'admin', label: '관리자', sub: '명단 업로드 · FU 지정', icon: ClipboardList, color: 'slate' },
     { key: 'settings', label: '설정', sub: '검사 · 검사실 · 교수', icon: Settings, color: 'slate' },
+    { key: 'directory', label: '전체 환자 명단', sub: '환자 찾기 · 진행 상황', icon: Search, color: 'slate' },
   ];
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -3777,8 +3778,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
             </label>
           </div>
           <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-sky-50 p-5">
-            <div className="text-xs font-medium text-indigo-500 mb-1">개발자 정보</div>
-            <div className="text-lg font-semibold text-slate-900 mb-3">2023년 입국 한상원</div>
+            <div className="text-lg font-semibold text-slate-900 mb-3">개발자 한상원 <span className="text-sm font-normal text-slate-500">(2023년 입국)</span></div>
             <p className="text-sm text-slate-700 leading-relaxed mb-2">
               Ophthalmology Flow의 완성을 진심으로 축하합니다.
             </p>
@@ -3924,6 +3924,8 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
 export default function App() {
   const [role, setRole] = useState(null);
   const [directoryOpen, setDirectoryOpen] = useState(false);
+  // 메인 화면의 '전체 환자 명단'은 화면 전환 없이 명단 창만 엽니다.
+  const selectRole = (key) => (key === 'directory' ? setDirectoryOpen(true) : setRole(key));
   const [patients, mutatePatients, syncPatients, markPatients] = useSharedStore('daily-patients', loadDaily, []);
   const [fuMap, mutateFu, syncFu, markFu] = useSharedStore('fu-designations', loadFu, {});
   const [doctors, mutateDoctors, syncDoctors, markDoctors] = useSharedStore('doctors', loadDoctors, []);
@@ -3956,7 +3958,7 @@ export default function App() {
   }, [refresh]);
 
   const renderView = () => {
-  if (!role) return <RoleSelect settings={settings} onSelect={setRole} />;
+  if (!role) return <RoleSelect settings={settings} onSelect={selectRole} />;
 
   const onBack = () => setRole(null);
   const today = todayISO();
@@ -4053,14 +4055,10 @@ export default function App() {
       />
     );
   }
-  return <RoleSelect settings={settings} onSelect={setRole} />;
+  return <RoleSelect settings={settings} onSelect={selectRole} />;
   };
-  const isBoard = role === 'board' || role?.startsWith('board:');
   return <>
     <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
-    {!isBoard && !directoryOpen && <div className="fixed bottom-24 right-5 z-30">
-      <button type="button" onClick={() => setDirectoryOpen(true)} className="flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-3 text-sm font-medium text-white shadow-lg"><Search size={16} />전체 환자 명단</button>
-    </div>}
     {directoryOpen && <PatientDirectory patients={patients} settings={settings} lastSync={lastSync} onClose={() => setDirectoryOpen(false)} />}
   </>;
 }
