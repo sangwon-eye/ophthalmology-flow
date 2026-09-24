@@ -312,6 +312,26 @@ function saveFollowup(prev, id, doctor, value) {
   if (doctor) byDoctor[doctor] = next;
   return { ...prev, [id]: { ...next, name: value.name || old.name, byDoctor } };
 }
+// 한 교수님의 FU 지정만 지웁니다. 다른 교수님 기록이 남아 있으면 그중 가장 최근 것이 대표 기록이 됩니다.
+function deleteFollowup(prev, id, doctor) {
+  const old = prev[id];
+  if (!old) return prev;
+  const next = { ...prev };
+  const byDoctor = { ...old.byDoctor };
+  if (doctor) delete byDoctor[doctor];
+  const rest = Object.values(byDoctor);
+  if (!doctor || !rest.length) { delete next[id]; return next; }
+  const latest = [...rest].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  next[id] = { ...latest, name: old.name, byDoctor };
+  return next;
+}
+// FU 지정 관리에 보여줄 줄: 교수님별로 한 줄씩
+function followupRows(id, record) {
+  const entries = Object.entries(record?.byDoctor || {});
+  if (entries.length) return entries.map(([doctor, fu]) => ({ id, doctor, fu }));
+  return [{ id, doctor: record?.doctor || '', fu: record }];
+}
+
 // 이름이 없는 FU 기록에 명단의 환자 이름을 채웁니다 (예전에 저장된 기록용)
 function fillFollowupNames(prev, list) {
   let changed = false;
@@ -856,7 +876,11 @@ function textScale(v) {
   return Math.max(0.75, Math.min(1, window.innerWidth / 1100));
 }
 function applyTextSize(v) {
-  document.documentElement.style.fontSize = `${Math.round(textScale(v) * 1000) / 10}%`;
+  const scale = textScale(v);
+  document.documentElement.style.fontSize = `${Math.round(scale * 1000) / 10}%`;
+  // 80% 이하에서는 설명 문구(t-hint)를 숨깁니다
+  if (scale <= 0.8) document.documentElement.dataset.compact = '1';
+  else delete document.documentElement.dataset.compact;
 }
 function useTextSize() {
   const [value, setValue] = useState(() => {
@@ -919,7 +943,7 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
         </div>
       </div>
       <div className="max-w-3xl mx-auto px-5 py-5">{children}</div>
-      {lastSync && <div className="text-center text-xs text-slate-400 pb-6">마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')}</div>}
+      {lastSync && <div className="t-hint text-center text-xs text-slate-400 pb-6">마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')}</div>}
     </div>
   );
 }
@@ -1009,7 +1033,7 @@ function RecentRow({ p, time, children }) {
   return (
     <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 flex-wrap">
       <div className="text-sm text-slate-700">
-        {p.name} <span className="text-xs text-slate-400">{p.id}</span>
+        <span className="t-name text-slate-900">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
         {time && <span className="text-xs text-slate-400 ml-2">{time} 완료</span>}
       </div>
       <div className="flex flex-wrap gap-2 justify-end">{children}</div>
@@ -1381,10 +1405,10 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
   return (
     <div className={`flex items-start gap-3 bg-white border ${c.border} rounded-xl p-4`}>
       {handle && <div className="pt-2 shrink-0">{handle}</div>}
-      <div className={`w-10 h-10 rounded-full ${c.solid} text-white flex items-center justify-center font-semibold shrink-0`}>{index + 1}</div>
+      <div className={`t-num w-10 h-10 rounded-full ${c.solid} text-white flex items-center justify-center font-semibold shrink-0`}>{index + 1}</div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium text-slate-900">{p.name}</span>
+          <span className="t-name text-slate-900">{p.name}</span>
           <span className="text-xs text-slate-400">{p.id}</span>
           {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
           {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
@@ -1856,7 +1880,7 @@ function RoleSelect({ settings, onSelect }) {
               <button key={key} type="button" onClick={() => onSelect(key)} className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 ${c.border} ${c.bg} hover:shadow-md transition-shadow`}>
                 <Icon size={32} className={c.text} />
                 <div className="text-center">
-                  <div className="font-medium text-slate-900">{label}</div>
+                  <div className="t-tile font-medium text-slate-900">{label}</div>
                   <div className="text-xs text-slate-500 mt-0.5">{sub}</div>
                 </div>
               </button>
@@ -2251,7 +2275,7 @@ function SectionTitle({ children, hint }) {
   return (
     <div className="mb-3">
       <div className="text-sm font-medium text-slate-600">{children}</div>
-      {hint && <div className="text-xs text-slate-400 mt-0.5">{hint}</div>}
+      {hint && <div className="t-hint text-xs text-slate-400 mt-0.5">{hint}</div>}
     </div>
   );
 }
@@ -2261,7 +2285,7 @@ function SimpleCard({ p, tone = 'slate', children }) {
   return (
     <div className={`bg-white border ${c.border} rounded-xl p-4 mb-3`}>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-medium text-slate-900">{p.name}</span>
+        <span className="t-name text-slate-900">{p.name}</span>
         <span className="text-xs text-slate-400">{p.id}</span>
         {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
@@ -2539,7 +2563,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
               <SectionTitle>진료 보류 (추가 검사 중) · {onHold.length}명</SectionTitle>
               {onHold.map(p => (
                 <div key={patientKey(p)} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-3 mb-2">
-                  <div className="text-sm text-slate-700">{p.name} <span className="text-xs text-slate-400">{p.id}</span></div>
+                  <div className="text-sm text-slate-700"><span className="t-name text-slate-900">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span></div>
                   <div className="text-xs text-slate-500">{getStage(p, settings).label}</div>
                 </div>
               ))}
@@ -2798,7 +2822,7 @@ function UploadResult({ result, patients, onRemove, onShowList }) {
           <p className="text-xs text-orange-800 mb-2">같은 날짜·교수 명단에 있었지만 이번 파일에는 없습니다. 예약이 취소된 환자인지 확인한 뒤 삭제하세요. (삭제 버튼은 두 번 눌러야 삭제됩니다)</p>
           {stillMissing.map(p => (
             <div key={patientKey(p)} className="flex items-center justify-between gap-2 py-1 border-t border-orange-200 first:border-t-0">
-              <span>{p.name} <span className="text-xs text-slate-500">{p.id} · 예약 {p.reservation || '-'}{p.checkin ? ` · 접수 ${p.checkin}` : ''}</span></span>
+              <span><span className="t-name text-slate-900">{p.name}</span> <span className="text-xs text-slate-500">{p.id} · 예약 {p.reservation || '-'}{p.checkin ? ` · 접수 ${p.checkin}` : ''}</span></span>
               <ConfirmButton label="삭제" onConfirm={() => onRemove(patientKey(p))} />
             </div>
           ))}
@@ -3075,7 +3099,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       {tab === 'upload' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">엑셀 명단 올리기</div>
-          <p className="text-sm text-slate-500 mb-3">환자번호, 이름, 예약시간 세 칸만 있으면 됩니다. 초진 칸을 추가해 O를 적으면 초진으로 체크돼요(없어도 됩니다). 위에서 고른 날짜와 교수가 파일 속 모든 환자에게 적용되고, 저장된 FU 검사는 환자번호로 자동으로 붙습니다. 같은 명단을 다시 올려도 이미 있는 환자는 지정해둔 검사·진행 상황이 그대로 유지되고, 예약시간만 바뀐 경우 새 시간으로 고쳐집니다.</p>
+          <p className="t-hint text-sm text-slate-500 mb-3">환자번호, 이름, 예약시간 세 칸만 있으면 됩니다. 초진 칸을 추가해 O를 적으면 초진으로 체크돼요(없어도 됩니다). 위에서 고른 날짜와 교수가 파일 속 모든 환자에게 적용되고, 저장된 FU 검사는 환자번호로 자동으로 붙습니다. 같은 명단을 다시 올려도 이미 있는 환자는 지정해둔 검사·진행 상황이 그대로 유지되고, 예약시간만 바뀐 경우 새 시간으로 고쳐집니다.</p>
           <div className="flex gap-3 flex-wrap items-center">
             <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium cursor-pointer">
               <Upload size={16} /> 엑셀 올리기
@@ -3166,7 +3190,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
             <div key={patientKey(p)} className={`bg-white rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap ${flag ? 'border-2 border-orange-400' : 'border border-slate-200'}`}>
               <div>
                 <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
-                  {p.name} <span className="text-xs text-slate-400">{p.id}</span>
+                  <span className="t-name">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
                   {flag && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
                   {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
@@ -3201,33 +3225,35 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
 
       {tab === 'fu' && (
         <div>
-          <p className="text-sm text-slate-500 mb-3">진료실에서 지정하지 못한 환자는 여기서 환자번호나 이름으로 찾아 다음 방문 검사를 지정할 수 있어요.</p>
+          <p className="t-hint text-sm text-slate-500 mb-3">진료실에서 지정하지 못한 환자는 여기서 환자번호나 이름으로 찾아 다음 방문 검사를 지정할 수 있어요.</p>
           <div className="flex items-center gap-2 mb-4 bg-white border border-slate-300 rounded-lg px-3 py-2">
             <Search size={16} className="text-slate-400" />
             <input placeholder="환자번호 또는 이름으로 찾기" value={fuSearch} onChange={e => setFuSearch(e.target.value)} className="flex-1 outline-none text-sm" />
           </div>
           {fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
-          {fuIds.map(id => {
-            const fu = fuMap[id];
+          {fuIds.flatMap(id => followupRows(id, fuMap[id])).map(({ id, doctor: fuDoctor, fu }) => {
             const dilText = [fu.dilate === 'yes' ? `산동 함${dilateEyeOf(fu.dilateEye) ? ` (${DILATE_EYE_LABEL[fu.dilateEye]})` : ''}` : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
             const names = [allTests.filter(t => fu[t.id]).map(t => testLabelWithOptions(t, fu.detail?.[t.id])).join(', '), dilText].filter(Boolean).join(' / ');
             const fuNotes = allTests
               .filter(t => fu[t.id] && String(fu.detail?.[t.id]?.note ?? '').trim())
               .map(t => ({ id: t.id, short: t.short, note: String(fu.detail[t.id].note).trim() }));
             return (
-              <div key={id} className="bg-white border border-slate-200 rounded-xl p-4 mb-2 flex items-center justify-between gap-3">
+              <div key={`${id}-${fuDoctor}`} className="bg-white border border-slate-200 rounded-xl p-4 mb-2 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
-                    {nameOf(id) || <span className="text-slate-400 font-normal">이름 정보 없음</span>}
+                    {nameOf(id) ? <span className="t-name">{nameOf(id)}</span> : <span className="text-slate-400 font-normal">이름 정보 없음</span>}
                     <span className="text-xs text-slate-400 font-normal">{id}</span>
-                    {fu.doctor && <span className="text-xs text-slate-500 font-normal">· 다음 내원 {fu.doctor}</span>}
+                    {fuDoctor && <span className="text-xs text-slate-500 font-normal">· 다음 내원 {fuDoctor}</span>}
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5">{names || '지정된 검사 없음'}</div>
                   {fuNotes.map(n => (
                     <div key={n.id} className="text-xs text-yellow-800 mt-0.5"><span className="font-medium">{n.short}</span> {n.note}</div>
                   ))}
                 </div>
-                <button type="button" onClick={() => setFuEdit({ id, ...fu })} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600">수정</button>
+                <div className="flex gap-2 shrink-0">
+                  <button type="button" onClick={() => setFuEdit({ ...fu, id, doctor: fuDoctor, name: nameOf(id) })} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600">수정</button>
+                  <ConfirmButton label="삭제" onConfirm={() => { mutateFu(prev => deleteFollowup(prev, id, fuDoctor)); setMessage(`${nameOf(id) || id}${fuDoctor ? ` ${fuDoctor}` : ''} 다음 내원 지정을 삭제했습니다.`); }} />
+                </div>
               </div>
             );
           })}
@@ -3968,7 +3994,7 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
     }}>
       <div className="sticky top-0 z-10 border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-5xl px-5 py-4 flex items-center justify-between gap-3">
-          <div><h2 id="directory-title" className="text-xl font-semibold text-slate-900">전체 환자 명단</h2><p className="text-sm text-slate-500">현재 등록된 대기 명단을 조회합니다. 여러 검사실에 대기 중이면 모두 표시됩니다.</p></div>
+          <div><h2 id="directory-title" className="text-xl font-semibold text-slate-900">전체 환자 명단</h2><p className="t-hint text-sm text-slate-500">현재 등록된 대기 명단을 조회합니다. 여러 검사실에 대기 중이면 모두 표시됩니다.</p></div>
           <button ref={closeRef} type="button" onClick={onClose} className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm">닫기</button>
         </div>
       </div>
@@ -3983,7 +4009,7 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
         {archived.isArchived && <div className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">{archived.loading ? '지난 명단을 불러오는 중입니다…' : archived.error ? '지난 명단을 불러오지 못했습니다. 서버 연결을 확인해주세요.' : '지난 날짜의 보관된 명단입니다.'}</div>}
         {!list.length ? <EmptyState text={archived.loading ? '불러오는 중…' : '조건에 맞는 환자가 없습니다. 검색어나 날짜를 확인해주세요.'} /> : list.map(p => (
           <div key={patientKey(p)} className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="flex flex-wrap items-center gap-2"><span className="text-lg font-semibold text-slate-900">{p.name}</span><span className="text-sm text-slate-500">{p.id} · {p.doctor || '담당 교수 미지정'}</span>{p.firstVisit && <span className="text-xs text-sky-700">초진</span>}</div>
+            <div className="flex flex-wrap items-center gap-2"><span className="t-name text-slate-900">{p.name}</span><span className="text-sm text-slate-500">{p.id} · {p.doctor || '담당 교수 미지정'}</span>{p.firstVisit && <span className="text-xs text-sky-700">초진</span>}</div>
             <div className="mt-1 text-xs text-slate-500">{p.date} · 예약 {p.reservation || '-'} · 접수 {p.checkin || '미접수'}</div>
             <div className="mt-3 flex flex-wrap gap-2">{patientQueueLabels(p, settings).map(label => <span key={label} className={`rounded-lg border px-3 py-2 text-sm ${p.consultDone ? 'border-slate-200 bg-slate-50 text-slate-600' : activeVf(p) ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{label}</span>)}</div>
             {pendingProcedures(p).length > 0 && <div className="mt-2 text-xs text-slate-600">남은 처치: {pendingProcedures(p).map(x => `${x.name} (${PERFORMER_LABEL[x.performer] || x.performer})`).join(', ')}</div>}

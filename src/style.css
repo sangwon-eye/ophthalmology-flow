@@ -1,3 +1,22 @@
 @import "tailwindcss";
 body { margin: 0; font-family: system-ui, sans-serif; }
 button, input, select, textarea { font: inherit; }
+
+/* ------------------------------------------------------------------ */
+/* 글씨 크기 우선순위                                                   */
+/* 글씨 설정(70%~)이나 '자동'으로 화면을 줄여도, 중요한 글자는 아래 크기   */
+/* 밑으로 줄지 않습니다. 여백·칩 크기는 계속 줄어서 명단이 더 많이 보입니다. */
+/* ------------------------------------------------------------------ */
+/* ② 일반 정보: 환자번호·시간·검사 칩·상태 */
+body { font-size: max(1rem, 13px); }
+.text-sm { font-size: max(0.875rem, 12px); }
+.text-xs { font-size: max(0.75rem, 11px); }
+/* ① 꼭 보여야 하는 것: 환자 이름, 대기 번호, 주요 버튼 */
+.t-name { font-size: max(1.0625rem, 15px); font-weight: 600; }
+.t-num { font-size: max(1rem, 14px); }
+button.text-sm { font-size: max(0.875rem, 13px); }
+button.text-sm.font-medium { font-size: max(0.875rem, 14px); }
+/* 메인 화면 버튼 제목 */
+.t-tile { font-size: max(1.0625rem, 15px); }
+/* ③ 설명: 80% 이하(자동 포함)에서는 숨겨서 자리를 아낍니다 */
+html[data-compact] .t-hint { display: none; }
