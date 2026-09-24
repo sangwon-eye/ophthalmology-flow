@@ -51,7 +51,9 @@ const DEFAULT_SETTINGS = {
   ],
   dilationWaitMin: 15,
   lateGraceMin: 0,
-
+  // 같은 날 2차 진료(다른 교수님)로 넘어갈 때 처치실에서 추가 검사를 확인할지
+  linkCheckAdded: true,    // 진료 중에 추가된 2차 진료
+  linkCheckPlanned: false, // 미리 명단에 예정된 2차 진료
 };
 const PERFORMER_LABEL = { prof: '교수님', resident: '전공의' };
 
@@ -117,7 +119,8 @@ function newId(prefix) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-function patientKey(p) { return `${p.id}::${p.date}`; }
+// 같은 날 두 번째 교수님 진료(2차 진료)는 visit 2, 3… 으로 따로 기록합니다.
+function patientKey(p) { return `${p.id}::${p.date}${p.visit > 1 ? `::${p.visit}` : ''}`; }
 function byQueue(a, b) { return a.queueKey - b.queueKey; }
 
 function roomColor(settings, roomId) {
@@ -145,7 +148,7 @@ function visionComplete(p) {
   return !!p.done?.[VISION_KEY] && (!p.assigned?.ark || !!p.done?.ark);
 }
 function pastVision(p) {
-  return !!p.checkin && visionComplete(p) && (!p.firstVisit || !!p.triageAssigned || !!p.triageDone);
+  return !!p.checkin && visionComplete(p) && (!(p.firstVisit || p.addOnCheck) || !!p.triageAssigned || !!p.triageDone);
 }
 
 function roomPending(p, settings, roomId) {
@@ -169,8 +172,9 @@ function allDone(p, settings) {
 
 /* 진료 흐름 단계 */
 // 초진: 시력/안압 후 처치실에서 검사 지정 대기
+// 2차 진료: 1차 진료 설명 완료 후 처치실에서 추가 검사 확인 대기 (설정에서 켠 경우)
 function needsTriageAssign(p) {
-  return !p.consultDone && !!p.checkin && visionComplete(p) && !!p.firstVisit && !p.triageAssigned && !p.triageDone;
+  return !p.consultDone && !!p.checkin && visionComplete(p) && !!(p.firstVisit || p.addOnCheck) && !p.triageAssigned && !p.triageDone;
 }
 // 초진: 검사를 모두 마치고(또는 검사 없음) 처치실 처치 대기에서 예진 대기
 function needsTriageExam(p, settings) {
@@ -200,9 +204,10 @@ function consultWaiting(p, settings) {
 
 function getStage(p, settings) {
   if (p.consultDone) return { label: '완료', area: 'done' };
+  if (p.linkWaiting) return { label: `${p.primaryDoctor || '1차'} 진료 후 대기 (2차 진료)`, area: 'linked' };
   if (!p.checkin) return { label: '접수 대기', area: 'reception' };
   if (!visionComplete(p)) return { label: '시력/안압 검사 대기', area: 'vision' };
-  if (needsTriageAssign(p)) return { label: '처치실 대기 (초진 검사 지정)', area: 'triage' };
+  if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
   const rooms = pendingRooms(p, settings);
   if (rooms.length) return { label: `${rooms.map(r => r.name).join(', ')} 검사 대기`, area: 'exam' };
@@ -344,26 +349,146 @@ function buildPatient(raw, fuMap, settings) {
   };
 }
 
+/* 같은 날 두 교수님 진료 (2차 진료) */
+// 교수님마다 기록을 따로 두고, 뒤 진료(linkWaiting)는 앞 진료(primaryKey)의 설명 완료 뒤에 시작합니다.
+// - 미리 예정(planned): 1차 진료 전에 두 교수님 검사를 한 번에 합니다. 예약시간이 빠른 교수님이 1차.
+// - 진료 중 추가(added): 1차 진료 설명 완료 후 (설정에 따라) 처치실에서 추가 검사를 확인합니다.
+function visitGroup(list, id, date) {
+  return list.filter(x => x.id === id && x.date === date);
+}
+function linkTail(group) {
+  const pointed = new Set(group.map(x => x.primaryKey).filter(Boolean));
+  return group.find(x => !pointed.has(patientKey(x))) || group[group.length - 1];
+}
+// 뒤 진료의 검사·산동을 앞 진료에 합칩니다 (검사를 한 번에 하기 위해)
+function unionPlan(first, other, prefs) {
+  const assigned = { ...first.assigned };
+  const detail = { ...first.detail };
+  Object.entries(other.assigned || {}).forEach(([k, v]) => {
+    if (v && !assigned[k]) { assigned[k] = true; if (other.detail?.[k]) detail[k] = other.detail[k]; }
+  });
+  const next = { ...first, assigned, detail };
+  if (needsDilation(other, prefs)) {
+    if (!needsDilation(first, prefs)) return { ...next, dilateOverride: true, dilateEye: dilateEyeOf(other.dilateEye) };
+    if (dilateEyeOf(first.dilateEye) !== dilateEyeOf(other.dilateEye)) return { ...next, dilateEye: undefined };
+  }
+  return next;
+}
+function addLinkedVisit(list, np, prefs, settings) {
+  const group = visitGroup(list, np.id, np.date);
+  const visit = Math.max(...group.map(x => x.visit || 1)) + 1;
+  const tail = linkTail(group);
+  const linkType = group.some(x => x.checkin) ? 'added' : 'planned';
+  const rec = { ...np, visit, linkType };
+  // 둘 다 접수 전이고 새 진료의 예약시간이 더 빠르면 새 진료가 1차
+  if (linkType === 'planned' && group.length === 1 && np.reservation && tail.reservation && timeToMin(np.reservation) < timeToMin(tail.reservation)) {
+    const second = { ...tail, linkWaiting: true, primaryKey: patientKey(rec), primaryDoctor: rec.doctor, linkType };
+    return { next: [...list.filter(x => x !== tail), second, unionPlan(rec, second, prefs)], record: rec, first: true };
+  }
+  const waiting = { ...rec, linkWaiting: true, primaryKey: patientKey(tail), primaryDoctor: tail.doctor };
+  const root = group.find(x => !x.linkWaiting && !x.consultDone);
+  let next = linkType === 'planned' && root ? list.map(x => (x === root ? unionPlan(x, waiting, prefs) : x)) : list;
+  next = [...next, waiting];
+  if (tail.consultDone) next = activateLinked(next, patientKey(tail), settings);
+  return { next, record: waiting, first: false };
+}
+// 앞 진료 설명 완료 → 뒤 진료 시작: 접수·시력/안압·오늘 한 검사·점안 기록을 이어받습니다.
+function activateLinked(list, pk, settings, at = Date.now()) {
+  const primary = list.find(x => patientKey(x) === pk);
+  if (!primary) return list;
+  return list.map(x => {
+    if (!x.linkWaiting || x.primaryKey !== pk) return x;
+    const done = { ...x.done }, doneAt = { ...x.doneAt };
+    Object.entries(primary.done || {}).forEach(([k, v]) => { if (v) { done[k] = true; doneAt[k] = primary.doneAt?.[k] ?? null; } });
+    const check = x.linkType === 'added' ? settings?.linkCheckAdded !== false : !!settings?.linkCheckPlanned;
+    return {
+      ...x, linkWaiting: false, linkActivatedAt: at,
+      checkin: primary.checkin || nowHHMM(), late: false,
+      queueKey: timeToMin(x.reservation || nowHHMM()),
+      done, doneAt,
+      measure: x.measure || primary.measure,
+      drops: (x.drops || []).some(Boolean) ? x.drops : [...(primary.drops || [])],
+      addOnCheck: check, triageAssigned: false, triageDone: false,
+    };
+  });
+}
+// 설명 완료를 되돌리면, 아직 아무 진행이 없는 뒤 진료는 다시 대기로
+function deactivateLinked(list, pk) {
+  return list.map(x => (x.primaryKey === pk && !x.linkWaiting && x.linkActivatedAt && !x.triageAssigned && !x.seen && !x.calledRoom && !x.consultDone
+    ? { ...x, linkWaiting: true, linkActivatedAt: null, checkin: '', addOnCheck: false }
+    : x));
+}
+// 기록을 지울 때, 그 기록을 기다리던 뒤 진료는 한 단계 앞으로
+function removeVisit(list, pk) {
+  const gone = list.find(x => patientKey(x) === pk);
+  if (!gone) return list;
+  return list.filter(x => x !== gone).map(x => {
+    if (x.primaryKey !== pk) return x;
+    if (gone.primaryKey) return { ...x, primaryKey: gone.primaryKey, primaryDoctor: gone.primaryDoctor };
+    const { primaryKey, primaryDoctor, ...rest } = x;
+    return { ...rest, linkWaiting: false };
+  });
+}
+// 미리 예정된 두 진료의 순서 바꾸기 (둘 다 접수 전일 때)
+function swapLinkOrder(list, waitingKey, prefs) {
+  const w = list.find(x => patientKey(x) === waitingKey);
+  const first = w && list.find(x => patientKey(x) === w.primaryKey);
+  if (!w || !first || first.checkin || first.primaryKey) return list;
+  const { primaryKey, primaryDoctor, ...rest } = w;
+  const newFirst = unionPlan({ ...rest, linkWaiting: false }, first, prefs);
+  const newSecond = { ...first, linkWaiting: true, primaryKey: waitingKey, primaryDoctor: w.doctor, linkType: w.linkType };
+  return list.map(x => {
+    if (x === w) return newFirst;
+    if (x === first) return newSecond;
+    if (x.primaryKey === waitingKey) return { ...x, primaryKey: patientKey(first), primaryDoctor: first.doctor };
+    return x;
+  });
+}
+// 이름·환자번호는 같은 날 같은 환자의 모든 진료에, 예약시간은 이 진료에만 적용합니다.
+function editPatientInfo(list, pk, { id, name, reservation }) {
+  const rec = list.find(x => patientKey(x) === pk);
+  if (!rec) return list;
+  const newId = String(id || '').trim() || rec.id;
+  if (newId !== rec.id && list.some(x => x.id === newId && x.date === rec.date)) return list;
+  const keyMap = new Map();
+  const next = list.map(x => {
+    if (x.id !== rec.id || x.date !== rec.date) return x;
+    let y = { ...x, id: newId, name: String(name || '').trim() || x.name };
+    if (x === rec && reservation !== undefined && reservation !== x.reservation) {
+      y = x.checkin ? { ...y, reservation } : { ...y, reservation, queueKey: timeToMin(reservation) };
+    }
+    keyMap.set(patientKey(x), patientKey(y));
+    return y;
+  });
+  return next.map(x => (x.primaryKey && keyMap.has(x.primaryKey) ? { ...x, primaryKey: keyMap.get(x.primaryKey) } : x));
+}
+
 // 명단을 다시 올려도 이미 있는 환자의 진행 상황·검사 지정은 그대로 두고, 예약시간만 새 값으로 바꿉니다.
 // 이미 접수한 환자는 대기 순서(직접 끌어서 바꾼 순서 포함)를 건드리지 않고 예약시간 글자만 바꿉니다.
-function mergePatientList(prev, news) {
-  const stats = { added: [], timeChanged: [], unchanged: [], otherDoctor: [] };
-  const map = new Map(prev.map(p => [patientKey(p), p]));
+// 같은 날 다른 교수님 명단에 이미 있으면 2차 진료로 연결합니다.
+function mergePatientList(prev, news, prefs, settings) {
+  const stats = { added: [], timeChanged: [], unchanged: [], linked: [] };
+  let list = prev;
   news.forEach(np => {
-    const key = patientKey(np);
-    const old = map.get(key);
-    if (!old) { map.set(key, np); stats.added.push(np); return; }
-    if (old.doctor !== np.doctor) { stats.otherDoctor.push(old); return; }
+    const group = visitGroup(list, np.id, np.date);
+    if (!group.length) { list = [...list, np]; stats.added.push(np); return; }
+    const old = group.find(x => x.doctor === np.doctor);
+    if (!old) {
+      const r = addLinkedVisit(list, np, prefs, settings);
+      list = r.next;
+      stats.linked.push({ ...r.record, others: group.map(x => x.doctor), first: r.first });
+      return;
+    }
     if (np.reservation && np.reservation !== old.reservation) {
-      map.set(key, old.checkin
+      list = list.map(x => (x !== old ? x : old.checkin
         ? { ...old, reservation: np.reservation }
-        : { ...old, reservation: np.reservation, queueKey: timeToMin(np.reservation) });
+        : { ...old, reservation: np.reservation, queueKey: timeToMin(np.reservation) }));
       stats.timeChanged.push({ ...old, newReservation: np.reservation });
       return;
     }
     stats.unchanged.push(old);
   });
-  return { next: Array.from(map.values()), stats };
+  return { next: list, stats };
 }
 // 이전 정보(FU)로 검사·산동·CR이 붙은 환자인지
 function hasFollowupApplied(p) {
@@ -371,7 +496,7 @@ function hasFollowupApplied(p) {
 }
 // 재진인데 오늘 할 검사(CR 포함)가 하나도 없는 환자 → 프로그램 도입 전 환자일 가능성이 높아 확인 필요
 function needsTestCheck(p, prefs) {
-  if (p.firstVisit || p.consultDone) return false;
+  if (p.firstVisit || p.consultDone || p.linkType === 'added') return false;
   if (Object.entries(p.assigned || {}).some(([k, v]) => v && k !== VISION_KEY)) return false;
   return !crActive(p, prefs);
 }
@@ -1205,6 +1330,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
           <span className="text-xs text-slate-400">{p.id}</span>
           {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
           {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
+          {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
           {p.late && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">지각</span>}
           {p.consultHold && !p.consultDone && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 flex items-center gap-1">
@@ -1490,8 +1616,9 @@ function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-function TestCheckModal({ title, subtitle, tests, settings, initial, initialDetail, dilation, triageChoice, followup, confirmLabel, onConfirm, onCancel }) {
+function TestCheckModal({ title, subtitle, tests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, confirmLabel, onConfirm, onCancel }) {
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
+  const [linkDoctor, setLinkDoctor] = useState('');
   const [showOthers, setShowOthers] = useState(false);
   const [triageRequired, setTriageRequired] = useState(triageChoice !== false);
   const [dil, setDil] = useState(() => ({ mode: ['yes', 'no'].includes(dilation?.initial?.mode) ? dilation.initial.mode : followup?.prefs?.[followup.doctor]?.dilate ? 'yes' : 'no', cr: !!dilation?.initial?.cr, eye: dilateEyeOf(dilation?.initial?.eye) || 'OU' }));
@@ -1563,8 +1690,19 @@ function TestCheckModal({ title, subtitle, tests, settings, initial, initialDeta
           })}
         </div>
         {followup && <div className="mb-5 space-y-2">
-          <button type="button" onClick={() => setShowOthers(v => !v)} className="w-full rounded-lg border border-slate-300 py-2 text-sm">{showOthers ? '나머지 검사 접기' : `나머지 검사 보기 (${others.length}개 · 선택 ${others.filter(t => sel[t.id]).length}개)`}</button>
+          <button type="button" onClick={() => setShowOthers(v => !v)} className="w-full rounded-lg border border-slate-300 py-2 text-sm">{showOthers ? '나머지 검사 접기' : `나머지 검사 보기 (${others.length}개 · 선택 ${others.filter(t => sel[t.id]).length}개)${linkDoctor ? ` · 오늘 ${linkDoctor} 진료 추가` : ''}`}</button>
           {showOthers && <>
+            {Array.isArray(linkDoctors) && (
+              <label className="block text-sm text-fuchsia-800 rounded-lg border border-fuchsia-200 bg-fuchsia-50 p-3">오늘 다른 교수 진료 추가
+                <select value={linkDoctor} onChange={e => setLinkDoctor(e.target.value)} className={INPUT}>
+                  <option value="">추가 안 함</option>
+                  {linkDoctors.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <span className="text-xs">{linkDoctor
+                  ? `설명 완료 후 ${settings.linkCheckAdded !== false ? '처치실에서 추가 검사를 확인하고 ' : ''}${linkDoctor} 진료 대기로 넘어갑니다.`
+                  : '같은 날 다른 교수님 진료도 봐야 하면 선택하세요.'}</span>
+              </label>
+            )}
             <label className="block text-sm text-slate-600">다음 내원 담당 교수
               <select value={followupDoctor} onChange={e => { setFollowupDoctor(e.target.value); setDil(d => ({ ...d, cr: !!followup.prefs?.[e.target.value]?.cr && d.cr })); }} className={INPUT}>
                 {[...new Set([followupDoctor, ...(followup.doctors || [])])].filter(Boolean).map(name => <option key={name} value={name}>{name}</option>)}
@@ -1618,7 +1756,7 @@ function TestCheckModal({ title, subtitle, tests, settings, initial, initialDeta
         )}
         <div className="flex gap-3">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
-          <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor }, triageRequired)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>
+          <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor }, triageRequired, linkDoctor)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -2067,13 +2205,14 @@ function SimpleCard({ p, tone = 'slate', children }) {
         <span className="text-xs text-slate-400">{p.id}</span>
         {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
+        {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
       </div>
       <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
     </div>
   );
 }
 
-function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutatePatients, mutateFu, onBack, lastSync }) {
+function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, settings, history, mutatePatients, mutateFu, onBack, lastSync }) {
   const [selectedDoctor, setSelectedDoctor] = useState('');
   const [explainFor, setExplainFor] = useState(null);
   const [extraModalFor, setExtraModalFor] = useState(null);
@@ -2138,7 +2277,7 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
     })));
   };
 
-  const completeExplain = (sel, detail, dil) => {
+  const completeExplain = async (sel, detail, dil, _triage, linkDoctor) => {
     const p = explainFor;
     const pk = patientKey(p);
     const at = Date.now();
@@ -2151,8 +2290,22 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
         cr: dil?.cr || undefined,
         updatedAt: at,
     }));
-    patch(pk, () => ({ consultDone: true, consultDoneAt: at }));
-    showToast(`${p.name} 설명 완료`, () => patch(pk, () => ({ consultDone: false, consultDoneAt: null })));
+    // 오늘 다른 교수 진료 추가: 그 교수님의 이전 정보(FU)를 붙여 2차 진료로 연결
+    let extra = null;
+    if (linkDoctor) {
+      let fu = {};
+      try { fu = await loadFu(); } catch { /* 이전 정보 없이 추가 */ }
+      extra = buildPatient({ id: p.id, name: p.name, date: p.date, doctor: linkDoctor, reservation: '', firstVisit: false }, fu, settings);
+    }
+    const undoDone = () => mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null } : x)), pk));
+    mutatePatients(prev => {
+      let next = prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at } : x));
+      if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
+      return activateLinked(next, pk, settings, at);
+    });
+    const nextVisit = linkDoctor || allPatients.find(x => x.primaryKey === pk && x.linkWaiting)?.doctor;
+    const via = settings.linkCheckAdded !== false && linkDoctor ? '처치실 추가 검사 확인 후 ' : '';
+    showToast(`${p.name} 설명 완료${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
   };
 
   const confirmExtra = (sel, detail) => {
@@ -2184,6 +2337,13 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
     });
   };
 
+  // 다른 교수님 진료 추가 (2차 진료): 이 진료의 설명 완료 후 시작
+  const nextVisitOf = (p) => allPatients.filter(x => x.primaryKey === patientKey(p));
+  const nextVisitNote = (p) => {
+    const next = nextVisitOf(p);
+    return next.length ? <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">설명 완료 후 → {next.map(x => x.doctor).join(', ')} 2차 진료</span> : null;
+  };
+
   const inRoomTests = inRoom ? allTests.filter(t => inRoom.assigned?.[t.id]) : [];
   const inRoomNotes = inRoom ? notesOf(inRoom, allTests) : [];
   const dilationInitial = (p) => ({
@@ -2211,6 +2371,7 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
               {explainList.map(p => (
                 <SimpleCard key={patientKey(p)} p={p} tone="emerald">
                   <ProcedureList p={p} />
+                  {nextVisitNote(p)}
                   <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
                     설명 완료
                   </button>
@@ -2240,6 +2401,8 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
               <div className="text-2xl font-semibold text-slate-900 mb-1 flex items-center gap-2 flex-wrap">
                 {inRoom.name}
                 {inRoom.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-normal">초진</span>}
+                {inRoom.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-normal">2차 진료 · {inRoom.primaryDoctor} 후</span>}
+                {nextVisitNote(inRoom)}
               </div>
               <div className="text-sm text-slate-400 mb-4">{inRoom.id} · 예약 {inRoom.reservation}</div>
               <div className="bg-slate-50 rounded-xl p-3 mb-3">
@@ -2325,7 +2488,7 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
           <RecentDone count={recent.length}>
             {recent.map(p => (
               <RecentRow key={patientKey(p)} p={p} time={fmtClock(p.consultDoneAt)}>
-                <UndoButton label="설명 완료 취소" onClick={() => patch(patientKey(p), () => ({ consultDone: false, consultDoneAt: null }))} />
+                <UndoButton label="설명 완료 취소" onClick={() => mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === patientKey(p) ? { ...x, consultDone: false, consultDoneAt: null } : x)), patientKey(p)))} />
               </RecentRow>
             ))}
           </RecentDone>
@@ -2337,6 +2500,7 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
           key={`explain-${patientKey(explainFor)}`}
           title={`${explainFor.name}님 다음 내원 검사`}
           followup={{ doctor: explainFor.doctor, doctors, prefs: doctorPrefs }}
+          linkDoctors={doctors.filter(d => !allPatients.some(x => x.id === explainFor.id && x.date === explainFor.date && x.doctor === d))}
           subtitle="다음 내원 때 필요한 검사를 체크하고 설명 완료를 누르세요"
           tests={allTests}
           settings={settings}
@@ -2416,9 +2580,11 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
         else if (detail?.[t.id]) nd[t.id] = detail[t.id];
         else delete nd[t.id];
       });
-      return { assigned, done, detail: nd, triageAssigned: true, triageAssignedAt: at, triageRequired };
+      return { assigned, done, detail: nd, triageAssigned: true, triageAssignedAt: at, triageRequired: x.firstVisit ? triageRequired : false };
     });
-    showToast(`${p.name} 검사 지정 완료, ${chosen.length ? (triageRequired ? '검사 후 처치실 예진으로' : '검사 후 진료 대기로') : (triageRequired ? '처치 대기에서 예진' : '진료 대기로')}`, () => patchPatient(mutatePatients, pk, x => (!activeVf(x) && !x.triageDone ? { triageAssigned: false, triageAssignedAt: null, triageRequired: p.triageRequired } : {})));
+    const pending = chosen.filter(t => !p.done?.[t.id]);
+    const withTriage = p.firstVisit && triageRequired;
+    showToast(`${p.name} ${p.firstVisit ? '검사 지정' : '추가 검사 확인'} 완료, ${pending.length ? (withTriage ? '검사 후 처치실 예진으로' : '검사 후 진료 대기로') : (withTriage ? '처치 대기에서 예진' : '진료 대기로')}`, () => patchPatient(mutatePatients, pk, x => (!activeVf(x) && !x.triageDone ? { triageAssigned: false, triageAssignedAt: null, triageRequired: p.triageRequired } : {})));
   };
 
   const finishTriage = (p) => {
@@ -2452,22 +2618,26 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   return (
     <ScreenShell title="처치실" color="indigo" onBack={onBack} lastSync={lastSync} count={triage.length + procs.length}>
       <div className="mb-8">
-        <SectionTitle hint="오늘 할 검사와 예진 여부를 지정하세요. 예진을 하지 않으면 검사 완료 후 진료 대기로 이동합니다.">
-          초진 검사 지정 대기 · {triage.length}명
+        <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
+          검사 지정 대기 (초진 · 2차 진료) · {triage.length}명
         </SectionTitle>
         {triage.length === 0 ? (
-          <div className="text-sm text-slate-400 py-3">초진 대기 환자가 없습니다</div>
-        ) : triage.map(p => (
+          <div className="text-sm text-slate-400 py-3">검사 지정 대기 환자가 없습니다</div>
+        ) : triage.map(p => {
+          const doneTests = allTests.filter(t => p.done?.[t.id]);
+          return (
           <SimpleCard key={patientKey(p)} p={p} tone="sky">
             <div className="w-full">
               <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
             </div>
+            {p.addOnCheck && doneTests.length > 0 && <div className="w-full text-xs text-slate-500">오늘 이미 한 검사: {doneTests.map(t => t.short || t.name).join(', ')}</div>}
             <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
-              검사 지정
+              {p.firstVisit ? '검사 지정' : '추가 검사 확인'}
             </button>
           </SimpleCard>
-        ))}
+          );
+        })}
       </div>
 
       <div>
@@ -2501,20 +2671,45 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
       {triageFor && (
         <TestCheckModal
           key={`triage-${patientKey(triageFor)}`}
-          title={`${triageFor.name}님 검사 지정`}
-          subtitle="오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다."
+          title={triageFor.firstVisit ? `${triageFor.name}님 검사 지정` : `${triageFor.name}님 2차 진료 추가 검사 (${triageFor.doctor})`}
+          subtitle={triageFor.firstVisit
+            ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'
+            : `${triageFor.primaryDoctor || '1차'} 진료를 마쳤습니다. ${triageFor.doctor} 진료 전에 할 검사를 체크하세요. 이미 한 검사는 다시 하지 않습니다. 없으면 바로 진료 대기로 이동합니다.${allTests.some(t => triageFor.done?.[t.id]) ? ` (오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')})` : ''}`}
           tests={allTests}
           settings={settings}
           initial={triageFor.assigned}
           initialDetail={triageFor.detail}
-          triageChoice={defaultTriageRequired(triageFor, doctorPrefs)}
-          confirmLabel="검사 지정 완료"
+          triageChoice={triageFor.firstVisit ? defaultTriageRequired(triageFor, doctorPrefs) : undefined}
+          confirmLabel={triageFor.firstVisit ? '검사 지정 완료' : '확인 완료'}
           onConfirm={confirmTriage}
           onCancel={() => setTriageFor(null)}
         />
       )}
       {toastNode}
     </ScreenShell>
+  );
+}
+
+// 명단 관리: 이름·환자번호·예약시간 수정
+function PatientInfoModal({ patient, onSave, onCancel }) {
+  const [v, setV] = useState({ id: patient.id || '', name: patient.name || '', reservation: patient.reservation || '' });
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+        <h3 className="text-lg font-medium text-slate-900 mb-1">{patient.name}님 정보 수정</h3>
+        <p className="text-sm text-slate-500 mb-4">이름·환자번호는 같은 날 이 환자의 모든 진료에 함께 바뀝니다. 이미 접수한 환자는 예약시간을 바꿔도 대기 순서는 그대로입니다.</p>
+        <div className="space-y-3">
+          <Field label="이름"><input value={v.name} onChange={e => setV({ ...v, name: e.target.value })} className={INPUT} /></Field>
+          <Field label="환자번호"><input value={v.id} onChange={e => setV({ ...v, id: e.target.value })} className={INPUT} /></Field>
+          <Field label="예약시간 (예: 09:30)"><input value={v.reservation} onChange={e => setV({ ...v, reservation: e.target.value })} className={INPUT} /></Field>
+        </div>
+        {v.id.trim() !== patient.id && <p className="text-xs text-amber-700 mt-3">환자번호를 바꾸면 새 번호의 이전 정보(FU)는 자동으로 붙지 않습니다. 필요하면 검사를 직접 지정해주세요.</p>}
+        <div className="flex gap-2 mt-6">
+          <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="button" onClick={() => onSave(v)} className="flex-1 py-3 rounded-xl bg-slate-800 text-white font-medium">저장</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2533,7 +2728,7 @@ function UploadResult({ result, patients, onRemove, onShowList }) {
           <li>새로 추가 <b>{stats.added.length}명</b>{stats.added.length > 0 && ` (이전 정보 적용 ${withFu}명 · 이전 정보 없음 ${stats.added.length - withFu}명${fv ? ` · 초진 ${fv}명` : ''})`}</li>
           {stats.timeChanged.length > 0 && <li>이미 있어 <b>예약시간만 변경 {stats.timeChanged.length}명</b>: {stats.timeChanged.slice(0, 8).map(p => `${p.name} ${p.reservation || '-'}→${p.newReservation}`).join(', ')}{stats.timeChanged.length > 8 ? ` 외 ${stats.timeChanged.length - 8}명` : ''}</li>}
           {stats.unchanged.length > 0 && <li>이미 있어 그대로 둠 {stats.unchanged.length}명</li>}
-          {stats.otherDoctor.length > 0 && <li className="text-amber-800">같은 날 <b>다른 교수 명단에 이미 있어 건너뜀 {stats.otherDoctor.length}명</b>: {stats.otherDoctor.slice(0, 8).map(p => `${p.name}(${p.doctor})`).join(', ')} · 필요하면 명단 관리에서 교수를 바꿔주세요.</li>}
+          {stats.linked.length > 0 && <li className="text-fuchsia-800">같은 날 다른 교수님 명단에도 있어 <b>두 교수님 진료로 연결 {stats.linked.length}명</b>: {stats.linked.slice(0, 8).map(p => `${p.name}(${p.first ? `${doctor} 먼저 → ${p.others.join(', ')}` : `${p.others.join(', ')} → ${doctor}`})`).join(', ')}{stats.linked.length > 8 ? ` 외 ${stats.linked.length - 8}명` : ''} · 검사는 1차 진료 전에 함께 합니다. 순서는 명단 관리에서 바꿀 수 있어요.</li>}
         </ul>
       ) : <div className="text-red-600">저장하지 못했습니다. 서버 연결을 확인하고 다시 올려주세요.</div>}
       {stillMissing.length > 0 && (
@@ -2543,7 +2738,7 @@ function UploadResult({ result, patients, onRemove, onShowList }) {
           {stillMissing.map(p => (
             <div key={patientKey(p)} className="flex items-center justify-between gap-2 py-1 border-t border-orange-200 first:border-t-0">
               <span>{p.name} <span className="text-xs text-slate-500">{p.id} · 예약 {p.reservation || '-'}{p.checkin ? ` · 접수 ${p.checkin}` : ''}</span></span>
-              <ConfirmButton label="삭제" onConfirm={() => onRemove(p.id, p.date)} />
+              <ConfirmButton label="삭제" onConfirm={() => onRemove(patientKey(p))} />
             </div>
           ))}
         </div>
@@ -2596,7 +2791,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   const upsert = async (news) => {
     let stats = null;
     await mutatePatients(prev => {
-      const r = mergePatientList(prev, news);
+      const r = mergePatientList(prev, news, doctorPrefs, settings);
       stats = r.stats;
       return r.next;
     });
@@ -2684,7 +2879,12 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
     const currentFu = await loadFu();
     const np = buildPatient({ ...manual, id: manual.id.trim(), name: manual.name.trim(), reservation: normalizeTime(manual.reservation), date: batchDate, doctor: batchDoctor }, currentFu, settings);
     const stats = await upsert([np]);
-    if (stats?.otherDoctor.length) setMessage(`${manual.name}님은 ${batchDate}에 이미 ${stats.otherDoctor[0].doctor} 명단에 있습니다. 교수 변경은 명단 관리에서 해주세요.`);
+    if (stats?.linked.length) {
+      const l = stats.linked[0];
+      setMessage(l.linkType === 'added'
+        ? `${manual.name}님을 ${batchDoctor} 2차 진료로 추가했습니다. ${l.others.join(', ')} 진료 설명 완료 후 ${settings.linkCheckAdded !== false ? '처치실에서 추가 검사를 확인합니다' : '진료 대기로 넘어갑니다'}.`
+        : `${manual.name}님은 ${batchDate}에 ${l.others.join(', ')} 명단에도 있어 두 교수님 진료로 연결했습니다 (${l.first ? `${batchDoctor} 먼저` : `${l.others.join(', ')} 먼저`}).`);
+    }
     else if (stats?.timeChanged.length) setMessage(`${manual.name}님은 이미 명단에 있어 예약시간만 ${np.reservation}(으)로 바꿨습니다. 진행 상황은 그대로입니다.`);
     else if (stats?.unchanged.length) setMessage(`${manual.name}님은 이미 ${batchDate} ${batchDoctor} 명단에 있습니다.`);
     else setMessage(`${manual.name}님을 ${batchDate} ${batchDoctor} 명단에 추가했습니다.${hasFollowupApplied(np) ? ' (이전 정보 적용)' : ''}`);
@@ -2696,10 +2896,30 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   const byName = (a, b) => String(a.name).localeCompare(String(b.name), 'ko') || String(a.id).localeCompare(String(b.id));
   const byDate = (readOnly ? archived.list : patients).filter(p => p.date === manageDate).sort(sortMode === 'name' ? byName : byQueue);
   const checkCount = readOnly ? 0 : byDate.filter(p => needsTestCheck(p, doctorPrefs)).length;
-  const updateOne = (id, date, fn) => mutatePatients(prev => prev.map(p => (p.id === id && p.date === date ? fn(p) : p)));
-  const removeOne = (id, date) => mutatePatients(prev => prev.filter(p => !(p.id === id && p.date === date)));
-  const reassignDoctor = (id, date, doctor) => updateOne(id, date, p => ({ ...p, doctor }));
-  const toggleFirst = (id, date) => updateOne(id, date, p => ({ ...p, firstVisit: !p.firstVisit }));
+  const updateOne = (pk, fn) => mutatePatients(prev => prev.map(p => (patientKey(p) === pk ? fn(p) : p)));
+  const removeOne = (pk) => mutatePatients(prev => removeVisit(prev, pk));
+  const reassignDoctor = (p, doctor) => {
+    if (patients.some(x => x.id === p.id && x.date === p.date && x.doctor === doctor && patientKey(x) !== patientKey(p))) {
+      setMessage(`${p.name}님은 ${p.date}에 이미 ${doctor} 진료가 있습니다.`);
+      return;
+    }
+    const pk = patientKey(p);
+    mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, doctor } : x.primaryKey === pk ? { ...x, primaryDoctor: doctor } : x)));
+  };
+  const toggleFirst = (pk) => updateOne(pk, p => ({ ...p, firstVisit: !p.firstVisit }));
+  const [infoEdit, setInfoEdit] = useState(null);
+  const saveInfo = (p, info) => {
+    const id = info.id.trim();
+    if (!id || !info.name.trim()) { setMessage('환자번호와 이름을 입력해주세요.'); return; }
+    if (id !== p.id && patients.some(x => x.id === id && x.date === p.date)) {
+      setMessage(`환자번호 ${id}는 ${p.date} 명단에 이미 있습니다.`);
+      return;
+    }
+    setInfoEdit(null);
+    mutatePatients(prev => editPatientInfo(prev, patientKey(p), { id, name: info.name, reservation: normalizeTime(info.reservation) }));
+    setMessage(`${info.name.trim()}님 정보를 수정했습니다.`);
+  };
+  const swapOrder = (p) => mutatePatients(prev => swapLinkOrder(prev, patientKey(p), doctorPrefs));
   const crAnywhere = Object.values(doctorPrefs || {}).some(v => v?.cr);
 
   const fuIds = Object.keys(fuMap).filter(id => id.includes(fuSearch.trim())).slice(0, 30);
@@ -2817,20 +3037,27 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
                 <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                   {p.name} <span className="text-xs text-slate-400">{p.id}</span>
                   {flag && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
+                  {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
+                  {byDate.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · {readOnly ? p.doctor : getStage(p, settings).label}</div>
+                {!readOnly && p.linkWaiting && p.linkType === 'planned' && <div className="text-xs text-fuchsia-700 mt-0.5">검사는 1차 진료 전에 함께 합니다. 추가할 검사는 1차 진료 카드에 지정해주세요.</div>}
               </div>
               {!readOnly && <>
               <div className="flex gap-2 items-center flex-wrap">
-                <select value={p.doctor} onChange={e => reassignDoctor(p.id, p.date, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+                {p.linkWaiting && p.linkType === 'planned' && !patients.find(x => patientKey(x) === p.primaryKey)?.checkin && !patients.find(x => patientKey(x) === p.primaryKey)?.primaryKey && (
+                  <button type="button" onClick={() => swapOrder(p)} className="text-xs px-3 py-1.5 rounded-lg border border-fuchsia-300 text-fuchsia-700">진료 순서 바꾸기</button>
+                )}
+                <button type="button" onClick={() => setInfoEdit(p)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600">정보 수정</button>
+                <select value={p.doctor} onChange={e => reassignDoctor(p, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
                   {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
                   {doctors.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
-                <button type="button" onClick={() => toggleFirst(p.id, p.date)} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
+                <button type="button" onClick={() => toggleFirst(patientKey(p))} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
                 </button>
-                <ConfirmButton label="삭제" onConfirm={() => removeOne(p.id, p.date)} />
+                <ConfirmButton label="삭제" onConfirm={() => removeOne(patientKey(p))} />
               </div>
               <TestPicker p={p} tests={allTests} onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }} onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }} />
               <DilationRow showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
@@ -2880,6 +3107,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       {todayEdit && todayTest && <TestDetailModal key={`${todayDetail.key}-${todayTest.id}`} test={todayTest} patientName={todayEdit.name} on={!!todayEdit.assigned?.[todayTest.id]} value={todayEdit.detail?.[todayTest.id]}
         onApply={d => { const kept = pickDetail({ [todayTest.id]: d }, { [todayTest.id]: true }, [todayTest])[todayTest.id] || null; setTodayTest(todayDetail.key, todayTest, true, kept); setTodayDetail(null); }}
         onRemove={() => { setTodayTest(todayDetail.key, todayTest, false); setTodayDetail(null); }} onCancel={() => setTodayDetail(null)} />}
+      {infoEdit && <PatientInfoModal patient={infoEdit} onSave={info => saveInfo(infoEdit, info)} onCancel={() => setInfoEdit(null)} />}
       {fuEdit && (
         <TestCheckModal
           key={`fu-${fuEdit.id}`}
@@ -3474,6 +3702,18 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
               <span className="text-sm text-slate-600">분</span>
             </div>
           </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="font-medium text-slate-900 mb-1">같은 날 두 교수님 진료 (2차 진료)</div>
+            <p className="text-sm text-slate-500 mb-3">1차 진료의 설명 완료 후 2차 진료로 넘어갈 때, 처치실에서 추가 검사를 먼저 확인할지 정합니다. 끄면 바로 2차 교수님 진료 대기로 갑니다.</p>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
+              <input type="checkbox" checked={draft.linkCheckAdded !== false} onChange={e => updateDraft(d => ({ ...d, linkCheckAdded: e.target.checked }))} className="w-4 h-4" />
+              진료 중에 추가된 2차 진료 → 처치실에서 추가 검사 확인
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={!!draft.linkCheckPlanned} onChange={e => updateDraft(d => ({ ...d, linkCheckPlanned: e.target.checked }))} className="w-4 h-4" />
+              미리 예정된 2차 진료 → 처치실에서 추가 검사 확인 (예정된 검사는 1차 진료 전에 함께 합니다)
+            </label>
+          </div>
         </div>
       )}
 
@@ -3533,7 +3773,7 @@ function matchesDirectoryStatus(p, settings, status) {
   if (status === 'done') return !!p.consultDone;
   if (p.consultDone) return false;
   switch (status) {
-    case 'reception': return !p.checkin;
+    case 'reception': return !p.checkin && !p.linkWaiting;
     case 'vision': return !!p.checkin && !visionComplete(p);
     case 'exam': return pendingRooms(p, settings).length > 0 || !!activeVf(p);
     case 'consult': return consultWaiting(p, settings) || inConsult(p) || awaitingExplain(p);
@@ -3646,7 +3886,8 @@ export default function App() {
 
   const onBack = () => setRole(null);
   const today = todayISO();
-  const patientsToday = patients.filter(p => p.date === today);
+  // 1차 진료 설명 완료를 기다리는 2차 진료는 관리자·전체 명단에서만 보입니다.
+  const patientsToday = patients.filter(p => p.date === today && !p.linkWaiting);
 
   if (role === 'vision' || role.startsWith('room:')) {
     return (
@@ -3689,6 +3930,7 @@ export default function App() {
         mutateFu={mutateFu}
         onBack={onBack}
         lastSync={lastSync}
+        allPatients={patients.filter(p => p.date === today)}
       />
     );
   }

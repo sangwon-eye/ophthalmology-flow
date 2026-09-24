@@ -143,8 +143,9 @@ function archiveOldPatients() {
     const key = `${ARCHIVE_PREFIX}${month}`;
     let prev = [];
     try { prev = JSON.parse(readItem(key)?.value || '[]'); } catch { prev = []; }
-    const merged = new Map(prev.map(p => [`${p.id}::${p.date}`, p]));
-    for (const p of items) merged.set(`${p.id}::${p.date}`, p);
+    const keyOf = p => `${p.id}::${p.date}::${p.visit || 1}`;
+    const merged = new Map(prev.map(p => [keyOf(p), p]));
+    for (const p of items) merged.set(keyOf(p), p);
     writeItem(key, JSON.stringify([...merged.values()]));
   }
   // 보관 파일을 먼저 저장한 뒤 실시간 명단에서 뺍니다 (중간에 멈춰도 데이터가 사라지지 않도록).
