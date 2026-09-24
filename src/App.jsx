@@ -1638,7 +1638,14 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true }) {
 function ProcedureModal({ patient, procedures, onConfirm, onCancel }) {
   const [sel, setSel] = useState({});
   const [note, setNote] = useState('');
-  const chosen = procedures.filter(x => sel[x.id]);
+  // 목록에 없는 요청은 직접 입력 (예: 안약 교육, 봉합사 제거)
+  const [custom, setCustom] = useState('');
+  const [customBy, setCustomBy] = useState('resident');
+  const customName = custom.trim();
+  const chosen = [
+    ...procedures.filter(x => sel[x.id]),
+    ...(customName ? [{ id: 'custom', name: customName, performer: customBy }] : []),
+  ];
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
@@ -1654,7 +1661,22 @@ function ProcedureModal({ patient, procedures, onConfirm, onCancel }) {
             </label>
           ))}
         </div>
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="처치 메모 (선택)" className={`${INPUT} mb-6`} />
+        <div className="rounded-xl border border-slate-200 p-3 mb-4">
+          <div className="text-sm text-slate-700 mb-2">기타 요청 (직접 입력)</div>
+          <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="예: 안약 점안 교육, 봉합사 제거" className={INPUT} />
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-xs text-slate-500">누가</span>
+            <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
+              {['prof', 'resident'].map(k => (
+                <button key={k} type="button" aria-pressed={customBy === k} onClick={() => setCustomBy(k)}
+                  className={`px-3 py-1 rounded-md text-sm ${customBy === k ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}>
+                  {PERFORMER_LABEL[k]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="처치 메모 (선택 · 위에서 고른 처치 모두에 붙습니다)" className={`${INPUT} mb-6`} />
         <div className="flex gap-3">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
           <button
