@@ -139,6 +139,28 @@ function sortedTests(settings) {
     .sort((a, b) => (idx(a.roomId) - idx(b.roomId)) || (a.order - b.order));
 }
 
+// 검사 선택 창(추가 검사·설명 완료·검사 지정·FU 지정)의 검사 순서. 설정에서 정한 순서가 없으면 검사실 순서.
+function orderForPicking(tests, settings) {
+  const order = Array.isArray(settings?.pickOrder) ? settings.pickOrder : [];
+  const pos = (t) => { const i = order.indexOf(t.id); return i < 0 ? order.length + tests.indexOf(t) : i; };
+  return [...tests].sort((a, b) => pos(a) - pos(b));
+}
+
+/* 검사 처방: 검사실에서 전산 처방을 넣은 뒤 [처방 완료]를 누릅니다 (직원 화면에만 표시).
+   처방 완료 뒤 이 검사실 검사가 새로 추가되거나 다시 하게 되면 '처방 전'으로 돌아갑니다. */
+function orderState(p, settings, roomId) {
+  const needed = roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
+  const rec = p.orders?.[roomId];
+  const covered = rec?.tests || [];
+  const missing = needed.filter(t => !covered.includes(t.id));
+  return { needed, rec, missing, complete: needed.length > 0 && missing.length === 0 };
+}
+// 검사를 새로(또는 다시) 지정하면 그 검사의 처방 완료 표시를 지웁니다
+function clearOrders(p, testIds) {
+  if (!p.orders || !testIds.length) return p.orders;
+  return Object.fromEntries(Object.entries(p.orders).map(([room, rec]) => [room, { ...rec, tests: (rec.tests || []).filter(id => !testIds.includes(id)) }]));
+}
+
 function pendingTests(p, settings, roomId) {
   return roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
 }
@@ -180,8 +202,12 @@ function needsTriageAssign(p) {
 function needsTriageExam(p, settings) {
   return !p.consultDone && !!p.firstVisit && p.triageRequired !== false && !p.triageDone && testsComplete(p, settings);
 }
+// 진료실에서 '처치실 확인 요청'으로 보낸 환자
+function treatRequested(p) {
+  return !p.consultDone && !!p.treatRequest;
+}
 function inTreatRoom(p, settings) {
-  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p);
+  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p);
 }
 function pendingProcedures(p, performer) {
   return (p.procedures || []).filter(x => !x.done && (!performer || x.performer === performer));
@@ -199,7 +225,7 @@ function inConsult(p) {
   return !p.consultDone && !p.seen && !!p.calledRoom;
 }
 function consultWaiting(p, settings) {
-  return !p.consultDone && !p.seen && !p.calledRoom && allDone(p, settings);
+  return !p.consultDone && !p.seen && !p.calledRoom && !p.treatRequest && allDone(p, settings);
 }
 
 function getStage(p, settings) {
@@ -207,6 +233,7 @@ function getStage(p, settings) {
   if (p.linkWaiting) return { label: `${p.primaryDoctor || '1차'} 진료 후 대기 (2차 진료)`, area: 'linked' };
   if (!p.checkin) return { label: '접수 대기', area: 'reception' };
   if (!visionComplete(p)) return { label: '시력/안압 검사 대기', area: 'vision' };
+  if (treatRequested(p)) return { label: '처치실 대기 (진료실 요청 확인)', area: 'treatReq' };
   if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
   const rooms = pendingRooms(p, settings);
@@ -1452,6 +1479,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
           )}
         </div>
         <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</div>
+        {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
         <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
       </div>
       {(onUp || onDown) && (
@@ -1751,7 +1779,8 @@ function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-function TestCheckModal({ title, subtitle, tests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, confirmLabel, onConfirm, onCancel }) {
+function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, confirmLabel, onConfirm, onCancel }) {
+  const tests = orderForPicking(rawTests, settings);
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
   const [linkDoctor, setLinkDoctor] = useState('');
   const [showOthers, setShowOthers] = useState(false);
@@ -1978,6 +2007,24 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
   const gatAvailable = !!gatTest && settings.rooms.some(r => r.id === gatTest.roomId);
   const roomHasGat = !isVision && gatTest?.roomId === room.id;
 
+  // 처방 완료 표시 (이 검사실의 지금 남은 검사 기준)
+  const setOrdered = (p, on) => {
+    const pk = patientKey(p);
+    const before = p.orders;
+    const at = Date.now();
+    patchPatient(mutatePatients, pk, x => {
+      const orders = { ...(x.orders || {}) };
+      if (on) {
+        const ids = roomTests(settings, room.id).filter(t => x.assigned?.[t.id]).map(t => t.id);
+        orders[room.id] = { at, tests: [...new Set([...(orders[room.id]?.tests || []), ...ids])] };
+      } else {
+        delete orders[room.id];
+      }
+      return { orders };
+    });
+    showToast(`${p.name} ${on ? '처방 완료' : '처방 완료 취소'}`, () => patchPatient(mutatePatients, pk, () => ({ orders: before })));
+  };
+
   const q = query.trim();
   const notCheckedIn = isVision
     ? patients.filter(p => !p.consultDone && !p.checkin && inSession(p, session) && (!q || (p.name || '').includes(q) || String(p.id).includes(q))).sort(nameSort ? byName : byQueue)
@@ -2179,6 +2226,26 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     <MeasureLine label="오늘" m={p.measure} fields={['nct', 'gat']} emptyText="오늘 안압 없음" />
                   </div>
                 )}
+                {!isVision && (() => {
+                  const o = orderState(p, settings, room.id);
+                  if (!o.needed.length) return null;
+                  if (o.complete) {
+                    return (
+                      <span className="w-full flex items-center gap-2 text-sm text-emerald-700">
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-1"><Check size={13} />처방 완료 {fmtClock(o.rec.at)}</span>
+                        <button type="button" onClick={() => setOrdered(p, false)} className="text-xs text-slate-400 underline">처방 완료 취소</button>
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="w-full flex items-center gap-2 flex-wrap">
+                      <span className="text-sm px-2 py-0.5 rounded-lg bg-orange-100 text-orange-800 font-medium">
+                        {o.rec ? `추가 처방 필요: ${o.missing.map(t => t.short || t.name).join(', ')}` : '처방 전'}
+                      </span>
+                      <button type="button" onClick={() => setOrdered(p, true)} className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium">처방 완료</button>
+                    </span>
+                  );
+                })()}
                 {isVision && (
                   <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision' })} className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium">
                     측정값 입력
@@ -2355,7 +2422,59 @@ function SimpleCard({ p, tone = 'slate', children }) {
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
         {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
       </div>
+      {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
       <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
+    </div>
+  );
+}
+
+// 진료실 → 원하는 곳으로 보내기 창
+const SEND_DESTS = [
+  ['vision', '시력/안압 다시', '시력·안압을 다시 측정합니다'],
+  ['exam', '검사실', '누락된 검사를 추가하거나 검사를 다시 합니다'],
+  ['treat', '처치실', '처치실에서 확인한 뒤 진료 대기로 돌아옵니다'],
+];
+function SendPatientModal({ patient, tests, settings, onConfirm, onCancel }) {
+  const [dest, setDest] = useState('treat');
+  const [sel, setSel] = useState({});
+  const [note, setNote] = useState('');
+  const ordered = orderForPicking(tests, settings);
+  const ready = dest !== 'exam' || ordered.some(t => sel[t.id]);
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
+        <h3 className="text-lg font-medium text-slate-900 mb-1">{patient.name}님 보내기</h3>
+        <p className="text-sm text-slate-500 mb-4">확인이 끝나면 다시 이 진료실 진료 대기로 돌아옵니다.</p>
+        <div className="space-y-2 mb-4">
+          {SEND_DESTS.map(([k, label, desc]) => (
+            <label key={k} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${dest === k ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200'}`}>
+              <input type="radio" name="send-dest" checked={dest === k} onChange={() => setDest(k)} className="mt-1" />
+              <span><span className="font-medium text-slate-900">{label}</span><span className="block text-xs text-slate-500">{desc}</span></span>
+            </label>
+          ))}
+        </div>
+        {dest === 'exam' && (
+          <div className="flex flex-wrap gap-2 mb-4">
+            {ordered.map(t => {
+              const on = !!sel[t.id];
+              const doneToday = patient.assigned?.[t.id] && patient.done?.[t.id];
+              return (
+                <button key={t.id} type="button" onClick={() => setSel(x => ({ ...x, [t.id]: !x[t.id] }))}
+                  className={`text-sm px-3 py-1.5 rounded-lg border flex items-center gap-1 ${on ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>
+                  {on && <Check size={12} />}{t.short || t.name}{doneToday && <span className={`text-xs ${on ? 'text-violet-100' : 'text-slate-400'}`}>(오늘 함 · 다시)</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
+          placeholder={dest === 'treat' ? '전달 메모 (예: 추가 검사 있는지 확인해주세요)' : '전달 메모 (선택, 예: VF 누락되어 다시 부탁드립니다)'}
+          className={`${INPUT} mb-6`} />
+        <div className="flex gap-2">
+          <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="button" disabled={!ready} onClick={() => onConfirm({ dest, sel, note: note.trim() })} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-medium disabled:opacity-40">보내기</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2378,7 +2497,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
   const procList = mine.filter(inProfProcedure).sort((a, b) => (a.procOrderedAt || 0) - (b.procOrderedAt || 0));
   const inRoom = mine.find(inConsult);
   const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
-  const onHold = mine.filter(p => p.consultHold && !p.consultDone && !p.seen && !allDone(p, settings));
+  const onHold = mine.filter(p => p.consultHold && !p.consultDone && !p.seen && (!allDone(p, settings) || p.treatRequest));
   const testing = mine.filter(p => !p.consultDone && !p.consultHold && !p.seen && p.checkin && !allDone(p, settings) && !inTreatRoom(p, settings)).length;
   const residentCount = mine.filter(p => inTreatRoom(p, settings)).length;
   const recent = mine
@@ -2459,8 +2578,11 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
 
   const confirmExtra = (sel, detail) => {
     const pk = patientKey(extraModalFor);
-    const chosen = allTests.filter(t => sel[t.id]);
     setExtraModalFor(null);
+    applyExtraTests(pk, allTests.filter(t => sel[t.id]).map(t => t.id), detail, undefined);
+  };
+  // 검사를 추가(또는 다시)하고 검사실 대기열 앞쪽으로 보냅니다. sendNote 가 있으면 전달 메모도 남깁니다.
+  const applyExtraTests = (pk, chosen, detail, sendNote) => {
     if (!chosen.length) return;
     mutatePatients(prev => {
       const target = prev.find(p => patientKey(p) === pk);
@@ -2481,9 +2603,30 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
       else if (others.length >= 2) boosted = (others[0].queueKey + others[1].queueKey) / 2;
       boosted = Math.min(boosted, target.queueKey);
       return prev.map(p => (patientKey(p) === pk
-        ? { ...p, assigned, done, detail: nextDetail, calledRoom: null, consultHold: true, queueKey: boosted }
+        ? { ...p, assigned, done, detail: nextDetail, orders: clearOrders(p, chosen), calledRoom: null, consultHold: true, queueKey: boosted, ...(sendNote !== undefined ? { sendNote } : {}) }
         : p));
     });
+  };
+
+  // 진료실에서 원하는 곳으로 환자 보내기 (누락 검사·재검·처치실 확인)
+  const [sendFor, setSendFor] = useState(null);
+  const sendPatient = (p, { dest, sel, note }) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    setSendFor(null);
+    const sendNote = note ? { text: note, from: doctor, at } : null;
+    const before = { done: p.done, doneAt: p.doneAt, assigned: p.assigned, detail: p.detail, queueKey: p.queueKey, calledRoom: p.calledRoom, consultHold: p.consultHold, sendNote: p.sendNote, treatRequest: p.treatRequest };
+    const undo = () => patch(pk, () => before);
+    if (dest === 'exam') {
+      const ids = allTests.filter(t => sel[t.id]).map(t => t.id);
+      applyExtraTests(pk, ids, {}, sendNote);
+      showToast(`${p.name} 검사실로 보냈습니다 (${allTests.filter(t => sel[t.id]).map(t => t.short || t.name).join(', ')})`, undo);
+      return;
+    }
+    patch(pk, x => (dest === 'vision'
+      ? { calledRoom: null, consultHold: true, sendNote, done: { ...x.done, [VISION_KEY]: false }, doneAt: { ...x.doneAt, [VISION_KEY]: null } }
+      : { calledRoom: null, consultHold: true, sendNote, treatRequest: { at, from: doctor } }));
+    showToast(`${p.name} ${dest === 'vision' ? '시력/안압 검사실' : '처치실'}로 보냈습니다`, undo);
   };
 
   // 다른 교수님 진료 추가 (2차 진료): 이 진료의 설명 완료 후 시작
@@ -2576,7 +2719,10 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                 <button type="button" onClick={() => setProcFor(inRoom)} className="py-3 rounded-xl border-2 border-rose-300 text-rose-700 font-medium">처치</button>
                 <button type="button" onClick={() => finishConsult(inRoom)} className="py-3 rounded-xl bg-amber-600 text-white font-medium">진료 완료</button>
               </div>
-              <button type="button" onClick={() => patch(patientKey(inRoom), () => ({ calledRoom: null }))} className="w-full py-2 text-sm text-slate-400">호출 취소</button>
+              <div className="flex items-center justify-between gap-2">
+                <button type="button" onClick={() => setSendFor(inRoom)} className="text-sm px-4 py-2 rounded-lg border-2 border-indigo-300 text-indigo-700 font-medium">보내기 (시력·검사실·처치실)</button>
+                <button type="button" onClick={() => patch(patientKey(inRoom), () => ({ calledRoom: null }))} className="py-2 text-sm text-slate-400">호출 취소</button>
+              </div>
             </div>
           )}
 
@@ -2610,11 +2756,12 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                     <button
                       type="button"
                       disabled={!!inRoom}
-                      onClick={() => patch(pk, () => ({ calledRoom: doctor }))}
+                      onClick={() => patch(pk, () => ({ calledRoom: doctor, sendNote: null }))}
                       className={`text-sm px-3 py-1.5 rounded-lg font-medium ${inRoom ? 'bg-slate-200 text-slate-400' : 'bg-amber-600 text-white'}`}
                     >
                       진료 호출
                     </button>
+                    <button type="button" onClick={() => setSendFor(p)} className="text-sm px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700">보내기</button>
                     {inRoom && i === 0 && <span className="text-xs text-slate-400">현재 환자 진료를 마친 뒤 호출할 수 있어요</span>}
                   </PatientRow>
                 );
@@ -2674,6 +2821,16 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
           onCancel={() => setExtraModalFor(null)}
         />
       )}
+      {sendFor && (
+        <SendPatientModal
+          key={`send-${patientKey(sendFor)}`}
+          patient={sendFor}
+          tests={allTests}
+          settings={settings}
+          onConfirm={v => sendPatient(sendFor, v)}
+          onCancel={() => setSendFor(null)}
+        />
+      )}
       {procFor && (
         <ProcedureModal
           key={`proc-${patientKey(procFor)}`}
@@ -2705,6 +2862,19 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   const allTests = sortedTests(settings);
   const waitMin = settings.dilationWaitMin;
 
+  const requests = patients.filter(treatRequested).sort(order);
+  const [reqFor, setReqFor] = useState(null);
+  // 진료실 요청: 확인 끝 → 진료 대기로 (필요하면 검사를 붙여서 검사실로)
+  const finishRequest = (p, testIds = [], detail = {}) => {
+    const pk = patientKey(p);
+    const before = { treatRequest: p.treatRequest, assigned: p.assigned, done: p.done, detail: p.detail };
+    patchPatient(mutatePatients, pk, x => {
+      const assigned = { ...x.assigned }, done = { ...x.done }, nd = { ...(x.detail || {}) };
+      testIds.forEach(id => { assigned[id] = true; done[id] = false; if (detail?.[id]) nd[id] = detail[id]; });
+      return { treatRequest: null, assigned, done, detail: nd, orders: clearOrders(x, testIds) };
+    });
+    showToast(`${p.name} ${testIds.length ? '검사 추가, 검사 후 진료 대기로' : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, () => before));
+  };
   const triage = patients.filter(needsTriageAssign).sort(order);
   const procs = patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)).sort(order);
   const recent = [
@@ -2767,10 +2937,22 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   };
 
   return (
-    <ScreenShell title="처치실" color="indigo" onBack={onBack} lastSync={lastSync} count={triage.length + procs.length}>
+    <ScreenShell title="처치실" color="indigo" onBack={onBack} lastSync={lastSync} count={requests.length + triage.length + procs.length}>
       <div className="flex justify-end mb-3">
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
       </div>
+      {requests.length > 0 && (
+        <div className="mb-8">
+          <SectionTitle hint="진료실에서 확인을 요청한 환자입니다. 메모를 확인하고, 추가할 검사가 있으면 지정하세요.">진료실 요청 확인 · {requests.length}명</SectionTitle>
+          {requests.map(p => (
+            <SimpleCard key={patientKey(p)} p={p} tone="amber">
+              <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
+              <button type="button" onClick={() => setReqFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">검사 추가</button>
+              <button type="button" onClick={() => finishRequest(p)} className="text-sm px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 font-medium">확인 완료 · 진료 대기로</button>
+            </SimpleCard>
+          ))}
+        </div>
+      )}
       <div className="mb-8">
         <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
           검사 지정 대기 (초진 · 2차 진료) · {triage.length}명
@@ -2822,6 +3004,20 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
         ))}
       </RecentDone>
 
+      {reqFor && (
+        <TestCheckModal
+          key={`req-${patientKey(reqFor)}`}
+          title={`${reqFor.name}님 추가 검사`}
+          subtitle={`${reqFor.sendNote?.text ? `진료실 메모: ${reqFor.sendNote.text} · ` : ''}추가할 검사를 체크하세요. 검사를 마치면 진료 대기로 돌아갑니다.`}
+          tests={allTests}
+          settings={settings}
+          initial={{}}
+          initialDetail={{}}
+          confirmLabel="검사 추가"
+          onConfirm={(sel, detail) => { const p = reqFor; setReqFor(null); finishRequest(p, allTests.filter(t => sel[t.id]).map(t => t.id), detail); }}
+          onCancel={() => setReqFor(null)}
+        />
+      )}
       {triageFor && (
         <TestCheckModal
           key={`triage-${patientKey(triageFor)}`}
@@ -3469,17 +3665,44 @@ function ExamBoardList({ patients, settings, compact }) {
   );
 }
 
-function ConsultBoardSection({ doctor, patients, settings, compact, plain }) {
+// 진찰실 번호: 숫자만 적으면 'N번 진료실', 글자를 적으면 그대로 표시
+function consultRoomLabel(prefs, doctor) {
+  const v = String(prefs?.[doctor]?.roomNo ?? '').trim();
+  if (!v) return '';
+  return /^\d+$/.test(v) ? `${v}번 진료실` : v;
+}
+
+// 설정 > 교수 관리: 진찰실 번호 (칸을 벗어나거나 Enter 를 누르면 저장)
+function DoctorRoomInput({ name, value, onSave }) {
+  const [v, setV] = useState(value || '');
+  useEffect(() => { setV(value || ''); }, [value]);
+  const save = () => { if (v.trim() !== String(value || '').trim()) onSave(v.trim()); };
+  return (
+    <label className="flex items-center gap-1.5 text-xs text-slate-600">
+      진찰실
+      <input aria-label={`${name} 진찰실 번호`} value={v} onChange={e => setV(e.target.value)} onBlur={save}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        placeholder="예: 3" className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm" />
+    </label>
+  );
+}
+
+function ConsultBoardSection({ doctor, patients, settings, compact, plain, roomLabel = '' }) {
   const mine = patients.filter(p => p.doctor === doctor && !p.consultDone);
   const inRoom = mine.find(inConsult);
   const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
   const testing = mine.filter(p => !p.seen && !allDone(p, settings)).length;
   return (
     <div className={plain ? '' : 'bg-white border border-amber-200 rounded-2xl p-4'}>
-      {!plain && <div className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-slate-900 mb-3`}>{doctor}</div>}
+      {!plain && (
+        <div className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-slate-900 mb-3 flex items-baseline justify-between gap-2 flex-wrap`}>
+          {doctor}
+          {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-amber-700`}>{roomLabel}</span>}
+        </div>
+      )}
       {inRoom && (
         <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">
-          <span className="text-sm text-amber-700 font-medium">진료 중</span>
+          <span className="text-sm text-amber-700 font-medium">진료 중{roomLabel ? ` · ${roomLabel}` : ''}</span>
           <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(inRoom)}</span>
         </div>
       )}
@@ -3530,7 +3753,7 @@ function BoardSelect({ doctors, onSelect, onBack }) {
   );
 }
 
-function BoardView({ kind, patients, settings, doctors, onBack }) {
+function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBack }) {
   const [layout, setLayout] = useState('horizontal');
   const activeDoctors = Array.from(new Set([...doctors, ...patients.map(p => p.doctor).filter(Boolean)]))
     .filter(d => patients.some(p => p.doctor === d && !p.consultDone));
@@ -3556,7 +3779,7 @@ function BoardView({ kind, patients, settings, doctors, onBack }) {
       <BoardShell title="진료 대기 순서" onBack={onBack} wide>
         {activeDoctors.length === 0 ? <BoardEmpty /> : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {activeDoctors.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} />)}
+            {activeDoctors.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} roomLabel={consultRoomLabel(doctorPrefs, d)} />)}
           </div>
         )}
       </BoardShell>
@@ -3565,8 +3788,8 @@ function BoardView({ kind, patients, settings, doctors, onBack }) {
   if (kind.startsWith('consult:')) {
     const d = kind.slice('consult:'.length);
     return (
-      <BoardShell title={`${d} 진료 대기 순서`} onBack={onBack}>
-        <ConsultBoardSection doctor={d} patients={patients} settings={settings} plain />
+      <BoardShell title={`${d} 진료 대기 순서${consultRoomLabel(doctorPrefs, d) ? ` · ${consultRoomLabel(doctorPrefs, d)}` : ''}`} onBack={onBack}>
+        <ConsultBoardSection doctor={d} patients={patients} settings={settings} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
       </BoardShell>
     );
   }
@@ -3577,7 +3800,7 @@ function BoardView({ kind, patients, settings, doctors, onBack }) {
         <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} compact /></BoardColumn>
         <BoardColumn title="진료실">
           {activeDoctors.length === 0 ? <BoardEmpty /> : activeDoctors.map(d => (
-            <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} compact />
+            <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} compact roomLabel={consultRoomLabel(doctorPrefs, d)} />
           ))}
         </BoardColumn>
       </div>
@@ -3830,6 +4053,36 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         </div>
       )}
 
+      {tab === 'rooms' && (() => {
+        const picked = orderForPicking(sortedTests(draft), draft);
+        const movePick = (i, dir) => updateDraft(d => {
+          const ids = orderForPicking(sortedTests(d), d).map(t => t.id);
+          const j = i + dir;
+          if (j < 0 || j >= ids.length) return d;
+          [ids[i], ids[j]] = [ids[j], ids[i]];
+          return { ...d, pickOrder: ids };
+        });
+        return (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 mt-4">
+            <div className="font-medium text-slate-900 mb-1">검사 선택 창 순서</div>
+            <p className="text-sm text-slate-500 mb-3">진료 중 추가 검사, 설명 완료(다음 내원 검사), 처치실 검사 지정, FU 지정 창에서 검사가 이 순서로 나옵니다. 검사실 대기 순서에는 영향이 없어요.</p>
+            <div className="space-y-1.5">
+              {picked.map((t, i) => (
+                <div key={t.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <span className="text-xs text-slate-400 w-5">{i + 1}</span>
+                  <span className="text-sm text-slate-800 flex-1">{t.short || t.name}</span>
+                  <button type="button" aria-label="위로" disabled={i === 0} onClick={() => movePick(i, -1)} className="p-1.5 rounded border border-slate-200 text-slate-500 disabled:opacity-30"><ChevronUp size={14} /></button>
+                  <button type="button" aria-label="아래로" disabled={i === picked.length - 1} onClick={() => movePick(i, 1)} className="p-1.5 rounded border border-slate-200 text-slate-500 disabled:opacity-30"><ChevronDown size={14} /></button>
+                </div>
+              ))}
+            </div>
+            {Array.isArray(draft.pickOrder) && (
+              <button type="button" onClick={() => updateDraft(d => { const { pickOrder, ...rest } = d; return rest; })} className="mt-3 text-xs text-slate-500 underline">검사실 순서로 되돌리기</button>
+            )}
+          </div>
+        );
+      })()}
+
       {tab === 'procedures' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">처치 목록</div>
@@ -3872,6 +4125,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
             {doctors.map(name => (
               <div key={name} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 flex-wrap">
                   <span className="text-slate-700 flex-1">{name}</span>
+                  <DoctorRoomInput name={name} value={doctorPrefs?.[name]?.roomNo} onSave={v => setPref(name, 'roomNo', v)} />
                   <label className="flex items-center gap-1.5 text-xs text-slate-600">
                     초진 예진 기본값
                     <select aria-label={`${name} 초진 예진 기본값`} value={doctorPrefs?.[name]?.triageRequired === false ? 'no' : 'yes'} onChange={e => setPref(name, 'triageRequired', e.target.value === 'yes')} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
@@ -4213,6 +4467,7 @@ export default function App() {
         patients={patientsToday.filter(p => p.checkin)}
         settings={settings}
         doctors={doctors}
+        doctorPrefs={doctorPrefs}
         onBack={() => setRole('board')}
       />
     );
