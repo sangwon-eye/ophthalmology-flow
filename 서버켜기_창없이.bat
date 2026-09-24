@@ -14,8 +14,7 @@ node scripts\health.js
 if not errorlevel 1 goto :already
 
 echo 서버를 창 없이 켜는 중입니다...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath $env:ComSpec -ArgumentList '/c','scripts\run-server.bat' -WorkingDirectory (Get-Location).Path -WindowStyle Hidden" >nul 2>nul
-if errorlevel 1 start "안과 환자 흐름 서버" /min "%ComSpec%" /c scripts\run-server.bat
+node scripts\launch.js
 
 set /a tries=0
 :wait

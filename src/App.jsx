@@ -846,7 +846,7 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
       <div className={`sticky top-0 z-10 ${c.bg} border-b ${c.border}`}>
         <div className="max-w-3xl mx-auto px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <div className={`text-xs font-medium ${c.text} mb-0.5`}>안과 진료 흐름 관리</div>
+            <div className={`text-xs font-medium ${c.text} mb-0.5`}>Ophthalmology Flow</div>
             <h1 className="text-xl font-semibold text-slate-900">
               {title}
               {typeof count === 'number' && <span className="ml-2 text-base font-normal text-slate-500">대기 {count}명</span>}
@@ -1786,7 +1786,7 @@ function RoleSelect({ settings, onSelect }) {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
       <div className="w-full max-w-3xl">
         <div className="text-center mb-8">
-          <div className="text-sm text-slate-400 mb-1">안과 진료 흐름 관리</div>
+          <div className="text-sm text-slate-400 mb-1">Ophthalmology Flow</div>
           <h1 className="text-2xl font-semibold text-slate-900">이 컴퓨터의 화면을 선택하세요</h1>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -2894,7 +2894,38 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   const archived = useArchivedPatients(manageDate);
   const readOnly = archived.isArchived;
   const byName = (a, b) => String(a.name).localeCompare(String(b.name), 'ko') || String(a.id).localeCompare(String(b.id));
-  const byDate = (readOnly ? archived.list : patients).filter(p => p.date === manageDate).sort(sortMode === 'name' ? byName : byQueue);
+  const [manageDoctor, setManageDoctor] = useState('');
+  const dayAll = (readOnly ? archived.list : patients).filter(p => p.date === manageDate);
+  const dayDoctors = [...new Set([...doctors, ...dayAll.map(p => p.doctor)].filter(Boolean))];
+  const byDate = dayAll.filter(p => !manageDoctor || p.doctor === manageDoctor).sort(sortMode === 'name' ? byName : byQueue);
+  // 전체 삭제: 지금 보이는 명단(날짜 + 선택한 교수)을 한 번에 지웁니다. 바로 되돌릴 수 있습니다.
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkDeleted, setBulkDeleted] = useState(null);
+  const bulkDelete = () => {
+    const keys = byDate.map(patientKey);
+    const snapshot = dayAll;
+    const label = `${manageDate}${manageDoctor ? ` ${manageDoctor}` : ' 전체'} 명단 ${keys.length}명`;
+    setBulkConfirm(false);
+    mutatePatients(prev => keys.reduce((list, k) => removeVisit(list, k), prev));
+    setBulkDeleted({ keys, snapshot, label });
+  };
+  const undoBulkDelete = () => {
+    const { keys, snapshot } = bulkDeleted;
+    const deleted = new Set(keys);
+    setBulkDeleted(null);
+    mutatePatients(prev => {
+      const have = new Set(prev.map(patientKey));
+      const before = new Map(snapshot.map(p => [patientKey(p), p]));
+      // 남아 있던 다른 교수님 진료는 연결 상태만 원래대로
+      const restored = prev.map(p => {
+        const old = before.get(patientKey(p));
+        if (!old || deleted.has(patientKey(p))) return p;
+        return { ...p, primaryKey: old.primaryKey, primaryDoctor: old.primaryDoctor, linkWaiting: old.linkWaiting };
+      });
+      return [...restored, ...snapshot.filter(p => deleted.has(patientKey(p)) && !have.has(patientKey(p)))];
+    });
+    setMessage('삭제를 되돌렸습니다.');
+  };
   const checkCount = readOnly ? 0 : byDate.filter(p => needsTestCheck(p, doctorPrefs)).length;
   const updateOne = (pk, fn) => mutatePatients(prev => prev.map(p => (patientKey(p) === pk ? fn(p) : p)));
   const removeOne = (pk) => mutatePatients(prev => removeVisit(prev, pk));
@@ -3009,7 +3040,16 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span className="text-sm text-slate-500">날짜</span>
             <input type="date" value={manageDate} onChange={e => setManageDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+            <select value={manageDoctor} onChange={e => setManageDoctor(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+              <option value="">전체 교수</option>
+              {dayDoctors.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
             <span className="text-sm text-slate-400">{byDate.length}명</span>
+            {!readOnly && byDate.length > 0 && (
+              <button type="button" onClick={() => setBulkConfirm(true)} className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 bg-white flex items-center gap-1">
+                <Trash2 size={14} /> {manageDoctor ? `${manageDoctor} 전체 삭제` : '전체 삭제'}
+              </button>
+            )}
             <div className="ml-auto inline-flex gap-1 bg-slate-100 rounded-lg p-1">
               {[['time', '예약시간순'], ['name', '가나다순']].map(([k, label]) => (
                 <button key={k} type="button" aria-pressed={sortMode === k} onClick={() => changeSort(k)}
@@ -3019,6 +3059,28 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
               ))}
             </div>
           </div>
+          {bulkDeleted && (
+            <div className="bg-slate-800 text-white text-sm rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
+              <span>{bulkDeleted.label}을 삭제했습니다.</span>
+              <button type="button" onClick={undoBulkDelete} className="text-sm font-semibold text-amber-300 px-3 py-1 rounded-lg flex items-center gap-1 shrink-0"><RotateCcw size={14} /> 되돌리기</button>
+            </div>
+          )}
+          {bulkConfirm && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+                <h3 className="text-lg font-medium text-slate-900 mb-1">명단 전체 삭제</h3>
+                <p className="text-sm text-slate-600 mb-2">
+                  <b>{manageDate} {manageDoctor || '모든 교수님'}</b> 명단 <b>{byDate.length}명</b>을 모두 삭제합니다.
+                </p>
+                {byDate.some(p => p.checkin) && <p className="text-sm text-red-600 mb-2">이미 접수한 환자 {byDate.filter(p => p.checkin).length}명도 함께 삭제됩니다.</p>}
+                <p className="text-xs text-slate-500">삭제 직후 화면에 나오는 [되돌리기]로 복구할 수 있습니다. 환자별 다음 내원 정보(FU)는 지워지지 않습니다.</p>
+                <div className="flex gap-2 mt-6">
+                  <button type="button" onClick={() => setBulkConfirm(false)} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+                  <button type="button" onClick={bulkDelete} className="flex-1 py-3 rounded-xl bg-red-600 text-white font-medium">{byDate.length}명 삭제</button>
+                </div>
+              </div>
+            </div>
+          )}
           {readOnly && (
             <div className="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm text-slate-600">
               {archived.loading ? '지난 명단을 불러오는 중입니다…' : archived.error ? '지난 명단을 불러오지 못했습니다. 서버 연결을 확인해주세요.' : '지난 날짜의 보관된 명단입니다. 보기만 할 수 있습니다.'}
@@ -3038,7 +3100,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
                   {p.name} <span className="text-xs text-slate-400">{p.id}</span>
                   {flag && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
-                  {byDate.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
+                  {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · {readOnly ? p.doctor : getStage(p, settings).label}</div>
@@ -3713,6 +3775,18 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
               <input type="checkbox" checked={!!draft.linkCheckPlanned} onChange={e => updateDraft(d => ({ ...d, linkCheckPlanned: e.target.checked }))} className="w-4 h-4" />
               미리 예정된 2차 진료 → 처치실에서 추가 검사 확인 (예정된 검사는 1차 진료 전에 함께 합니다)
             </label>
+          </div>
+          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-sky-50 p-5">
+            <div className="text-xs font-medium text-indigo-500 mb-1">개발자 정보</div>
+            <div className="text-lg font-semibold text-slate-900 mb-3">2023년 입국 한상원</div>
+            <p className="text-sm text-slate-700 leading-relaxed mb-2">
+              Ophthalmology Flow의 완성을 진심으로 축하합니다.
+            </p>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              바쁜 수련 생활 속에서도 환자분들의 기다림을 줄이고 함께 일하는 동료들의 수고를 덜기 위해,
+              진료 현장의 흐름 하나하나를 고민하며 이 프로그램을 만들었습니다.
+              검사실과 진료실, 처치실을 잇는 세심한 배려가 곳곳에 담긴 이 결실에 깊은 감사와 박수를 보냅니다.
+            </p>
           </div>
         </div>
       )}
