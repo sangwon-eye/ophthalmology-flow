@@ -189,7 +189,9 @@ function testsComplete(p, settings) {
 
 // 진료 받을 준비가 됨 (검사 모두 완료, 초진이면 예진까지 완료)
 function allDone(p, settings) {
-  return testsComplete(p, settings) && (!p.firstVisit || p.triageRequired === false || !!p.triageDone);
+  return testsComplete(p, settings)
+    && (!p.firstVisit || p.triageRequired === false || !!p.triageDone)
+    && (!p.extraTriage || !!p.triageDone);
 }
 
 /* 진료 흐름 단계 */
@@ -199,8 +201,10 @@ function needsTriageAssign(p) {
   return !p.consultDone && !!p.checkin && visionComplete(p) && !!(p.firstVisit || p.addOnCheck) && !p.triageAssigned && !p.triageDone;
 }
 // 초진: 검사를 모두 마치고(또는 검사 없음) 처치실 처치 대기에서 예진 대기
+// 초진 예진, 또는 처치실에서 '예진 추가'한 환자
 function needsTriageExam(p, settings) {
-  return !p.consultDone && !!p.firstVisit && p.triageRequired !== false && !p.triageDone && testsComplete(p, settings);
+  const wanted = (!!p.firstVisit && p.triageRequired !== false) || !!p.extraTriage;
+  return !p.consultDone && wanted && !p.triageDone && testsComplete(p, settings);
 }
 // 진료실에서 '처치실 확인 요청'으로 보낸 환자
 function treatRequested(p) {
@@ -2865,20 +2869,26 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   const requests = patients.filter(treatRequested).sort(order);
   const [reqFor, setReqFor] = useState(null);
   // 진료실 요청: 확인 끝 → 진료 대기로 (필요하면 검사를 붙여서 검사실로)
-  const finishRequest = (p, testIds = [], detail = {}) => {
+  // 진료실 요청 처리. 여러 가지를 함께 할 수 있습니다: 검사 추가, 시력/안압 다시, 예진 추가
+  const finishRequest = (p, testIds = [], detail = {}, { vision = false, triage = false } = {}) => {
     const pk = patientKey(p);
-    const before = { treatRequest: p.treatRequest, assigned: p.assigned, done: p.done, detail: p.detail };
+    const before = { treatRequest: p.treatRequest, assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, extraTriage: p.extraTriage, triageDone: p.triageDone, triageAt: p.triageAt, orders: p.orders };
     patchPatient(mutatePatients, pk, x => {
-      const assigned = { ...x.assigned }, done = { ...x.done }, nd = { ...(x.detail || {}) };
+      const assigned = { ...x.assigned }, done = { ...x.done }, doneAt = { ...x.doneAt }, nd = { ...(x.detail || {}) };
       testIds.forEach(id => { assigned[id] = true; done[id] = false; if (detail?.[id]) nd[id] = detail[id]; });
-      return { treatRequest: null, assigned, done, detail: nd, orders: clearOrders(x, testIds) };
+      if (vision) { done[VISION_KEY] = false; doneAt[VISION_KEY] = null; }
+      return {
+        treatRequest: null, assigned, done, doneAt, detail: nd, orders: clearOrders(x, testIds),
+        ...(triage ? { extraTriage: true, triageDone: false, triageAt: null } : {}),
+      };
     });
-    showToast(`${p.name} ${testIds.length ? '검사 추가, 검사 후 진료 대기로' : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, () => before));
+    const steps = [vision && '시력/안압', testIds.length && '검사', triage && '예진'].filter(Boolean);
+    showToast(`${p.name} ${steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, () => before));
   };
   const triage = patients.filter(needsTriageAssign).sort(order);
   const procs = patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)).sort(order);
   const recent = [
-    ...patients.filter(p => p.firstVisit && p.triageDone).map(p => ({ p, kind: 'triage', at: p.triageAt || 0 })),
+    ...patients.filter(p => (p.firstVisit || p.extraTriage) && p.triageDone).map(p => ({ p, kind: 'triage', at: p.triageAt || 0 })),
     ...patients
       .filter(p => (p.procedures || []).some(i => i.performer === 'resident' && i.done))
       .map(p => ({ p, kind: 'proc', at: Math.max(0, ...(p.procedures || []).filter(i => i.performer === 'resident' && i.done).map(i => i.doneAt || 0)) })),
@@ -2948,6 +2958,8 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
             <SimpleCard key={patientKey(p)} p={p} tone="amber">
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
               <button type="button" onClick={() => setReqFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">검사 추가</button>
+              <button type="button" onClick={() => finishRequest(p, [], {}, { vision: true })} className="text-sm px-4 py-2 rounded-lg border border-blue-300 text-blue-700 font-medium">시력/안압 다시</button>
+              <button type="button" onClick={() => finishRequest(p, [], {}, { triage: true })} className="text-sm px-4 py-2 rounded-lg border border-sky-300 text-sky-700 font-medium">예진 추가</button>
               <button type="button" onClick={() => finishRequest(p)} className="text-sm px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 font-medium">확인 완료 · 진료 대기로</button>
             </SimpleCard>
           ))}
@@ -3008,13 +3020,14 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
         <TestCheckModal
           key={`req-${patientKey(reqFor)}`}
           title={`${reqFor.name}님 추가 검사`}
-          subtitle={`${reqFor.sendNote?.text ? `진료실 메모: ${reqFor.sendNote.text} · ` : ''}추가할 검사를 체크하세요. 검사를 마치면 진료 대기로 돌아갑니다.`}
+          subtitle={`${reqFor.sendNote?.text ? `진료실 메모: ${reqFor.sendNote.text} · ` : ''}추가할 검사를 체크하세요. 검사 후 예진이 필요하면 아래에서 '예진 함'을 고르세요.`}
           tests={allTests}
           settings={settings}
           initial={{}}
           initialDetail={{}}
+          triageChoice={false}
           confirmLabel="검사 추가"
-          onConfirm={(sel, detail) => { const p = reqFor; setReqFor(null); finishRequest(p, allTests.filter(t => sel[t.id]).map(t => t.id), detail); }}
+          onConfirm={(sel, detail, _dil, triageRequired) => { const p = reqFor; setReqFor(null); finishRequest(p, allTests.filter(t => sel[t.id]).map(t => t.id), detail, { triage: !!triageRequired }); }}
           onCancel={() => setReqFor(null)}
         />
       )}
