@@ -215,6 +215,8 @@ function getStage(p, settings) {
 }
 
 /* 산동 */
+const DILATE_EYE_LABEL = { OD: '우안 (OD)', OS: '좌안 (OS)' };
+function dilateEyeOf(value) { return ['OD', 'OS'].includes(value) ? value : undefined; }
 function needsDilation(p, prefs) {
   if (typeof p.dilateOverride === 'boolean') return p.dilateOverride;
   return !!prefs?.[p.doctor]?.dilate;
@@ -328,6 +330,7 @@ function buildPatient(raw, fuMap, settings) {
     done: { [VISION_KEY]: false },
     doneAt: {},
     dilateOverride: fu?.dilate === 'yes' ? true : fu?.dilate === 'no' ? false : undefined,
+    dilateEye: fu?.dilate === 'yes' ? dilateEyeOf(fu.dilateEye) : undefined,
     cr: !!fu?.cr,
     drops: [],
     procedures: [],
@@ -339,6 +342,38 @@ function buildPatient(raw, fuMap, settings) {
     consultHold: false,
     calledRoom: null,
   };
+}
+
+// 명단을 다시 올려도 이미 있는 환자의 진행 상황·검사 지정은 그대로 두고, 예약시간만 새 값으로 바꿉니다.
+// 이미 접수한 환자는 대기 순서(직접 끌어서 바꾼 순서 포함)를 건드리지 않고 예약시간 글자만 바꿉니다.
+function mergePatientList(prev, news) {
+  const stats = { added: [], timeChanged: [], unchanged: [], otherDoctor: [] };
+  const map = new Map(prev.map(p => [patientKey(p), p]));
+  news.forEach(np => {
+    const key = patientKey(np);
+    const old = map.get(key);
+    if (!old) { map.set(key, np); stats.added.push(np); return; }
+    if (old.doctor !== np.doctor) { stats.otherDoctor.push(old); return; }
+    if (np.reservation && np.reservation !== old.reservation) {
+      map.set(key, old.checkin
+        ? { ...old, reservation: np.reservation }
+        : { ...old, reservation: np.reservation, queueKey: timeToMin(np.reservation) });
+      stats.timeChanged.push({ ...old, newReservation: np.reservation });
+      return;
+    }
+    stats.unchanged.push(old);
+  });
+  return { next: Array.from(map.values()), stats };
+}
+// 이전 정보(FU)로 검사·산동·CR이 붙은 환자인지
+function hasFollowupApplied(p) {
+  return Object.entries(p.assigned || {}).some(([k, v]) => v && k !== VISION_KEY) || typeof p.dilateOverride === 'boolean' || !!p.cr;
+}
+// 재진인데 오늘 할 검사(CR 포함)가 하나도 없는 환자 → 프로그램 도입 전 환자일 가능성이 높아 확인 필요
+function needsTestCheck(p, prefs) {
+  if (p.firstVisit || p.consultDone) return false;
+  if (Object.entries(p.assigned || {}).some(([k, v]) => v && k !== VISION_KEY)) return false;
+  return !crActive(p, prefs);
 }
 
 function applyCheckin(p, graceMin) {
@@ -603,6 +638,34 @@ async function loadSettings(meta) {
     procedures: Array.isArray(base.procedures) ? base.procedures : DEFAULT_SETTINGS.procedures,
     dilationWaitMin: Number.isFinite(Number(base.dilationWaitMin)) ? Number(base.dilationWaitMin) : 15,
   };
+}
+
+// 실시간 명단에는 어제~앞으로의 날짜만 있습니다. 그보다 지난 명단은 서버가 월별 보관 파일로 옮깁니다.
+function shiftISO(iso, days) {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+function isArchivedDate(date) {
+  return !!date && date < shiftISO(todayISO(), -1);
+}
+// 보관된 날짜를 고르면 그 달의 보관 명단을 한 번 불러옵니다 (보기 전용).
+function useArchivedPatients(date) {
+  const isArchived = isArchivedDate(date);
+  const month = isArchived ? date.slice(0, 7) : '';
+  const [state, setState] = useState({ month: '', list: [], loading: false, error: false });
+  useEffect(() => {
+    if (!month) return undefined;
+    let alive = true;
+    setState({ month, list: [], loading: true, error: false });
+    loadKey(`patients-archive-${month}`, [])
+      .then(list => { if (alive) setState({ month, list: Array.isArray(list) ? list : [], loading: false, error: false }); })
+      .catch(() => { if (alive) setState({ month, list: [], loading: false, error: true }); });
+    return () => { alive = false; };
+  }, [month]);
+  const ready = state.month === month;
+  return { isArchived, list: ready ? state.list : [], loading: isArchived && (!ready || state.loading), error: ready && state.error };
 }
 
 // 화면을 먼저 바꾸고, 저장은 뒤에서 순서대로 처리 (버튼이 즉시 반응하도록)
@@ -1269,10 +1332,10 @@ function PriorityBanner({ groups, patients }) {
   );
 }
 
-function DilationBadge({ st, waitMin }) {
+function DilationBadge({ st, waitMin, eye }) {
   const w = Number(waitMin) || 15;
   if (st.status === 'todo') {
-    return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">점안 필요</span>;
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">점안 필요{eye ? ` · ${DILATE_EYE_LABEL[eye]}` : ''}</span>;
   }
   if (st.status === 'progress') {
     return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">CR {st.given}/{st.total}회, 마지막 점안 후 {st.mins}분</span>;
@@ -1283,6 +1346,32 @@ function DilationBadge({ st, waitMin }) {
   return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">산동 완료</span>;
 }
 
+// 산동 칩을 오른쪽 클릭(길게 누르기)했을 때 뜨는 좌·우안 선택 창
+function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCancel }) {
+  const [v, setV] = useState(eye || 'OU');
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+        <h3 className="text-lg font-medium text-slate-900">{patientName}님 산동</h3>
+        <p className="text-sm text-slate-500 mb-4">한쪽 눈만 산동하면 눈을 골라주세요.</p>
+        <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
+          {EYE_OPTIONS.map(o => (
+            <button key={o.key} type="button" aria-pressed={v === o.key} onClick={() => setV(o.key)}
+              className={`px-3 py-1.5 rounded-md text-sm ${v === o.key ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 mt-6">
+          <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          {on && <button type="button" onClick={onRemove} className="flex-1 py-3 rounded-xl border border-red-200 text-red-600">산동 빼기</button>}
+          <button type="button" onClick={() => onApply(v)} className="flex-1 py-3 rounded-xl bg-rose-600 text-white font-medium">{on ? '적용' : '산동 추가'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 산동 여부·CR·점안 시각 기록. 모든 직원 화면의 환자 카드에서 같은 방식으로 사용
 function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true }) {
   const pk = patientKey(p);
@@ -1290,13 +1379,30 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true }) {
   const cr = crActive(p, prefs);
   const dil = needsDilation(p, prefs);
   const st = dilationState(p, prefs, waitMin);
+  const eye = !cr && dil ? dilateEyeOf(p.dilateEye) : undefined;
+  const [eyeModal, setEyeModal] = useState(false);
   const chip = (on) => `text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
   return (
     <div className="w-full flex flex-wrap items-center gap-1.5">
       {!cr && (
-        <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateOverride: !dil }))} className={chip(dil)}>
-          {dil ? '산동 함' : '산동 안 함'}
-        </button>
+        <SpecialPressButton
+          onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateOverride: !dil }))}
+          onSpecial={() => setEyeModal(true)}
+          title="오른쪽 클릭: 좌·우안 지정"
+          className={`${chip(dil)} select-none`}
+        >
+          {dil ? `산동 함${eye ? ` · ${DILATE_EYE_LABEL[eye]}` : ''}` : '산동 안 함'}
+        </SpecialPressButton>
+      )}
+      {eyeModal && (
+        <DilationEyeModal
+          patientName={p.name}
+          on={dil}
+          eye={dilateEyeOf(p.dilateEye)}
+          onApply={e => { patchPatient(mutatePatients, pk, () => ({ dilateOverride: true, dilateEye: dilateEyeOf(e) })); setEyeModal(false); }}
+          onRemove={() => { patchPatient(mutatePatients, pk, () => ({ dilateOverride: false })); setEyeModal(false); }}
+          onCancel={() => setEyeModal(false)}
+        />
       )}
       {crAvail && (
         <button type="button" onClick={() => patchPatient(mutatePatients, pk, x => ({ cr: !x.cr }))} className={chip(cr)}>
@@ -1316,7 +1422,7 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true }) {
           {cr ? `${i + 1}회 점안` : '점안'}{t ? ` ${fmtClock(t)}` : ''}
         </button>
       ))}
-      {st.need && <DilationBadge st={st} waitMin={waitMin} />}
+      {st.need && <DilationBadge st={st} waitMin={waitMin} eye={eye} />}
     </div>
   );
 }
@@ -1388,7 +1494,8 @@ function TestCheckModal({ title, subtitle, tests, settings, initial, initialDeta
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
   const [showOthers, setShowOthers] = useState(false);
   const [triageRequired, setTriageRequired] = useState(triageChoice !== false);
-  const [dil, setDil] = useState(() => ({ mode: ['yes', 'no'].includes(dilation?.initial?.mode) ? dilation.initial.mode : followup?.prefs?.[followup.doctor]?.dilate ? 'yes' : 'no', cr: !!dilation?.initial?.cr }));
+  const [dil, setDil] = useState(() => ({ mode: ['yes', 'no'].includes(dilation?.initial?.mode) ? dilation.initial.mode : followup?.prefs?.[followup.doctor]?.dilate ? 'yes' : 'no', cr: !!dilation?.initial?.cr, eye: dilateEyeOf(dilation?.initial?.eye) || 'OU' }));
+  const [dilEyeOpen, setDilEyeOpen] = useState(() => !!dilateEyeOf(dilation?.initial?.eye));
   const [sel, setSel] = useState(() => Object.fromEntries(tests.map(t => [t.id, !!initial?.[t.id]])));
   const [detail, setDetail] = useState(() => {
     const out = {};
@@ -1480,16 +1587,27 @@ function TestCheckModal({ title, subtitle, tests, settings, initial, initialDeta
             <div className="text-sm text-slate-700 mb-2">다음 내원 산동</div>
             <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
               {[['yes', '산동 함'], ['no', '산동 안 함']].map(([k, label]) => (
-                <button
+                <SpecialPressButton
                   key={k}
-                  type="button"
                   onClick={() => setDil(d => ({ ...d, mode: k }))}
-                  className={`px-3 py-1.5 rounded-md text-sm ${dil.mode === k ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}
+                  onSpecial={k === 'yes' ? () => { setDil(d => ({ ...d, mode: 'yes' })); setDilEyeOpen(true); } : undefined}
+                  title={k === 'yes' ? '오른쪽 클릭: 좌·우안 지정' : undefined}
+                  className={`px-3 py-1.5 rounded-md text-sm select-none ${dil.mode === k ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}
                 >
-                  {label}
-                </button>
+                  {k === 'yes' && dil.mode === 'yes' && dil.eye !== 'OU' ? `${label} · ${DILATE_EYE_LABEL[dil.eye]}` : label}
+                </SpecialPressButton>
               ))}
             </div>
+            {dil.mode === 'yes' && dilEyeOpen && (
+              <div className="mt-2 inline-flex gap-1 bg-slate-100 rounded-lg p-1 ml-0 sm:ml-2">
+                {EYE_OPTIONS.map(o => (
+                  <button key={o.key} type="button" aria-pressed={dil.eye === o.key} onClick={() => setDil(d => ({ ...d, eye: o.key }))}
+                    className={`px-3 py-1.5 rounded-md text-sm ${dil.eye === o.key ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {(followup ? !!followup.prefs?.[followupDoctor]?.cr : dilation.crAvailable) && (
               <label className="flex items-center gap-2 mt-3 text-sm text-slate-700 cursor-pointer">
                 <input type="checkbox" checked={dil.cr} onChange={e => setDil(d => ({ ...d, cr: e.target.checked }))} className="w-4 h-4" />
@@ -2029,6 +2147,7 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
         ...sel,
         detail,
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
+        dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
         updatedAt: at,
     }));
@@ -2070,6 +2189,7 @@ function ConsultView({ patients, doctors, doctorPrefs, settings, history, mutate
   const dilationInitial = (p) => ({
     mode: needsDilation(p, doctorPrefs) ? 'yes' : 'no',
     cr: !!p.cr,
+    eye: p.dilateEye,
   });
 
   return (
@@ -2398,6 +2518,43 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   );
 }
 
+// 명단 올리기 결과 요약 + 파일에서 빠진 환자 삭제 버튼
+function UploadResult({ result, patients, onRemove, onShowList }) {
+  const { date, doctor, total, stats, missing } = result;
+  const byKey = new Map(patients.map(p => [patientKey(p), p]));
+  const stillMissing = missing.map(k => byKey.get(k)).filter(Boolean);
+  const withFu = stats ? stats.added.filter(hasFollowupApplied).length : 0;
+  const fv = stats ? stats.added.filter(p => p.firstVisit).length : 0;
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 space-y-2">
+      <div className="font-medium text-slate-900">{date} {doctor} 명단 · 파일 속 환자 {total}명</div>
+      {stats ? (
+        <ul className="space-y-1">
+          <li>새로 추가 <b>{stats.added.length}명</b>{stats.added.length > 0 && ` (이전 정보 적용 ${withFu}명 · 이전 정보 없음 ${stats.added.length - withFu}명${fv ? ` · 초진 ${fv}명` : ''})`}</li>
+          {stats.timeChanged.length > 0 && <li>이미 있어 <b>예약시간만 변경 {stats.timeChanged.length}명</b>: {stats.timeChanged.slice(0, 8).map(p => `${p.name} ${p.reservation || '-'}→${p.newReservation}`).join(', ')}{stats.timeChanged.length > 8 ? ` 외 ${stats.timeChanged.length - 8}명` : ''}</li>}
+          {stats.unchanged.length > 0 && <li>이미 있어 그대로 둠 {stats.unchanged.length}명</li>}
+          {stats.otherDoctor.length > 0 && <li className="text-amber-800">같은 날 <b>다른 교수 명단에 이미 있어 건너뜀 {stats.otherDoctor.length}명</b>: {stats.otherDoctor.slice(0, 8).map(p => `${p.name}(${p.doctor})`).join(', ')} · 필요하면 명단 관리에서 교수를 바꿔주세요.</li>}
+        </ul>
+      ) : <div className="text-red-600">저장하지 못했습니다. 서버 연결을 확인하고 다시 올려주세요.</div>}
+      {stillMissing.length > 0 && (
+        <div className="rounded-lg border border-orange-300 bg-orange-50 p-3">
+          <div className="font-medium text-orange-900 mb-1">이번 파일에 없는 환자 {stillMissing.length}명</div>
+          <p className="text-xs text-orange-800 mb-2">같은 날짜·교수 명단에 있었지만 이번 파일에는 없습니다. 예약이 취소된 환자인지 확인한 뒤 삭제하세요. (삭제 버튼은 두 번 눌러야 삭제됩니다)</p>
+          {stillMissing.map(p => (
+            <div key={patientKey(p)} className="flex items-center justify-between gap-2 py-1 border-t border-orange-200 first:border-t-0">
+              <span>{p.name} <span className="text-xs text-slate-500">{p.id} · 예약 {p.reservation || '-'}{p.checkin ? ` · 접수 ${p.checkin}` : ''}</span></span>
+              <ConfirmButton label="삭제" onConfirm={() => onRemove(p.id, p.date)} />
+            </div>
+          ))}
+        </div>
+      )}
+      {stats && (
+        <button type="button" onClick={onShowList} className="text-xs underline text-slate-600">명단 관리에서 보기</button>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* 관리자 화면                                                          */
 /* ------------------------------------------------------------------ */
@@ -2426,11 +2583,25 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
 
   const allTests = sortedTests(settings);
 
-  const upsert = (news) => mutatePatients(prev => {
-    const map = new Map(prev.map(p => [patientKey(p), p]));
-    news.forEach(np => map.set(patientKey(np), np));
-    return Array.from(map.values());
+  const [uploadResult, setUploadResult] = useState(null);
+  const [sortMode, setSortMode] = useState(() => {
+    try { return localStorage.getItem('admin-sort') === 'name' ? 'name' : 'time'; } catch { return 'time'; }
   });
+  const changeSort = (mode) => {
+    setSortMode(mode);
+    try { localStorage.setItem('admin-sort', mode); } catch { /* 저장 못 해도 동작에는 문제 없음 */ }
+  };
+
+  // 이미 명단에 있는 환자는 덮어쓰지 않습니다 (mergePatientList 참고). 저장된 결과의 통계를 돌려줍니다.
+  const upsert = async (news) => {
+    let stats = null;
+    await mutatePatients(prev => {
+      const r = mergePatientList(prev, news);
+      stats = r.stats;
+      return r.next;
+    });
+    return stats;
+  };
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -2441,23 +2612,35 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       const wb = XLSX.read(buf, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      // 환자번호·이름은 엑셀 화면에 보이는 글자 그대로 읽습니다 (예: 앞자리 0 유지)
+      const shown = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
       const currentFu = await loadFu();
       const news = rows
-        .map(row => ({
-          id: String(row['환자번호'] ?? '').trim(),
-          name: String(row['이름'] ?? '').trim(),
+        .map((row, i) => ({
+          id: String(shown[i]?.['환자번호'] ?? row['환자번호'] ?? '').trim(),
+          name: String(shown[i]?.['이름'] ?? row['이름'] ?? '').trim(),
           reservation: normalizeTime(row['예약시간']),
           firstVisit: isFirstVisitMark(row['초진']),
           date: batchDate,
           doctor: batchDoctor,
         }))
-        .filter(r => r.id)
-        .map(r => buildPatient(r, currentFu, settings));
-      await upsert(news);
-      const fvCount = news.filter(n => n.firstVisit).length;
-      setMessage(news.length
-        ? `${batchDate} ${batchDoctor} 명단에 ${news.length}명을 올렸습니다.${fvCount ? ` (초진 ${fvCount}명)` : ''}`
-        : '환자를 찾지 못했습니다. 첫 줄에 환자번호 / 이름 / 예약시간 제목이 있는지 확인해주세요.');
+        .filter(r => r.id);
+      const uniq = [...new Map(news.map(r => [r.id, r])).values()].map(r => buildPatient(r, currentFu, settings));
+      if (!uniq.length) {
+        setUploadResult(null);
+        setMessage('환자를 찾지 못했습니다. 첫 줄에 환자번호 / 이름 / 예약시간 제목이 있는지 확인해주세요.');
+        e.target.value = '';
+        return;
+      }
+      let stats = null;
+      try { stats = await upsert(uniq); } catch { /* 저장 실패는 결과 창에 표시 */ }
+      const ids = new Set(uniq.map(p => p.id));
+      // 같은 날짜·같은 교수 명단에 있었는데 이번 파일에는 없는 환자 → 사용자가 확인 후 삭제
+      const missing = patients
+        .filter(p => p.date === batchDate && p.doctor === batchDoctor && !ids.has(p.id))
+        .map(p => patientKey(p));
+      setMessage('');
+      setUploadResult({ date: batchDate, doctor: batchDoctor, total: uniq.length, stats, missing });
     } catch (err) {
       setMessage('파일을 읽지 못했습니다. 엑셀(.xlsx) 파일인지 확인해주세요.');
     }
@@ -2481,7 +2664,8 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
     const freshFu = await loadFu();
     const news = sampleRows().map((r, i) => buildPatient({ ...r, firstVisit: r.id === '10003', date: todayISO(), doctor: docsNow[i % docsNow.length] }, freshFu, settings));
     await upsert(news);
-    setMessage(`샘플 환자 ${news.length}명을 오늘 명단에 올렸습니다.`);
+    setUploadResult(null);
+    setMessage(`샘플 환자 ${news.length}명을 오늘 명단에 올렸습니다. (이미 있던 환자는 그대로 둡니다)`);
   };
 
   const downloadTemplate = () => {
@@ -2498,13 +2682,20 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
     if (!manual.id || !manual.name) { setMessage('환자번호와 이름을 입력해주세요.'); return; }
     if (!batchDoctor) { setMessage('먼저 담당 교수를 선택해주세요.'); return; }
     const currentFu = await loadFu();
-    const np = buildPatient({ ...manual, reservation: normalizeTime(manual.reservation), date: batchDate, doctor: batchDoctor }, currentFu, settings);
-    upsert([np]);
-    setMessage(`${manual.name}님을 ${batchDate} ${batchDoctor} 명단에 추가했습니다.`);
+    const np = buildPatient({ ...manual, id: manual.id.trim(), name: manual.name.trim(), reservation: normalizeTime(manual.reservation), date: batchDate, doctor: batchDoctor }, currentFu, settings);
+    const stats = await upsert([np]);
+    if (stats?.otherDoctor.length) setMessage(`${manual.name}님은 ${batchDate}에 이미 ${stats.otherDoctor[0].doctor} 명단에 있습니다. 교수 변경은 명단 관리에서 해주세요.`);
+    else if (stats?.timeChanged.length) setMessage(`${manual.name}님은 이미 명단에 있어 예약시간만 ${np.reservation}(으)로 바꿨습니다. 진행 상황은 그대로입니다.`);
+    else if (stats?.unchanged.length) setMessage(`${manual.name}님은 이미 ${batchDate} ${batchDoctor} 명단에 있습니다.`);
+    else setMessage(`${manual.name}님을 ${batchDate} ${batchDoctor} 명단에 추가했습니다.${hasFollowupApplied(np) ? ' (이전 정보 적용)' : ''}`);
     setManual({ id: '', name: '', reservation: '', firstVisit: false });
   };
 
-  const byDate = patients.filter(p => p.date === manageDate).sort(byQueue);
+  const archived = useArchivedPatients(manageDate);
+  const readOnly = archived.isArchived;
+  const byName = (a, b) => String(a.name).localeCompare(String(b.name), 'ko') || String(a.id).localeCompare(String(b.id));
+  const byDate = (readOnly ? archived.list : patients).filter(p => p.date === manageDate).sort(sortMode === 'name' ? byName : byQueue);
+  const checkCount = readOnly ? 0 : byDate.filter(p => needsTestCheck(p, doctorPrefs)).length;
   const updateOne = (id, date, fn) => mutatePatients(prev => prev.map(p => (p.id === id && p.date === date ? fn(p) : p)));
   const removeOne = (id, date) => mutatePatients(prev => prev.filter(p => !(p.id === id && p.date === date)));
   const reassignDoctor = (id, date, doctor) => updateOne(id, date, p => ({ ...p, doctor }));
@@ -2519,6 +2710,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
         ...sel,
         detail,
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
+        dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
         updatedAt: Date.now(),
     }));
@@ -2563,7 +2755,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       {tab === 'upload' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">엑셀 명단 올리기</div>
-          <p className="text-sm text-slate-500 mb-3">환자번호, 이름, 예약시간 세 칸만 있으면 됩니다. 초진 칸을 추가해 O를 적으면 초진으로 체크돼요(없어도 됩니다). 위에서 고른 날짜와 교수가 파일 속 모든 환자에게 적용되고, 저장된 FU 검사는 환자번호로 자동으로 붙습니다.</p>
+          <p className="text-sm text-slate-500 mb-3">환자번호, 이름, 예약시간 세 칸만 있으면 됩니다. 초진 칸을 추가해 O를 적으면 초진으로 체크돼요(없어도 됩니다). 위에서 고른 날짜와 교수가 파일 속 모든 환자에게 적용되고, 저장된 FU 검사는 환자번호로 자동으로 붙습니다. 같은 명단을 다시 올려도 이미 있는 환자는 지정해둔 검사·진행 상황이 그대로 유지되고, 예약시간만 바뀐 경우 새 시간으로 고쳐집니다.</p>
           <div className="flex gap-3 flex-wrap items-center">
             <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium cursor-pointer">
               <Upload size={16} /> 엑셀 올리기
@@ -2572,6 +2764,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
             <button type="button" onClick={downloadTemplate} className="px-4 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-600">템플릿 받기</button>
             <button type="button" onClick={loadSample} className="px-4 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-600">데모 샘플 넣기</button>
           </div>
+          {uploadResult && <UploadResult result={uploadResult} patients={patients} onRemove={removeOne} onShowList={() => { setManageDate(uploadResult.date); setTab('today'); }} />}
         </div>
       )}
 
@@ -2593,20 +2786,42 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
 
       {tab === 'today' && (
         <div>
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span className="text-sm text-slate-500">날짜</span>
             <input type="date" value={manageDate} onChange={e => setManageDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
             <span className="text-sm text-slate-400">{byDate.length}명</span>
+            <div className="ml-auto inline-flex gap-1 bg-slate-100 rounded-lg p-1">
+              {[['time', '예약시간순'], ['name', '가나다순']].map(([k, label]) => (
+                <button key={k} type="button" aria-pressed={sortMode === k} onClick={() => changeSort(k)}
+                  className={`px-3 py-1.5 rounded-md text-sm ${sortMode === k ? 'bg-white text-slate-900 font-medium shadow' : 'text-slate-500'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-          {byDate.length === 0 ? <EmptyState text="이 날짜에 올라간 환자가 없습니다" /> : byDate.map(p => (
-            <div key={patientKey(p)} className="bg-white border border-slate-200 rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap">
+          {readOnly && (
+            <div className="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm text-slate-600">
+              {archived.loading ? '지난 명단을 불러오는 중입니다…' : archived.error ? '지난 명단을 불러오지 못했습니다. 서버 연결을 확인해주세요.' : '지난 날짜의 보관된 명단입니다. 보기만 할 수 있습니다.'}
+            </div>
+          )}
+          {checkCount > 0 && (
+            <div className="bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 mb-4 text-sm text-orange-900">
+              <span className="font-semibold">확인 필요 {checkCount}명</span> · 재진인데 오늘 검사가 하나도 지정되지 않았습니다. 프로그램 사용 전에 진료받은 환자일 수 있으니 검사를 지정해주세요.
+            </div>
+          )}
+          {byDate.length === 0 ? <EmptyState text={readOnly && archived.loading ? '불러오는 중…' : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
+            const flag = !readOnly && needsTestCheck(p, doctorPrefs);
+            return (
+            <div key={patientKey(p)} className={`bg-white rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap ${flag ? 'border-2 border-orange-400' : 'border border-slate-200'}`}>
               <div>
-                <div className="font-medium text-slate-900 flex items-center gap-2">
+                <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                   {p.name} <span className="text-xs text-slate-400">{p.id}</span>
+                  {flag && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
                 </div>
-                <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · {getStage(p, settings).label}</div>
+                <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · {readOnly ? p.doctor : getStage(p, settings).label}</div>
               </div>
+              {!readOnly && <>
               <div className="flex gap-2 items-center flex-wrap">
                 <select value={p.doctor} onChange={e => reassignDoctor(p.id, p.date, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
                   {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
@@ -2619,8 +2834,10 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
               </div>
               <TestPicker p={p} tests={allTests} onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }} onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }} />
               <DilationRow showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+              </>}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -2634,7 +2851,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
           {fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
           {fuIds.map(id => {
             const fu = fuMap[id];
-            const dilText = [fu.dilate === 'yes' ? '산동 함' : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
+            const dilText = [fu.dilate === 'yes' ? `산동 함${dilateEyeOf(fu.dilateEye) ? ` (${DILATE_EYE_LABEL[fu.dilateEye]})` : ''}` : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
             const names = [allTests.filter(t => fu[t.id]).map(t => testLabelWithOptions(t, fu.detail?.[t.id])).join(', '), dilText].filter(Boolean).join(' / ');
             const fuNotes = allTests
               .filter(t => fu[t.id] && String(fu.detail?.[t.id]?.note ?? '').trim())
@@ -2672,7 +2889,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
           settings={settings}
           initial={fuEdit}
           initialDetail={fuEdit.detail}
-          dilation={{ crAvailable: crAnywhere, initial: { mode: fuEdit.dilate || 'default', cr: !!fuEdit.cr } }}
+          dilation={{ crAvailable: crAnywhere, initial: { mode: fuEdit.dilate || 'default', cr: !!fuEdit.cr, eye: fuEdit.dilateEye } }}
           confirmLabel="저장"
           onConfirm={saveFuEdit}
           onCancel={() => setFuEdit(null)}
@@ -3347,8 +3564,10 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
     closeRef.current?.focus();
     return () => { document.body.style.overflow = overflow; previous?.focus(); };
   }, []);
-  const list = filterDirectory(patients, settings, date, query, doctor, status);
-  const doctors = [...new Set(patients.map(p => p.doctor).filter(Boolean))];
+  const archived = useArchivedPatients(date);
+  const source = archived.isArchived ? archived.list : patients;
+  const list = filterDirectory(source, settings, date, query, doctor, status);
+  const doctors = [...new Set(source.map(p => p.doctor).filter(Boolean))];
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="directory-title" className="fixed inset-0 z-[60] overflow-y-auto bg-slate-50" onKeyDown={e => {
       if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
@@ -3368,12 +3587,13 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
       <div className="mx-auto max-w-5xl space-y-4 p-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-white p-4">
           <Field label="환자 검색"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="이름 · 환자번호 · 교수 · 대기 명단" className={INPUT} /></Field>
-          <Field label="진료 날짜 (비우면 모든 날짜)"><input type="date" value={date} onChange={e => setDate(e.target.value)} className={INPUT} /></Field>
+          <Field label="진료 날짜 (비우면 어제~앞으로의 모든 날짜)"><input type="date" value={date} onChange={e => setDate(e.target.value)} className={INPUT} /></Field>
           <Field label="담당 교수"><select value={doctor} onChange={e => setDoctor(e.target.value)} className={INPUT}><option value="">전체 교수</option>{doctors.map(d => <option key={d} value={d}>{d}</option>)}</select></Field>
           <Field label="진행 상태"><select value={status} onChange={e => setStatus(e.target.value)} className={INPUT}>{DIRECTORY_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500"><span>조회 결과 {list.length}명 · {date || '모든 날짜'}</span><button type="button" onClick={() => { setQuery(''); setDoctor(''); setStatus('all'); setDate(todayISO()); }} className="underline">오늘 전체로 초기화</button></div>
-        {!list.length ? <EmptyState text="조건에 맞는 환자가 없습니다. 검색어나 날짜를 확인해주세요." /> : list.map(p => (
+        {archived.isArchived && <div className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">{archived.loading ? '지난 명단을 불러오는 중입니다…' : archived.error ? '지난 명단을 불러오지 못했습니다. 서버 연결을 확인해주세요.' : '지난 날짜의 보관된 명단입니다.'}</div>}
+        {!list.length ? <EmptyState text={archived.loading ? '불러오는 중…' : '조건에 맞는 환자가 없습니다. 검색어나 날짜를 확인해주세요.'} /> : list.map(p => (
           <div key={patientKey(p)} className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="flex flex-wrap items-center gap-2"><span className="text-lg font-semibold text-slate-900">{p.name}</span><span className="text-sm text-slate-500">{p.id} · {p.doctor || '담당 교수 미지정'}</span>{p.firstVisit && <span className="text-xs text-sky-700">초진</span>}</div>
             <div className="mt-1 text-xs text-slate-500">{p.date} · 예약 {p.reservation || '-'} · 접수 {p.checkin || '미접수'}</div>

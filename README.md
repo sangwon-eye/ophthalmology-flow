@@ -7,4 +7,4 @@
 
 - `src/App.jsx` : 앱 화면과 기능
 - `src/main.jsx` : 서버 저장소 연결, 연결 끊김/새 버전 알림
-- `server.js` : 공유 서버 (Node.js 기본 기능만 사용, 데이터는 `data/store.json`)
+- `server.js` : 공유 서버 (Node.js 기본 기능만 사용, 데이터는 `data/keys/`)

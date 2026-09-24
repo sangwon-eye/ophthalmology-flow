@@ -12,12 +12,16 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 const DIST_DIR = path.join(ROOT, 'dist');
 const DATA_DIR = path.join(ROOT, 'data');
-const STORE_FILE = path.join(DATA_DIR, 'store.json');
+const KEYS_DIR = path.join(DATA_DIR, 'keys');
+const OLD_STORE_FILE = path.join(DATA_DIR, 'store.json');
 // 백업 폴더. 공유폴더에 백업하려면 서버시작.bat 에서 BACKUP_DIR 을 지정하세요.
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(DATA_DIR, 'backups');
 const BACKUP_KEEP_DAYS = 30;
-const MAX_BODY = 20 * 1024 * 1024;
-
+const MAX_BODY = 50 * 1024 * 1024;
+// 실시간으로 주고받는 명단은 어제~앞으로의 날짜만. 그보다 지난 명단은 월별 보관 파일로 옮깁니다.
+const LIVE_PATIENTS_KEY = 'daily-patients';
+const ARCHIVE_PREFIX = 'patients-archive-';
+const LIVE_PAST_DAYS = 1;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -31,59 +35,129 @@ const MIME = {
 };
 
 /* ---------------- 데이터 저장 ---------------- */
-// store = { [key]: { version, value, updatedAt } }
-function loadStore() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(STORE_FILE)) return {};
-  const text = fs.readFileSync(STORE_FILE, 'utf8');
+// 항목(key)마다 data\keys\<key>.json 파일 하나: { version, value, updatedAt }
+// 항목별로 나눠 저장하므로, 버튼 하나 누를 때 바뀐 항목만 저장합니다.
+const KEY_RE = /^[A-Za-z0-9_-]{1,100}$/;
+const cache = new Map();
+
+function keyFile(key) { return path.join(KEYS_DIR, `${key}.json`); }
+
+function readItem(key) {
+  if (cache.has(key)) return cache.get(key);
+  const file = keyFile(key);
+  let item = null;
+  if (fs.existsSync(file)) {
+    try {
+      item = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      console.error(`\n[오류] ${file} 파일이 손상되어 읽을 수 없습니다.`);
+      console.error('데이터를 덮어쓰지 않도록 서버를 멈춥니다.');
+      console.error(`백업 폴더(${BACKUP_DIR})의 가장 최근 날짜 폴더에서 같은 이름의 파일을 복사해 넣은 뒤 다시 실행하세요.\n`);
+      process.exit(1);
+    }
+  }
+  cache.set(key, item);
+  return item;
+}
+
+function writeFileSafely(file, text) {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, text);
   try {
-    return JSON.parse(text);
+    fs.renameSync(tmp, file);
   } catch {
-    console.error('\n[오류] data\\store.json 파일이 손상되어 읽을 수 없습니다.');
-    console.error('데이터를 덮어쓰지 않도록 서버를 멈춥니다.');
-    console.error(`백업 폴더(${BACKUP_DIR})의 최근 파일을 data\\store.json 으로 복사한 뒤 다시 실행하세요.\n`);
-    process.exit(1);
+    // 백신 프로그램 등이 파일을 잡고 있으면 이름 바꾸기가 실패할 수 있어 직접 씁니다.
+    fs.writeFileSync(file, text);
+    fs.rmSync(tmp, { force: true });
   }
 }
 
-const store = loadStore();
+function writeItem(key, value) {
+  backupOncePerDay(); // 그날 첫 저장 전에 어제까지의 데이터를 백업
+  const item = { version: (readItem(key)?.version || 0) + 1, value, updatedAt: new Date().toISOString() };
+  writeFileSafely(keyFile(key), JSON.stringify(item));
+  cache.set(key, item);
+  return item;
+}
 
-function writeStore() {
-  const text = JSON.stringify(store);
-  const tmp = `${STORE_FILE}.tmp`;
-  fs.writeFileSync(tmp, text);
-  try {
-    fs.renameSync(tmp, STORE_FILE);
-  } catch {
-    // 백신 프로그램 등이 파일을 잡고 있으면 이름 바꾸기가 실패할 수 있어 직접 씁니다.
-    fs.writeFileSync(STORE_FILE, text);
-    fs.rmSync(tmp, { force: true });
+// 이전 버전(store.json 한 파일)에서 쓰던 데이터를 항목별 파일로 옮깁니다.
+function migrateOldStore() {
+  if (!fs.existsSync(OLD_STORE_FILE)) return;
+  let old;
+  try { old = JSON.parse(fs.readFileSync(OLD_STORE_FILE, 'utf8')); } catch {
+    console.error('\n[오류] data\\store.json 파일이 손상되어 옮길 수 없습니다. 서버를 멈춥니다.\n');
+    process.exit(1);
   }
-  backupOncePerDay();
+  for (const [key, item] of Object.entries(old)) {
+    if (KEY_RE.test(key) && !fs.existsSync(keyFile(key))) writeFileSafely(keyFile(key), JSON.stringify(item));
+  }
+  fs.renameSync(OLD_STORE_FILE, `${OLD_STORE_FILE}.옮김완료`);
+  console.log('이전 데이터(store.json)를 새 저장 방식으로 옮겼습니다.');
 }
 
 let lastBackupDay = null;
 function backupOncePerDay() {
   const day = localDate();
   if (lastBackupDay === day) return;
+  lastBackupDay = day;
   try {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    fs.copyFileSync(STORE_FILE, path.join(BACKUP_DIR, `store-${day}.json`));
-    lastBackupDay = day;
-    const files = fs.readdirSync(BACKUP_DIR).filter(f => /^store-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
-    for (const f of files.slice(0, Math.max(0, files.length - BACKUP_KEEP_DAYS))) {
-      fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+    const target = path.join(BACKUP_DIR, day);
+    if (fs.existsSync(target)) return;
+    const files = fs.existsSync(KEYS_DIR) ? fs.readdirSync(KEYS_DIR).filter(f => f.endsWith('.json')) : [];
+    if (!files.length) return;
+    fs.mkdirSync(target, { recursive: true });
+    for (const f of files) fs.copyFileSync(path.join(KEYS_DIR, f), path.join(target, f));
+    const days = fs.readdirSync(BACKUP_DIR).filter(f => /^\d{4}-\d{2}-\d{2}$/.test(f)).sort();
+    for (const d of days.slice(0, Math.max(0, days.length - BACKUP_KEEP_DAYS))) {
+      fs.rmSync(path.join(BACKUP_DIR, d), { recursive: true, force: true });
     }
   } catch (e) {
     console.error(`[경고] 백업에 실패했습니다 (${BACKUP_DIR}): ${e.message}`);
   }
 }
 
-function localDate() {
+function localDate(offsetDays = 0) {
   const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+// 어제보다 지난 명단을 월별 보관 파일(patients-archive-YYYY-MM)로 옮깁니다.
+function archiveOldPatients() {
+  const live = readItem(LIVE_PATIENTS_KEY);
+  if (!live) return;
+  let list;
+  try { list = JSON.parse(live.value); } catch { return; }
+  if (!Array.isArray(list)) return;
+  const cutoff = localDate(-LIVE_PAST_DAYS);
+  const old = list.filter(p => typeof p?.date === 'string' && p.date < cutoff);
+  if (!old.length) return;
+  const byMonth = new Map();
+  for (const p of old) {
+    const month = p.date.slice(0, 7);
+    if (!byMonth.has(month)) byMonth.set(month, []);
+    byMonth.get(month).push(p);
+  }
+  for (const [month, items] of byMonth) {
+    const key = `${ARCHIVE_PREFIX}${month}`;
+    let prev = [];
+    try { prev = JSON.parse(readItem(key)?.value || '[]'); } catch { prev = []; }
+    const merged = new Map(prev.map(p => [`${p.id}::${p.date}`, p]));
+    for (const p of items) merged.set(`${p.id}::${p.date}`, p);
+    writeItem(key, JSON.stringify([...merged.values()]));
+  }
+  // 보관 파일을 먼저 저장한 뒤 실시간 명단에서 뺍니다 (중간에 멈춰도 데이터가 사라지지 않도록).
+  writeItem(LIVE_PATIENTS_KEY, JSON.stringify(list.filter(p => !old.includes(p))));
+  console.log(`지난 명단 ${old.length}명을 보관 파일로 옮겼습니다.`);
+}
+
+fs.mkdirSync(KEYS_DIR, { recursive: true });
+migrateOldStore();
+archiveOldPatients();
+setInterval(() => {
+  try { archiveOldPatients(); } catch (e) { console.error(`[경고] 지난 명단 보관 실패: ${e.message}`); }
+}, 10 * 60 * 1000);
 
 /* ---------------- HTTP ---------------- */
 function sendJson(res, status, body) {
@@ -116,10 +190,18 @@ async function handleApi(req, res, pathname) {
   const m = pathname.match(/^\/api\/storage\/([^/]+)$/);
   if (!m) return sendJson(res, 404, { error: 'not found' });
   const key = decodeURIComponent(m[1]);
+  if (!KEY_RE.test(key)) return sendJson(res, 400, { error: 'bad key' });
 
   if (req.method === 'GET') {
-    const item = store[key];
+    const item = readItem(key);
     if (!item) return sendJson(res, 404, { version: 0 });
+    // 브라우저가 이미 같은 버전을 갖고 있으면 내용을 다시 보내지 않습니다 (4초마다 확인하므로 중요).
+    const have = new URL(req.url, 'http://localhost').searchParams.get('have');
+    if (have !== null && Number(have) === item.version) {
+      res.writeHead(304, { 'Cache-Control': 'no-store' });
+      res.end();
+      return;
+    }
     return sendJson(res, 200, { key, value: item.value, version: item.version });
   }
 
@@ -127,19 +209,19 @@ async function handleApi(req, res, pathname) {
     let body;
     try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
     if (typeof body?.value !== 'string') return sendJson(res, 400, { error: 'value must be a string' });
-    const current = store[key]?.version || 0;
+    const current = readItem(key)?.version || 0;
     // 다른 컴퓨터가 그 사이에 먼저 저장했다면 거절하고, 브라우저가 최신 내용으로 다시 적용합니다.
     if (body.version !== undefined && body.version !== null && Number(body.version) !== current) {
       return sendJson(res, 409, { error: 'conflict', version: current });
     }
-    store[key] = { version: current + 1, value: body.value, updatedAt: new Date().toISOString() };
+    let item;
     try {
-      writeStore();
+      item = writeItem(key, body.value);
     } catch (e) {
       console.error(`[오류] 저장 실패: ${e.message}`);
       return sendJson(res, 500, { error: 'write failed' });
     }
-    return sendJson(res, 200, { key, version: store[key].version });
+    return sendJson(res, 200, { key, version: item.version });
   }
 
   return sendJson(res, 405, { error: 'method not allowed' });
@@ -193,7 +275,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(` 이 컴퓨터에서 접속:   http://localhost:${PORT}`);
   for (const a of addrs) console.log(` 다른 컴퓨터에서 접속: http://${a}:${PORT}`);
   console.log('');
-  console.log(` 데이터 파일: ${STORE_FILE}`);
+  console.log(` 데이터 폴더: ${KEYS_DIR}`);
   console.log(` 백업 폴더:   ${BACKUP_DIR}`);
   console.log('');
   console.log(' 이 창을 닫으면 모든 컴퓨터에서 사용할 수 없습니다.');

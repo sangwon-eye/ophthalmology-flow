@@ -30,13 +30,20 @@ async function request(url, options) {
   }
 }
 
+// 마지막으로 받은 값. 서버 값이 그대로면(304) 다시 내려받지 않고 이것을 씁니다.
+const lastSeen = new Map();
+
 window.storage = {
   // 없는 값이면 null, 서버에 연결되지 않으면 오류를 던집니다 (빈 데이터로 덮어쓰지 않도록).
   async get(key) {
-    const res = await request(`/api/storage/${encodeURIComponent(key)}`);
-    if (res.status === 404) return null;
+    const known = lastSeen.get(key);
+    const res = await request(`/api/storage/${encodeURIComponent(key)}${known ? `?have=${known.version}` : ''}`);
+    if (res.status === 304 && known) return known;
+    if (res.status === 404) { lastSeen.delete(key); return null; }
     if (!res.ok) throw new Error(`불러오기 실패 (${res.status})`);
-    return res.json();
+    const item = await res.json();
+    lastSeen.set(key, item);
+    return item;
   },
   // version 을 주면, 그 사이에 다른 컴퓨터가 먼저 저장했을 때 conflict 오류가 납니다.
   async set(key, value, _shared, version) {
@@ -51,7 +58,9 @@ window.storage = {
       throw err;
     }
     if (!res.ok) throw new Error(`저장 실패 (${res.status})`);
-    return res.json();
+    const saved = await res.json();
+    lastSeen.set(key, { key, value, version: saved.version });
+    return saved;
   },
 };
 
