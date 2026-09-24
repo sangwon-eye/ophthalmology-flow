@@ -88,7 +88,7 @@ function timeToMin(t) {
 function normalizeTime(v) {
   if (v === null || v === undefined || v === '') return '';
   if (typeof v === 'number') {
-    const totalMin = Math.round(v * 24 * 60);
+    const totalMin = Math.round((v % 1) * 24 * 60) % (24 * 60);
     const h = Math.floor(totalMin / 60), m = totalMin % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
@@ -293,12 +293,6 @@ function updateVf(p, key, action, at) {
     vfInProgress: null, vfStartedAt: null,
     ...(action === 'finish' ? { done: { ...p.done, [key]: true }, doneAt: { ...p.doneAt, [key]: at } } : {}),
   };
-}
-
-function isFirstVisitMark(v) {
-  const s = String(v ?? '').trim();
-  if (!s) return false;
-  return !['x', 'X', 'n', 'N', '0', '-', '아니오', 'false', 'FALSE'].includes(s);
 }
 
 function followupForDoctor(record, doctor) {
@@ -2919,10 +2913,11 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       const currentFu = await loadFu();
       const news = rows
         .map((row, i) => ({
+          // 양식: 예약 | 환자번호 | 환자명 | 초재진 — '재진'이 아니면 모두 초진
           id: String(shown[i]?.['환자번호'] ?? row['환자번호'] ?? '').trim(),
-          name: String(shown[i]?.['이름'] ?? row['이름'] ?? '').trim(),
-          reservation: normalizeTime(row['예약시간']),
-          firstVisit: isFirstVisitMark(row['초진']),
+          name: String(shown[i]?.['환자명'] ?? row['환자명'] ?? '').trim(),
+          reservation: normalizeTime(row['예약']),
+          firstVisit: !String(row['초재진'] ?? '').includes('재진'),
           date: batchDate,
           doctor: batchDoctor,
         }))
@@ -2930,7 +2925,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       const uniq = [...new Map(news.map(r => [r.id, r])).values()].map(r => buildPatient(r, currentFu, settings));
       if (!uniq.length) {
         setUploadResult(null);
-        setMessage('환자를 찾지 못했습니다. 첫 줄에 환자번호 / 이름 / 예약시간 제목이 있는지 확인해주세요.');
+        setMessage('환자를 찾지 못했습니다. 첫 줄에 예약 / 환자번호 / 환자명 / 초재진 제목이 있는지 확인해주세요.');
         e.target.value = '';
         return;
       }
@@ -2972,8 +2967,8 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
-      { 환자번호: '10001', 이름: '홍길동', 예약시간: '09:00', 초진: '' },
-      { 환자번호: '10002', 이름: '김철수', 예약시간: '09:10', 초진: 'O' },
+      { 예약: '09:00', 환자번호: '10001', 환자명: '홍길동', 초재진: '재진' },
+      { 예약: '09:10', 환자번호: '10002', 환자명: '김철수', 초재진: '초진' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '명단');
@@ -3121,7 +3116,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
       {tab === 'upload' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">엑셀 명단 올리기</div>
-          <p className="t-hint text-sm text-slate-500 mb-3">환자번호, 이름, 예약시간 세 칸만 있으면 됩니다. 초진 칸을 추가해 O를 적으면 초진으로 체크돼요(없어도 됩니다). 위에서 고른 날짜와 교수가 파일 속 모든 환자에게 적용되고, 저장된 FU 검사는 환자번호로 자동으로 붙습니다. 같은 명단을 다시 올려도 이미 있는 환자는 지정해둔 검사·진행 상황이 그대로 유지되고, 예약시간만 바뀐 경우 새 시간으로 고쳐집니다.</p>
+          <p className="t-hint text-sm text-slate-500 mb-3">첫 줄에 예약 · 환자번호 · 환자명 · 초재진 제목을 적어주세요. 초재진 칸에 '재진'이라고 적힌 환자 외에는 모두 초진으로 올라갑니다. 위에서 고른 날짜와 교수가 파일 속 모든 환자에게 적용되고, 저장된 FU 검사는 환자번호로 자동으로 붙습니다. 같은 명단을 다시 올려도 이미 있는 환자는 지정해둔 검사·진행 상황이 그대로 유지되고, 예약시간만 바뀐 경우 새 시간으로 고쳐집니다.</p>
           <div className="flex gap-3 flex-wrap items-center">
             <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium cursor-pointer">
               <Upload size={16} /> 엑셀 올리기
