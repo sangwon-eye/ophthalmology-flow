@@ -3287,7 +3287,10 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
   const [manageDoctor, setManageDoctor] = useState('');
   const dayAll = (readOnly ? archived.list : patients).filter(p => p.date === manageDate);
   const dayDoctors = [...new Set([...doctors, ...dayAll.map(p => p.doctor)].filter(Boolean))];
-  const byDate = dayAll.filter(p => (!manageDoctor || p.doctor === manageDoctor) && inSession(p, session)).sort(sortMode === 'name' ? byName : byQueue);
+  const [manageQuery, setManageQuery] = useState('');
+  const mq = manageQuery.trim();
+  const byDate = dayAll.filter(p => (!manageDoctor || p.doctor === manageDoctor) && inSession(p, session)
+    && (!mq || String(p.name || '').includes(mq) || String(p.id).includes(mq))).sort(sortMode === 'name' ? byName : byQueue);
   // 전체 삭제: 지금 보이는 명단(날짜 + 선택한 교수)을 한 번에 지웁니다. 바로 되돌릴 수 있습니다.
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const sessionLabel = session === 'am' ? ' 오전' : session === 'pm' ? ' 오후' : '';
@@ -3461,7 +3464,12 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
               {dayDoctors.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
             <span className="text-sm text-slate-400">{byDate.length}명</span>
-            {!readOnly && byDate.length > 0 && (
+            <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5">
+              <Search size={14} className="text-slate-400" />
+              <input placeholder="이름·환자번호 찾기" value={manageQuery} onChange={e => setManageQuery(e.target.value)} className="outline-none text-sm w-32" />
+              {mq && <button type="button" aria-label="검색 지우기" onClick={() => setManageQuery('')} className="text-slate-400 text-sm">✕</button>}
+            </div>
+            {!readOnly && !mq && byDate.length > 0 && (
               <button type="button" onClick={() => setBulkConfirm(true)} className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 bg-white flex items-center gap-1">
                 <Trash2 size={14} /> {`${manageDoctor ? `${manageDoctor} ` : ''}${sessionLabel.trim() ? `${sessionLabel.trim()} ` : ''}전체 삭제`}
               </button>
@@ -3503,7 +3511,7 @@ function AdminView({ patients, doctors, doctorPrefs, settings, fuMap, mutatePati
               <span className="font-semibold">확인 필요 {checkCount}명</span> · 검사 미지정 또는 지난 진료 FU 미지정
             </div>
           )}
-          {byDate.length === 0 ? <EmptyState text={readOnly && archived.loading ? '불러오는 중…' : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
+          {byDate.length === 0 ? <EmptyState text={readOnly && archived.loading ? '불러오는 중…' : mq ? `'${mq}'에 맞는 환자가 없습니다` : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
             const flag = !readOnly && needsTestCheck(p, doctorPrefs);
             return (
             <div key={patientKey(p)} className={`bg-white rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap ${flag ? 'border-2 border-orange-400' : 'border border-slate-200'}`}>
