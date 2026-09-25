@@ -108,7 +108,12 @@ function fmtClock(ts) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+// 메인 화면에서 날짜를 직접 정하면(모든 컴퓨터 공통, 그날 하루만) 그 날짜를 '오늘'로 씁니다.
+let forcedToday = null;
 function todayISO() {
+  return forcedToday || realTodayISO();
+}
+function realTodayISO() {
   const d = new Date();
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
@@ -877,6 +882,7 @@ const loadFu = (meta) => loadKey('fu-designations', {}, meta);
 const loadDoctors = (meta) => loadKey('doctors', [], meta);
 const loadHistory = (meta) => loadKey('measure-history', {}, meta);
 const loadDoctorPrefs = (meta) => loadKey('doctor-prefs', {}, meta);
+const loadTodayOverride = (meta) => loadKey('today-override', null, meta);
 
 function ensureBuiltins(s) {
   s = { ...s, tests: s.tests.some(t => t.id === 'ark') ? s.tests.map(t => t.id === 'ark' ? { ...t, roomId: 'vision', builtin: 'ark' } : t) : [ARK_TEST, ...s.tests] };
@@ -1038,7 +1044,7 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
       <div className={`sticky top-0 z-10 ${c.bg} border-b ${c.border}`}>
         <div className="max-w-3xl mx-auto px-5 py-2 flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <div className={`text-[11px] leading-none font-medium ${c.text} mb-1`}>Ophthalmology Flow</div>
+            <div className={`text-[11px] leading-none font-medium ${c.text} mb-1`}>Ophthalmology Flow{forcedToday && <span className="ml-2 px-1.5 rounded bg-amber-100 text-amber-800">날짜 {forcedToday} (직접 정함)</span>}</div>
             <h1 className="text-lg leading-tight font-semibold text-slate-900">
               {title}
               {typeof count === 'number' && <span className="ml-2 text-base font-normal text-slate-500">대기 {count}명</span>}
@@ -2100,7 +2106,7 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
 /* ------------------------------------------------------------------ */
 /* 역할 선택                                                           */
 /* ------------------------------------------------------------------ */
-function RoleSelect({ settings, onSelect }) {
+function RoleSelect({ settings, onSelect, onSetToday }) {
   const items = [
     { key: 'vision', label: '시력 · 안압', sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue' },
     ...settings.rooms.map(r => ({
@@ -2124,6 +2130,15 @@ function RoleSelect({ settings, onSelect }) {
           <div className="text-sm text-slate-400 mb-1">Ophthalmology Flow</div>
           <h1 className="text-2xl font-semibold text-slate-900">이 컴퓨터의 화면을 선택하세요</h1>
           <div className="flex justify-center mt-3"><TextSizeControl /></div>
+          <div className="flex justify-center items-center gap-2 mt-3 flex-wrap text-sm">
+            <span className="text-slate-500">오늘 날짜</span>
+            <input type="date" aria-label="오늘 날짜" value={todayISO()} onChange={e => onSetToday(e.target.value)}
+              className={`border rounded-lg px-3 py-1.5 bg-white ${forcedToday ? 'border-amber-400' : 'border-slate-300'}`} />
+            {forcedToday ? <>
+              <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300">직접 정함 · 모든 컴퓨터 적용 · 다음 날 자동 해제</span>
+              <button type="button" onClick={() => onSetToday(null)} className="text-xs underline text-slate-600">실제 날짜({realTodayISO()})로 되돌리기</button>
+            </> : <span className="text-xs text-slate-400">컴퓨터 날짜 자동</span>}
+          </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {items.map(({ key, label, sub, icon: Icon, color }) => {
@@ -4664,13 +4679,17 @@ export default function App() {
   const [settings, mutateSettings, syncSettings, markSettings] = useSharedStore('settings', loadSettings, DEFAULT_SETTINGS);
   const [history, mutateHistory, syncHistory, markHistory] = useSharedStore('measure-history', loadHistory, {});
   const [doctorPrefs, mutateDoctorPrefs, syncDoctorPrefs, markDoctorPrefs] = useSharedStore('doctor-prefs', loadDoctorPrefs, {});
+  const [todayOverride, mutateTodayOverride, syncTodayOverride, markTodayOverride] = useSharedStore('today-override', loadTodayOverride, null);
   const [lastSync, setLastSync] = useState(null);
+  // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
+  forcedToday = todayOverride?.date && todayOverride.setOn === realTodayISO() ? todayOverride.date : null;
+  const setToday = (date) => mutateTodayOverride(() => (date && date !== realTodayISO() ? { date, setOn: realTodayISO() } : null));
 
   const refresh = useCallback(async () => {
-    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs()];
-    let p, f, d, s, h, dp;
+    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride()];
+    let p, f, d, s, h, dp, to;
     try {
-      [p, f, d, s, h, dp] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs()]);
+      [p, f, d, s, h, dp, to] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs(), loadTodayOverride()]);
     } catch {
       return; // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다.
     }
@@ -4680,8 +4699,9 @@ export default function App() {
     syncSettings(s, marks[3]);
     syncHistory(h, marks[4]);
     syncDoctorPrefs(dp, marks[5]);
+    syncTodayOverride(to, marks[6]);
     setLastSync(new Date());
-  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs]);
+  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride]);
 
   useEffect(() => {
     refresh();
@@ -4690,7 +4710,7 @@ export default function App() {
   }, [refresh]);
 
   const renderView = () => {
-  if (!role) return <RoleSelect settings={settings} onSelect={selectRole} />;
+  if (!role) return <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} />;
 
   const onBack = () => setRole(null);
   const today = todayISO();
@@ -4789,7 +4809,7 @@ export default function App() {
       />
     );
   }
-  return <RoleSelect settings={settings} onSelect={selectRole} />;
+  return <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} />;
   };
   return <PatientMemoContext.Provider value={mutatePatients}>
     <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
