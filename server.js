@@ -5,6 +5,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { ROOT, loadConfig, configuredPort, lanAddresses } from './scripts/common.js';
 
 const CONFIG = loadConfig();
@@ -200,7 +201,55 @@ function buildId() {
   try { return String(fs.statSync(path.join(DIST_DIR, 'index.html')).mtimeMs); } catch { return 'none'; }
 }
 
+// 설정 화면 비밀번호: 공유 저장소(모든 컴퓨터가 읽음)가 아니라 이 파일에 해시로만 저장합니다.
+// 잊어버리면 설정비밀번호초기화.bat 으로 이 파일을 지우면 됩니다.
+const LOCK_FILE = path.join(DATA_DIR, 'settings-lock.json');
+function readLock() {
+  try {
+    const l = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8'));
+    return l?.salt && l?.hash ? l : null;
+  } catch { return null; }
+}
+function hashPassword(password, salt) {
+  return crypto.scryptSync(String(password), salt, 32).toString('hex');
+}
+function lockMatches(lock, password) {
+  const a = Buffer.from(hashPassword(password ?? '', lock.salt), 'hex');
+  const b = Buffer.from(lock.hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+const delay = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function handleLock(req, res, pathname) {
+  const lock = readLock();
+  if (pathname === '/api/settings-lock' && req.method === 'GET') return sendJson(res, 200, { enabled: !!lock });
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'method' });
+  let body;
+  try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
+  if (pathname === '/api/settings-lock/check') {
+    const ok = !lock || lockMatches(lock, body?.password);
+    if (!ok) await delay(800); // 여러 번 빨리 맞춰보지 못하도록
+    return sendJson(res, 200, { ok });
+  }
+  if (pathname === '/api/settings-lock/set') {
+    if (lock && !lockMatches(lock, body?.current)) { await delay(800); return sendJson(res, 403, { error: 'wrong' }); }
+    const next = String(body?.next ?? '');
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!next) {
+      try { fs.unlinkSync(LOCK_FILE); } catch { /* 이미 없음 */ }
+      console.log('설정 비밀번호를 없앴습니다.');
+      return sendJson(res, 200, { enabled: false });
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    fs.writeFileSync(LOCK_FILE, JSON.stringify({ salt, hash: hashPassword(next, salt) }));
+    console.log('설정 비밀번호를 바꿨습니다.');
+    return sendJson(res, 200, { enabled: true });
+  }
+  return sendJson(res, 404, { error: 'not found' });
+}
+
 async function handleApi(req, res, pathname) {
+  if (pathname.startsWith('/api/settings-lock')) return handleLock(req, res, pathname);
   if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId() });
 
   // 서버끄기.bat 에서 사용. 서버 PC 자신에서만 끌 수 있습니다.

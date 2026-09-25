@@ -2122,6 +2122,79 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
 /* ------------------------------------------------------------------ */
 /* 역할 선택                                                           */
 /* ------------------------------------------------------------------ */
+// 설정 비밀번호: 서버가 해시로 저장하고 확인합니다 (공유 저장소에는 두지 않음).
+async function lockApi(path, body) {
+  const res = await fetch(`/api/settings-lock${path}`, body === undefined
+    ? { cache: 'no-store' }
+    : { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, ...data };
+}
+
+function PasswordModal({ onOk, onCancel }) {
+  const [pw, setPw] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError('');
+    try {
+      const r = await lockApi('/check', { password: pw });
+      if (r.ok) onOk(); else { setError('비밀번호가 틀렸습니다'); setPw(''); }
+    } catch { setError('서버에 연결되지 않아 확인할 수 없습니다'); }
+    setBusy(false);
+  };
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <form onSubmit={submit} className="bg-white rounded-2xl p-6 w-full max-w-sm">
+        <h3 className="text-lg font-medium mb-3 text-slate-900">설정 비밀번호</h3>
+        <input type="password" autoFocus value={pw} onChange={e => setPw(e.target.value)} aria-label="설정 비밀번호" className={INPUT} />
+        {error && <div className="text-sm text-red-600 mt-2">{error}</div>}
+        <div className="flex gap-3 mt-5">
+          <button type="button" onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="submit" disabled={busy} className="flex-1 py-2.5 rounded-xl bg-slate-800 text-white font-medium disabled:opacity-50">확인</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SettingsPasswordCard() {
+  const [enabled, setEnabled] = useState(null);
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [again, setAgain] = useState('');
+  const [msg, setMsg] = useState('');
+  useEffect(() => { lockApi('').then(r => setEnabled(!!r.enabled)).catch(() => setEnabled(null)); }, []);
+  const save = async (value) => {
+    if (value && value !== again) { setMsg('새 비밀번호 두 칸이 다릅니다'); return; }
+    try {
+      const r = await lockApi('/set', { current: cur, next: value });
+      if (r.status === 403) { setMsg('현재 비밀번호가 틀렸습니다'); return; }
+      if (r.status !== 200) { setMsg('저장하지 못했습니다'); return; }
+      setEnabled(!!r.enabled);
+      setCur(''); setNext(''); setAgain('');
+      setMsg(r.enabled ? '비밀번호를 저장했습니다. 이제 설정에 들어갈 때마다 묻습니다.' : '비밀번호를 없앴습니다. 설정에 바로 들어갑니다.');
+    } catch { setMsg('서버에 연결되지 않아 저장하지 못했습니다'); }
+  };
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5">
+      <div className="font-medium text-slate-900 mb-1">설정 비밀번호 <span className="text-sm font-normal text-slate-500">· {enabled === null ? '확인 중' : enabled ? '사용 중' : '사용 안 함'}</span></div>
+      <p className="text-sm text-slate-500 mb-3">정해 두면 모든 컴퓨터에서 설정에 들어갈 때마다 비밀번호를 묻습니다. 잊어버리면 서버 PC에서 설정비밀번호초기화.bat 을 실행하세요.</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+        {enabled && <input type="password" placeholder="현재 비밀번호" aria-label="현재 비밀번호" value={cur} onChange={e => setCur(e.target.value)} className={INPUT} />}
+        <input type="password" placeholder="새 비밀번호" aria-label="새 비밀번호" value={next} onChange={e => setNext(e.target.value)} className={INPUT} />
+        <input type="password" placeholder="새 비밀번호 확인" aria-label="새 비밀번호 확인" value={again} onChange={e => setAgain(e.target.value)} className={INPUT} />
+      </div>
+      <div className="flex gap-2 flex-wrap items-center">
+        <button type="button" disabled={!next} onClick={() => save(next)} className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium disabled:opacity-40">비밀번호 저장</button>
+        {enabled && <button type="button" onClick={() => save('')} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600">비밀번호 없애기</button>}
+        {msg && <span className="text-sm text-slate-600">{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
 function RoleSelect({ settings, onSelect, onSetToday }) {
   const items = [
     { key: 'vision', label: visionNames(settings).name, sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue' },
@@ -4550,6 +4623,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
 
       {tab === 'etc' && (
         <div className="space-y-4">
+          <SettingsPasswordCard />
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="font-medium text-slate-900 mb-1">산동 대기 시간</div>
             <p className="text-sm text-slate-500 mb-3">점안 후 이 시간이 지나면 '산동 완료'로 표시돼요. CR은 4번째 점안부터 계산합니다.</p>
@@ -4720,7 +4794,20 @@ export default function App() {
   const [directoryOpen, setDirectoryOpen] = useState(false);
   useApplyTextSize();
   // 메인 화면의 '전체 환자 명단'은 화면 전환 없이 명단 창만 엽니다.
-  const selectRole = (key) => (key === 'directory' ? setDirectoryOpen(true) : setRole(key));
+  const [askPassword, setAskPassword] = useState(false);
+  const [lockError, setLockError] = useState('');
+  const selectRole = async (key) => {
+    if (key === 'directory') { setDirectoryOpen(true); return; }
+    if (key === 'settings') {
+      // 설정은 비밀번호를 정해 두었으면 들어갈 때마다 묻습니다.
+      try {
+        const r = await lockApi('');
+        setLockError('');
+        if (r.enabled) { setAskPassword(true); return; }
+      } catch { setLockError('서버에 연결되지 않아 설정에 들어갈 수 없습니다'); return; }
+    }
+    setRole(key);
+  };
   const [patients, mutatePatients, syncPatients, markPatients] = useSharedStore('daily-patients', loadDaily, []);
   const [fuMap, mutateFu, syncFu, markFu] = useSharedStore('fu-designations', loadFu, {});
   const [doctors, mutateDoctors, syncDoctors, markDoctors] = useSharedStore('doctors', loadDoctors, []);
@@ -4862,6 +4949,8 @@ export default function App() {
   };
   return <PatientMemoContext.Provider value={mutatePatients}>
     <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
+    {askPassword && <PasswordModal onOk={() => { setAskPassword(false); setRole('settings'); }} onCancel={() => setAskPassword(false)} />}
+    {lockError && !role && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm rounded-xl px-4 py-2 z-50">{lockError}</div>}
     {directoryOpen && <PatientDirectory patients={patients} settings={settings} lastSync={lastSync} onClose={() => setDirectoryOpen(false)} />}
   </PatientMemoContext.Provider>;
 }
