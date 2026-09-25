@@ -805,18 +805,13 @@ function parseOptions(text) {
 }
 
 // 엑셀 명단: 위쪽 10줄 안에서 제목 줄을 찾아 제목 이름으로 칸을 고르므로, 칸 순서가 달라도 됩니다.
-const ROSTER_HEADERS = {
-  id: ['환자번호', '등록번호', '차트번호', '병록번호', '환자id'],
-  name: ['환자명', '이름', '성명', '환자이름'],
-  reservation: ['예약', '예약시간', '예약시각', '진료시간'],
-  visit: ['초재진', '초진재진', '초재', '구분'],
-  doctor: ['진료의', '진료교수', '담당의', '담당교수', '교수', '진료의사', '의사'],
-};
+// 제목은 아래 5가지와 정확히 같아야 합니다 (앞뒤 띄어쓰기만 무시). 다른 칸(진단명 등)은 읽지 않습니다.
+const ROSTER_HEADERS = { id: '환자번호', name: '환자명', reservation: '예약', visit: '초재진', doctor: '진료의' };
 function rosterColumns(row) {
   const cols = {};
   row.forEach((cell, i) => {
-    const h = String(cell ?? '').replace(/[\s/·.()]/g, '').toLowerCase();
-    Object.entries(ROSTER_HEADERS).forEach(([k, names]) => { if (cols[k] === undefined && names.includes(h)) cols[k] = i; });
+    const h = String(cell ?? '').trim();
+    Object.entries(ROSTER_HEADERS).forEach(([k, name]) => { if (cols[k] === undefined && h === name) cols[k] = i; });
   });
   return cols;
 }
@@ -3385,7 +3380,8 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
       const wb = XLSX.read(buf, { type: 'array' });
       const roster = readRoster(wb.Sheets[wb.SheetNames[0]]);
       if (!roster) return fail('제목 줄을 찾지 못했습니다. 첫 줄에 환자명 / 환자번호 / 예약 / 초재진 / 진료의 제목이 있는지 확인해주세요.');
-      if (roster.cols.doctor === undefined) return fail('엑셀에 진료의 칸이 없어 등록하지 않았습니다. 제목 줄에 "진료의" 칸을 넣어주세요.');
+      const lacking = Object.entries(ROSTER_HEADERS).filter(([k]) => roster.cols[k] === undefined).map(([, name]) => name);
+      if (lacking.length) return fail(`엑셀에 ${lacking.map(n => `"${n}"`).join(', ')} 칸이 없어 등록하지 않았습니다. 제목 글자가 정확히 같은지 확인해주세요 (환자명 · 환자번호 · 예약 · 초재진 · 진료의).`);
       if (!roster.rows.length) return fail('환자를 찾지 못했습니다. 환자번호 칸이 비어 있지 않은지 확인해주세요.');
       const currentFu = await loadFu();
       const rejected = [];
@@ -3616,7 +3612,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
       {tab === 'upload' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">엑셀 명단 올리기</div>
-          <p className="text-sm text-slate-500 mb-3">엑셀 첫 줄 제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의 (칸 순서는 상관없음, 재진 외에는 초진). 진료의가 교수 관리에 등록된 이름과 맞지 않는 환자는 등록하지 않습니다.</p>
+          <p className="text-sm text-slate-500 mb-3">엑셀 첫 줄 제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의 (제목 글자가 정확히 같아야 함, 칸 순서·다른 칸은 상관없음, 재진 외에는 초진). 진료의가 교수 관리에 등록된 이름과 맞지 않는 환자는 등록하지 않습니다.</p>
           <div className="flex gap-3 flex-wrap items-center">
             <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium cursor-pointer">
               <Upload size={16} /> 엑셀 올리기
