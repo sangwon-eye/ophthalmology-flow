@@ -804,6 +804,55 @@ function parseOptions(text) {
   return Array.from(new Set(String(text || '').split(/[,\n]/).map(s => s.trim()).filter(Boolean)));
 }
 
+// 엑셀 명단: 위쪽 10줄 안에서 제목 줄을 찾아 제목 이름으로 칸을 고르므로, 칸 순서가 달라도 됩니다.
+const ROSTER_HEADERS = {
+  id: ['환자번호', '등록번호', '차트번호', '병록번호', '환자id'],
+  name: ['환자명', '이름', '성명', '환자이름'],
+  reservation: ['예약', '예약시간', '예약시각', '진료시간'],
+  visit: ['초재진', '초진재진', '초재', '구분'],
+  doctor: ['진료의', '진료교수', '담당의', '담당교수', '교수', '진료의사', '의사'],
+};
+function rosterColumns(row) {
+  const cols = {};
+  row.forEach((cell, i) => {
+    const h = String(cell ?? '').replace(/[\s/·.()]/g, '').toLowerCase();
+    Object.entries(ROSTER_HEADERS).forEach(([k, names]) => { if (cols[k] === undefined && names.includes(h)) cols[k] = i; });
+  });
+  return cols;
+}
+function readRoster(ws) {
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  // 환자번호·이름은 엑셀 화면에 보이는 글자 그대로 읽습니다 (예: 앞자리 0 유지)
+  const shown = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+  const hi = raw.slice(0, 10).findIndex(r => { const c = rosterColumns(r); return c.id !== undefined && c.name !== undefined; });
+  if (hi < 0) return null;
+  const cols = rosterColumns(raw[hi]);
+  const rows = raw.slice(hi + 1).map((r, j) => {
+    const view = shown[hi + 1 + j] || [];
+    const text = (k) => (cols[k] === undefined ? '' : String(view[cols[k]] ?? r[cols[k]] ?? '').trim());
+    return {
+      id: text('id'),
+      name: text('name'),
+      reservation: cols.reservation === undefined ? '' : normalizeTime(r[cols.reservation]),
+      firstVisit: !text('visit').includes('재진'), // '재진'이 아니면 모두 초진
+      doctorText: text('doctor'),
+    };
+  }).filter(r => r.id);
+  return { cols, rows };
+}
+// 엑셀의 진료의를 교수 관리에 등록된 이름과 맞춤 ('교수', 띄어쓰기, 괄호 안 글자는 무시)
+function doctorKey(v) {
+  return String(v ?? '').replace(/\(.*?\)/g, '').replace(/교수님?|선생님|\s/g, '');
+}
+function matchDoctor(text, doctors) {
+  const t = doctorKey(text);
+  if (!t) return null;
+  const exact = doctors.filter(d => doctorKey(d) === t);
+  if (exact.length === 1) return exact[0];
+  const part = doctors.filter(d => doctorKey(d) && t.includes(doctorKey(d)));
+  return part.length === 1 ? part[0] : null;
+}
+
 function sampleRows() {
   return [
     { id: '10001', name: '김민수', reservation: '09:00' },
@@ -3239,26 +3288,36 @@ function PatientInfoModal({ patient, onSave, onCancel }) {
 
 // 명단 올리기 결과 요약 + 파일에서 빠진 환자 삭제 버튼
 function UploadResult({ result, patients, onRemove, onShowList }) {
-  const { date, doctor, total, stats, missing } = result;
+  const { date, doctors = [], perDoctor = [], total, stats, missing, rejected = [] } = result;
   const byKey = new Map(patients.map(p => [patientKey(p), p]));
   const stillMissing = missing.map(k => byKey.get(k)).filter(Boolean);
   const withFu = stats ? stats.added.filter(hasFollowupApplied).length : 0;
   const fv = stats ? stats.added.filter(p => p.firstVisit).length : 0;
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 space-y-2">
-      <div className="font-medium text-slate-900">{date} {doctor} 명단 · 파일 속 환자 {total}명</div>
+      <div className="font-medium text-slate-900">{date} {doctors.join(', ')} 명단 · 등록 대상 {total}명{perDoctor.length > 1 ? ` (${perDoctor.join(' · ')})` : ''}</div>
+      {rejected.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-3">
+          <div className="font-medium text-red-800 mb-1">등록 안 함: 진료의 불일치 {rejected.length}명</div>
+          <p className="text-xs text-red-700 mb-2">엑셀의 진료의가 설정 &gt; 교수 관리에 등록된 이름({(result.allDoctors || []).join(', ') || '없음'})과 맞지 않습니다. 엑셀이나 교수 이름을 고친 뒤 다시 올려주세요.</p>
+          {rejected.slice(0, 30).map((r, i) => (
+            <div key={`${r.id}-${i}`} className="text-xs text-slate-700 py-0.5">{r.name || '-'} <span className="text-slate-500">{r.id} · 진료의 '{r.doctorText || '비어 있음'}'</span></div>
+          ))}
+          {rejected.length > 30 && <div className="text-xs text-slate-500">외 {rejected.length - 30}명</div>}
+        </div>
+      )}
       {stats ? (
         <ul className="space-y-1">
           <li>새로 추가 <b>{stats.added.length}명</b>{stats.added.length > 0 && ` (이전 정보 적용 ${withFu}명 · 이전 정보 없음 ${stats.added.length - withFu}명${fv ? ` · 초진 ${fv}명` : ''})`}</li>
           {stats.timeChanged.length > 0 && <li>이미 있어 <b>예약시간만 변경 {stats.timeChanged.length}명</b>: {stats.timeChanged.slice(0, 8).map(p => `${p.name} ${p.reservation || '-'}→${p.newReservation}`).join(', ')}{stats.timeChanged.length > 8 ? ` 외 ${stats.timeChanged.length - 8}명` : ''}</li>}
           {stats.unchanged.length > 0 && <li>이미 있어 그대로 둠 {stats.unchanged.length}명</li>}
-          {stats.linked.length > 0 && <li className="text-fuchsia-800">같은 날 다른 교수님 명단에도 있어 <b>두 교수님 진료로 연결 {stats.linked.length}명</b>: {stats.linked.slice(0, 8).map(p => `${p.name}(${p.first ? `${doctor} 먼저 → ${p.others.join(', ')}` : `${p.others.join(', ')} → ${doctor}`})`).join(', ')}{stats.linked.length > 8 ? ` 외 ${stats.linked.length - 8}명` : ''} · 검사는 1차 진료 전에 함께 합니다. 순서는 명단 관리에서 바꿀 수 있어요.</li>}
+          {stats.linked.length > 0 && <li className="text-fuchsia-800">같은 날 다른 교수님 명단에도 있어 <b>두 교수님 진료로 연결 {stats.linked.length}명</b>: {stats.linked.slice(0, 8).map(p => `${p.name}(${p.first ? `${p.doctor} 먼저 → ${p.others.join(', ')}` : `${p.others.join(', ')} → ${p.doctor}`})`).join(', ')}{stats.linked.length > 8 ? ` 외 ${stats.linked.length - 8}명` : ''} · 검사는 1차 진료 전에 함께 합니다. 순서는 명단 관리에서 바꿀 수 있어요.</li>}
         </ul>
       ) : <div className="text-red-600">저장하지 못했습니다. 서버 연결을 확인하고 다시 올려주세요.</div>}
       {stillMissing.length > 0 && (
         <div className="rounded-lg border border-orange-300 bg-orange-50 p-3">
           <div className="font-medium text-orange-900 mb-1">이번 파일에 없는 환자 {stillMissing.length}명</div>
-          <p className="text-xs text-orange-800 mb-2">같은 날짜·교수 명단에 있었지만 이번 파일에는 없습니다. 예약이 취소된 환자인지 확인한 뒤 삭제하세요. (삭제 버튼은 두 번 눌러야 삭제됩니다)</p>
+          <p className="text-xs text-orange-800 mb-2">같은 날짜·같은 교수님 명단에 있었지만 이번 파일에는 없습니다. 예약이 취소된 환자인지 확인한 뒤 삭제하세요. (삭제 버튼은 두 번 눌러야 삭제됩니다)</p>
           {stillMissing.map(p => (
             <div key={patientKey(p)} className="flex items-center justify-between gap-2 py-1 border-t border-orange-200 first:border-t-0">
               <span><span className="t-name text-slate-900">{p.name}</span> <span className="text-xs text-slate-500">{p.id} · 예약 {p.reservation || '-'}{p.checkin ? ` · 접수 ${p.checkin}` : ''}</span></span>
@@ -3320,44 +3379,40 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!batchDoctor) { setMessage('먼저 담당 교수를 선택해주세요.'); e.target.value = ''; return; }
+    const fail = (msg) => { setUploadResult(null); setMessage(msg); e.target.value = ''; };
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      // 환자번호·이름은 엑셀 화면에 보이는 글자 그대로 읽습니다 (예: 앞자리 0 유지)
-      const shown = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+      const roster = readRoster(wb.Sheets[wb.SheetNames[0]]);
+      if (!roster) return fail('제목 줄을 찾지 못했습니다. 첫 줄에 환자명 / 환자번호 / 예약 / 초재진 / 진료의 제목이 있는지 확인해주세요.');
+      if (roster.cols.doctor === undefined) return fail('엑셀에 진료의 칸이 없어 등록하지 않았습니다. 제목 줄에 "진료의" 칸을 넣어주세요.');
+      if (!roster.rows.length) return fail('환자를 찾지 못했습니다. 환자번호 칸이 비어 있지 않은지 확인해주세요.');
       const currentFu = await loadFu();
-      const news = rows
-        .map((row, i) => ({
-          // 양식: 예약 | 환자번호 | 환자명 | 초재진 — '재진'이 아니면 모두 초진
-          id: String(shown[i]?.['환자번호'] ?? row['환자번호'] ?? '').trim(),
-          name: String(shown[i]?.['환자명'] ?? row['환자명'] ?? '').trim(),
-          reservation: normalizeTime(row['예약']),
-          firstVisit: !String(row['초재진'] ?? '').includes('재진'),
-          date: batchDate,
-          doctor: batchDoctor,
-        }))
-        .filter(r => r.id);
-      const uniq = [...new Map(news.map(r => [r.id, r])).values()].map(r => buildPatient(r, currentFu, settings));
-      if (!uniq.length) {
-        setUploadResult(null);
-        setMessage('환자를 찾지 못했습니다. 첫 줄에 예약 / 환자번호 / 환자명 / 초재진 제목이 있는지 확인해주세요.');
-        e.target.value = '';
-        return;
+      const rejected = [];
+      const news = [];
+      roster.rows.forEach(r => {
+        const doctor = matchDoctor(r.doctorText, doctors);
+        if (!doctor) { rejected.push(r); return; }
+        news.push({ id: r.id, name: r.name, reservation: r.reservation, firstVisit: r.firstVisit, date: batchDate, doctor });
+      });
+      // 같은 환자가 두 교수님 줄에 있으면 두 교수님 진료로 연결됩니다 (mergePatientList)
+      const uniq = [...new Map(news.map(r => [`${r.id}::${r.doctor}`, r])).values()].map(r => buildPatient(r, currentFu, settings));
+      let stats = { added: [], timeChanged: [], unchanged: [], linked: [] };
+      if (uniq.length) {
+        stats = null;
+        try { stats = await upsert(uniq); } catch { /* 저장 실패는 결과 창에 표시 */ }
       }
-      let stats = null;
-      try { stats = await upsert(uniq); } catch { /* 저장 실패는 결과 창에 표시 */ }
-      const ids = new Set(uniq.map(p => p.id));
+      const fileDoctors = doctors.filter(d => uniq.some(p => p.doctor === d));
+      const keys = new Set(uniq.map(p => `${p.id}::${p.doctor}`));
       // 같은 날짜·같은 교수 명단에 있었는데 이번 파일에는 없는 환자 → 사용자가 확인 후 삭제
       const missing = patients
-        .filter(p => p.date === batchDate && p.doctor === batchDoctor && !ids.has(p.id))
+        .filter(p => p.date === batchDate && fileDoctors.includes(p.doctor) && !keys.has(`${p.id}::${p.doctor}`))
         .map(p => patientKey(p));
+      const perDoctor = fileDoctors.map(d => `${d} ${uniq.filter(p => p.doctor === d).length}명`);
       setMessage('');
-      setUploadResult({ date: batchDate, doctor: batchDoctor, total: uniq.length, stats, missing });
+      setUploadResult({ date: batchDate, doctors: fileDoctors, allDoctors: doctors, perDoctor, total: uniq.length, stats, missing, rejected });
     } catch (err) {
-      setMessage('파일을 읽지 못했습니다. 엑셀(.xlsx) 파일인지 확인해주세요.');
+      return fail('파일을 읽지 못했습니다. 엑셀(.xlsx) 파일인지 확인해주세요.');
     }
     e.target.value = '';
   };
@@ -3385,8 +3440,8 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
-      { 예약: '09:00', 환자번호: '10001', 환자명: '홍길동', 초재진: '재진' },
-      { 예약: '09:10', 환자번호: '10002', 환자명: '김철수', 초재진: '초진' },
+      { 예약: '09:00', 환자번호: '10001', 환자명: '홍길동', 초재진: '재진', 진료의: doctors[0] || '김안과' },
+      { 예약: '09:10', 환자번호: '10002', 환자명: '김철수', 초재진: '초진', 진료의: doctors[1] || doctors[0] || '김안과' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '명단');
@@ -3542,7 +3597,11 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
           <Field label="진료 날짜">
             <input type="date" value={batchDate} onChange={e => setBatchDate(e.target.value)} className={INPUT} />
           </Field>
-          <Field label="담당 교수">
+          {tab === 'upload' ? (
+            <Field label="진료의">
+              <div className="text-sm text-slate-500 py-2">엑셀의 진료의 칸으로 교수님을 자동으로 나눕니다</div>
+            </Field>
+          ) : <Field label="담당 교수">
             {doctors.length === 0 ? (
               <div className="text-sm text-red-600 py-2">설정 &gt; 교수 관리에서 먼저 등록해주세요</div>
             ) : (
@@ -3550,14 +3609,14 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                 {doctors.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             )}
-          </Field>
+          </Field>}
         </div>
       )}
 
       {tab === 'upload' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">엑셀 명단 올리기</div>
-          <p className="text-sm text-slate-500 mb-3">엑셀 첫 줄: 예약 · 환자번호 · 환자명 · 초재진 (재진 외에는 초진)</p>
+          <p className="text-sm text-slate-500 mb-3">엑셀 첫 줄 제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의 (칸 순서는 상관없음, 재진 외에는 초진). 진료의가 교수 관리에 등록된 이름과 맞지 않는 환자는 등록하지 않습니다.</p>
           <div className="flex gap-3 flex-wrap items-center">
             <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium cursor-pointer">
               <Upload size={16} /> 엑셀 올리기
