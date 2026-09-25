@@ -36,6 +36,7 @@ const DEFAULT_SETTINGS = {
   rooms: [
     { id: 'B', name: 'WFP · OCT · VF 검사실', patientName: '정밀검사실', showPriority: true },
     { id: 'C', name: 'IDRA 검사실', patientName: '안구건조증 검사실', showPriority: false },
+    { id: 'treat', name: '처치실', patientName: '처치실', showPriority: false, builtin: 'treat' },
   ],
   tests: [
     ARK_TEST,
@@ -49,6 +50,8 @@ const DEFAULT_SETTINGS = {
     { id: 'p_prof', name: '교수 처치', performer: 'prof' },
     { id: 'p_res', name: '전공의 처치', performer: 'resident' },
   ],
+  // 시력방 이름 (직원 화면 / 환자용 화면)
+  vision: { name: '시력 / 안압 검사실', patientName: '시력검사실' },
   dilationWaitMin: 15,
   // 같은 날 2차 진료(다른 교수님)로 넘어갈 때 처치실에서 추가 검사를 확인할지
   linkCheckAdded: true,    // 진료 중에 추가된 2차 진료
@@ -182,8 +185,11 @@ function pastVision(p) {
   return !!p.checkin && visionComplete(p) && (!(p.firstVisit || p.addOnCheck) || !!p.triageAssigned || !!p.triageDone);
 }
 
+// 처치실의 진료 전 검사는 다른 검사실 검사가 모두 끝난 뒤 대기에 뜹니다.
 function roomPending(p, settings, roomId) {
-  return pastVision(p) && pendingTests(p, settings, roomId).length > 0;
+  if (!pastVision(p) || pendingTests(p, settings, roomId).length === 0) return false;
+  if (roomId !== treatRoomOf(settings).id) return true;
+  return !settings.rooms.some(r => r.id !== roomId && pendingTests(p, settings, r.id).length > 0);
 }
 
 function pendingRooms(p, settings) {
@@ -884,7 +890,10 @@ const loadHistory = (meta) => loadKey('measure-history', {}, meta);
 const loadDoctorPrefs = (meta) => loadKey('doctor-prefs', {}, meta);
 const loadTodayOverride = (meta) => loadKey('today-override', null, meta);
 
+// 처치실은 고정 검사실(builtin: 'treat')입니다. 여기 둔 검사(예: Syringing)는 진료 전에 처치실 화면에서 합니다.
+const TREAT_ROOM = { id: 'treat', name: '처치실', patientName: '처치실', showPriority: false, builtin: 'treat' };
 function ensureBuiltins(s) {
+  if (!s.rooms.some(r => r.builtin === 'treat')) s = { ...s, rooms: [...s.rooms, TREAT_ROOM] };
   s = { ...s, tests: s.tests.some(t => t.id === 'ark') ? s.tests.map(t => t.id === 'ark' ? { ...t, roomId: 'vision', builtin: 'ark' } : t) : [ARK_TEST, ...s.tests] };
   if (s.tests.some(t => t.id === GAT_ID)) {
     return { ...s, tests: s.tests.map(t => (t.id === GAT_ID ? { ...t, builtin: 'gat' } : t)) };
@@ -908,7 +917,14 @@ async function loadSettings(meta) {
     tests: normalizeTests(base.tests),
     procedures: Array.isArray(base.procedures) ? base.procedures : DEFAULT_SETTINGS.procedures,
     dilationWaitMin: Number.isFinite(Number(base.dilationWaitMin)) ? Number(base.dilationWaitMin) : 15,
+    vision: { ...DEFAULT_SETTINGS.vision, ...(base.vision || {}) },
   };
+}
+function treatRoomOf(settings) {
+  return settings.rooms.find(r => r.builtin === 'treat') || TREAT_ROOM;
+}
+function visionNames(settings) {
+  return { ...DEFAULT_SETTINGS.vision, ...(settings.vision || {}) };
 }
 
 // 실시간 명단에는 어제~앞으로의 날짜만 있습니다. 그보다 지난 명단은 서버가 월별 보관 파일로 옮깁니다.
@@ -1971,7 +1987,7 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
     });
     return out;
   });
-  const roomName = (id) => id === 'vision' ? '시력/안압방' : settings.rooms.find(r => r.id === id)?.name || '';
+  const roomName = (id) => id === 'vision' ? visionNames(settings).name : settings.rooms.find(r => r.id === id)?.name || '';
   const preferred = followup?.prefs?.[followupDoctor]?.followupTests;
   const primary = !followup || !Array.isArray(preferred) ? tests : tests.filter(t => preferred.includes(t.id));
   const others = tests.filter(t => !primary.some(x => x.id === t.id));
@@ -2108,15 +2124,15 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
 /* ------------------------------------------------------------------ */
 function RoleSelect({ settings, onSelect, onSetToday }) {
   const items = [
-    { key: 'vision', label: '시력 · 안압', sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue' },
-    ...settings.rooms.map(r => ({
+    { key: 'vision', label: visionNames(settings).name, sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue' },
+    ...settings.rooms.filter(r => r.builtin !== 'treat').map(r => ({
       key: `room:${r.id}`,
       label: r.name,
       sub: roomTests(settings, r.id).map(t => t.short).join(', ') || '검사 없음',
       icon: Camera,
       color: roomColor(settings, r.id),
     })),
-    { key: 'procedure', label: '처치실', sub: '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo' },
+    { key: 'procedure', label: treatRoomOf(settings).name, sub: roomTests(settings, treatRoomOf(settings).id).length ? '진료 전 검사 · 예진 · 전공의 처치' : '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo' },
     { key: 'consult', label: '진료실', sub: '교수님별 진료 대기', icon: Stethoscope, color: 'amber' },
     { key: 'board', label: '환자용 화면', sub: '대기 명단 모니터', icon: Monitor, color: 'slate' },
     { key: 'admin', label: '관리자', sub: '명단 업로드 · FU 지정', icon: ClipboardList, color: 'slate' },
@@ -2162,7 +2178,7 @@ function RoleSelect({ settings, onSelect, onSetToday }) {
 /* ------------------------------------------------------------------ */
 /* 검사실 화면 (시력/안압 + 설정된 검사실 공용)                           */
 /* ------------------------------------------------------------------ */
-function StationView({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistory, onBack, lastSync }) {
+function StationView({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistory, onBack, lastSync, embedded = false }) {
   const [filter, setFilter] = useState('all');
   const [sortMode, changeSort] = useSortMode(mode === 'vision' ? 'sort-vision' : `sort-room-${mode}`);
   const nameSort = sortMode === 'name';
@@ -2183,7 +2199,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
   }
 
   const color = isVision ? 'blue' : roomColor(settings, room.id);
-  const title = isVision ? '시력 / 안압 검사실' : room.name;
+  const title = isVision ? visionNames(settings).name : room.name;
   const tests = isVision ? [VISION_TEST, ARK_TEST] : roomTests(settings, room.id);
   const groups = isVision ? [] : machineGroups(tests);
   const allTests = sortedTests(settings);
@@ -2333,8 +2349,9 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
   const detailPatient = detailFor ? patients.find(x => patientKey(x) === detailFor.key) : null;
   const detailTest = detailFor ? settings.tests.find(t => t.id === detailFor.testId) : null;
 
-  return (
-    <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length}>
+  const content = (
+    <>
+      {embedded && groups.length >= 2 && <SectionTitle hint="다른 검사실 검사를 마친 뒤 진료 전에 하는 검사입니다">진료 전 검사 · {roomList.length}명</SectionTitle>}
 
       {/* 장비 필터(검사실)·검사 대기 인원(시력실)과 정렬을 한 줄에 */}
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -2353,12 +2370,14 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
               />
             ))}
           </div>
+        ) : embedded ? (
+          <div className="self-center text-sm font-medium text-slate-500">진료 전 검사 · {roomList.length}명</div>
         ) : <div />}
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} className="shrink-0" />
       </div>
 
       {shown.length === 0 ? (
-        <EmptyState compact={isVision} text="대기 중인 환자가 없습니다" />
+        <EmptyState compact={isVision || embedded} text="대기 중인 환자가 없습니다" />
       ) : (
         <DraggableList
           items={nameSort ? [...shown].sort(byName) : shown}
@@ -2371,7 +2390,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
             const pk = patientKey(p);
             const runningVf = activeVf(p);
             const topTest = showPriority && !runningVf ? pendingTests(p, settings, room.id)[0] : null;
-            const otherRooms = isVision ? [] : pendingRooms(p, settings).filter(r => r.id !== room.id);
+            const otherRooms = isVision ? [] : settings.rooms.filter(r => r.id !== room.id && pendingTests(p, settings, r.id).length > 0);
             const prev = previousMeasure(p, history);
             const notes = notesOf(p, allTests);
             return (
@@ -2551,6 +2570,12 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         />
       )}
       {toastNode}
+    </>
+  );
+  if (embedded) return <div className="mb-8">{content}</div>;
+  return (
+    <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length}>
+      {content}
     </ScreenShell>
   );
 }
@@ -3077,7 +3102,7 @@ function defaultTriageRequired(p, doctorPrefs) {
   return doctorPrefs?.[p.doctor]?.triageRequired !== false;
 }
 
-function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePatients, onBack, lastSync }) {
+function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePatients, mutateHistory, onBack, lastSync }) {
   const [triageFor, setTriageFor] = useState(null);
   const [sortMode, changeSort] = useSortMode('sort-procedure');
   const order = sortMode === 'name' ? byName : byQueue;
@@ -3166,7 +3191,12 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   };
 
   return (
-    <ScreenShell title="처치실" color="indigo" onBack={onBack} lastSync={lastSync} count={requests.length + triage.length + procs.length}>
+    <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} count={requests.length + triage.length + procs.length + patients.filter(p => !p.consultDone && roomPending(p, settings, treatRoomOf(settings).id)).length}>
+      {/* 진료 전 검사 (설정에서 처치실에 둔 검사, 예: Syringing) — 검사실 화면과 같은 카드 */}
+      {roomTests(settings, treatRoomOf(settings).id).length > 0 && (
+        <StationView embedded mode={treatRoomOf(settings).id} settings={settings} doctorPrefs={doctorPrefs} patients={patients}
+          history={history} mutatePatients={mutatePatients} mutateHistory={mutateHistory} onBack={onBack} lastSync={lastSync} />
+      )}
       <div className="flex justify-end mb-3">
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
       </div>
@@ -4058,11 +4088,12 @@ function BoardColumn({ title, children }) {
   );
 }
 
-function BoardSelect({ doctors, onSelect, onBack }) {
+function BoardSelect({ doctors, settings, onSelect, onBack }) {
+  const vName = visionNames(settings).patientName;
   const options = [
-    { key: 'vision', label: '시력검사실 대기 명단', sub: '순번 표시' },
+    { key: 'vision', label: `${vName} 대기 명단`, sub: '순번 표시' },
     { key: 'exam', label: '검사실 대기 명단', sub: '순번 없이 검사실·검사 안내' },
-    { key: 'vision-exam', label: '시력검사실 + 검사실', sub: '두 명단을 한 화면에' },
+    { key: 'vision-exam', label: `${vName} + 검사실`, sub: '두 명단을 한 화면에' },
     { key: 'consult-all', label: '진료실 대기 명단 (전체)', sub: '교수님별 구역으로 나눠 표시' },
     ...doctors.map(d => ({ key: `consult:${d}`, label: `${d} 진료실`, sub: '진료실 앞 모니터용' })),
     { key: 'combined', label: '통합 화면', sub: '세 명단을 한 화면에' },
@@ -4088,7 +4119,7 @@ function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBack }) {
     .filter(d => patients.some(p => p.doctor === d && !p.consultDone));
 
   if (kind === 'vision') {
-    return <BoardShell title="시력검사실 대기 순서" onBack={onBack}><VisionBoardList patients={patients} /></BoardShell>;
+    return <BoardShell title={`${visionNames(settings).patientName} 대기 순서`} onBack={onBack}><VisionBoardList patients={patients} /></BoardShell>;
   }
   if (kind === 'exam') {
     return <BoardShell title="검사실 대기 명단" onBack={onBack}><ExamBoardList patients={patients} settings={settings} /></BoardShell>;
@@ -4097,7 +4128,7 @@ function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBack }) {
     return (
       <BoardShell title="검사 대기 현황" onBack={onBack} wide extra={<label className="text-xs text-slate-500">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
         <div className="grid gap-4" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
-          <BoardColumn title="시력검사실"><VisionBoardList patients={patients} /></BoardColumn>
+          <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} /></BoardColumn>
           <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} /></BoardColumn>
         </div>
       </BoardShell>
@@ -4125,7 +4156,7 @@ function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBack }) {
   return (
     <BoardShell title="오늘의 대기 현황" onBack={onBack} wide>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <BoardColumn title="시력검사실"><VisionBoardList patients={patients} compact /></BoardColumn>
+        <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} compact /></BoardColumn>
         <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} compact /></BoardColumn>
         <BoardColumn title="진료실">
           {activeDoctors.length === 0 ? <BoardEmpty /> : activeDoctors.map(d => (
@@ -4201,6 +4232,10 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
       procedures: (draft.procedures || [])
         .map(x => ({ ...x, name: (x.name || '').trim() }))
         .filter(x => x.name),
+      vision: {
+        name: (draft.vision?.name || '').trim() || DEFAULT_SETTINGS.vision.name,
+        patientName: (draft.vision?.patientName || '').trim() || (draft.vision?.name || '').trim() || DEFAULT_SETTINGS.vision.patientName,
+      },
       dilationWaitMin: Math.max(1, Math.round(Number(draft.dilationWaitMin) || 15)),
     };
     setDraft(toDraft(cleaned));
@@ -4268,8 +4303,15 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
           </p>
 
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-            <div className="font-medium text-slate-900">시력 / 안압 검사실</div>
-            <div className="text-xs text-slate-500 mt-1">모든 환자가 가장 먼저 거치는 단계라 바꿀 수 없어요. 나안·교정 시력과 NCT를 여기서 입력합니다.</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+              <Field label="시력방 이름 (직원 화면)">
+                <input value={draft.vision?.name ?? ''} onChange={e => updateDraft(d => ({ ...d, vision: { ...visionNames(d), name: e.target.value } }))} className={INPUT} />
+              </Field>
+              <Field label="환자에게 보이는 이름">
+                <input value={draft.vision?.patientName ?? ''} onChange={e => updateDraft(d => ({ ...d, vision: { ...visionNames(d), patientName: e.target.value } }))} className={INPUT} />
+              </Field>
+            </div>
+            <div className="text-xs text-slate-500">모든 환자가 가장 먼저 거치는 곳이라 순서·검사는 바꿀 수 없어요. 나안·교정 시력과 NCT를 여기서 입력합니다.</div>
           </div>
 
           {draft.rooms.map((r, ri) => {
@@ -4292,6 +4334,12 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                   </div>
                 </div>
 
+                {r.builtin === 'treat' && (
+                  <p className="text-xs text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 mb-3">
+                    처치실 (고정). 여기 추가한 검사(예: Syringing)는 진료 전에 처치실 화면 맨 위 '진료 전 검사'에서 합니다.
+                    다른 검사실 검사가 모두 끝난 뒤 대기에 뜹니다. 예진·처치는 지금처럼 처치실 화면에서 합니다.
+                  </p>
+                )}
                 <label className="flex items-start gap-2 text-sm text-slate-700 mb-4 cursor-pointer">
                   <input type="checkbox" checked={!!r.showPriority} onChange={e => updateRoom(r.id, { showPriority: e.target.checked })} className="w-4 h-4 mt-0.5" />
                   <span>
@@ -4378,8 +4426,8 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                     <Plus size={14} /> 검사 추가
                   </button>
                   <div className="ml-auto flex items-center gap-2">
-                    {tests.length > 0 && <span className="text-xs text-slate-400">검사가 남아 있으면 삭제할 수 없어요</span>}
-                    <ConfirmButton label="검사실 삭제" disabled={tests.length > 0} onConfirm={() => deleteRoom(r.id)} />
+                    {r.builtin !== 'treat' && tests.length > 0 && <span className="text-xs text-slate-400">검사가 남아 있으면 삭제할 수 없어요</span>}
+                    {r.builtin !== 'treat' && <ConfirmButton label="검사실 삭제" disabled={tests.length > 0} onConfirm={() => deleteRoom(r.id)} />}
                   </div>
                 </div>
               </div>
@@ -4562,15 +4610,15 @@ function patientQueueLabels(p, settings) {
   if (p.consultDone) return ['진료 완료'];
   const labels = [];
   if (!p.checkin) labels.push('접수 전 · 미접수');
-  if (p.checkin && !visionComplete(p)) labels.push('시력방 · 접수 완료 / 시력·안압 검사 대기');
-  if (needsTriageAssign(p)) labels.push('처치실 · 초진 검사 지정 대기');
+  if (p.checkin && !visionComplete(p)) labels.push(`${visionNames(settings).name} · 접수 완료 / 시력·안압 검사 대기`);
+  if (needsTriageAssign(p)) labels.push(`${treatRoomOf(settings).name} · 초진 검사 지정 대기`);
   pendingRooms(p, settings).forEach(r => {
     const tests = pendingTests(p, settings, r.id).map(t => testLabelWithOptions(t, p.detail?.[t.id])).join(', ');
     labels.push(`${r.name} · ${tests}${activeVf(p) ? ' (VF 진행 중 · 다른 장비 호출 금지)' : ' 대기'}`);
   });
-  if (needsTriageExam(p, settings)) labels.push('처치실 · 예진 대기');
+  if (needsTriageExam(p, settings)) labels.push(`${treatRoomOf(settings).name} · 예진 대기`);
   if (inProfProcedure(p)) labels.push('진료실 · 교수님 처치 대기');
-  if (inResidentProcedure(p)) labels.push('처치실 · 전공의 처치 대기');
+  if (inResidentProcedure(p)) labels.push(`${treatRoomOf(settings).name} · 전공의 처치 대기`);
   if (awaitingExplain(p)) labels.push(p.explainedEarly ? (procedureStatus(p) === 'doing' ? '설명 완료 · 처치 후 귀가' : '진료실 · 처치 완료 · 귀가 대기') : `진료실 · 설명 대기${procedureStatus(p) === 'doing' ? ' (처치 중)' : ''}`);
   if (inConsult(p)) labels.push(`${p.calledRoom} · 진료 중`);
   if (consultWaiting(p, settings)) labels.push('진료실 · 진료 대기');
@@ -4741,6 +4789,7 @@ export default function App() {
         doctorPrefs={doctorPrefs}
         history={history}
         mutatePatients={mutatePatients}
+        mutateHistory={mutateHistory}
         onBack={onBack}
         lastSync={lastSync}
       />
@@ -4795,7 +4844,7 @@ export default function App() {
     );
   }
   if (role === 'board') {
-    return <BoardSelect doctors={doctors} onSelect={k => setRole(`board:${k}`)} onBack={onBack} />;
+    return <BoardSelect doctors={doctors} settings={settings} onSelect={k => setRole(`board:${k}`)} onBack={onBack} />;
   }
   if (role.startsWith('board:')) {
     return (
