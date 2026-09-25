@@ -2392,7 +2392,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   if (o.complete) {
                     return (
                       <span className="flex items-center gap-1.5">
-                        <span className="text-sm px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 flex items-center gap-1"><Check size={14} />처방 완료 {fmtClock(o.rec.at)}</span>
+                        <span className="text-xs px-2 py-1 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 flex items-center gap-0.5"><Check size={12} />처방 완료</span>
                         <button type="button" onClick={() => setOrdered(p, false)} title="처방 완료 취소" aria-label="처방 완료 취소" className="p-1 rounded text-slate-300 hover:text-slate-600"><RotateCcw size={13} /></button>
                         <span className="h-6 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
                       </span>
@@ -2401,7 +2401,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   return (
                     <span className="flex items-center gap-1.5">
                       <button type="button" onClick={() => setOrdered(p, true)} title="전산 처방을 넣은 뒤 누르면 처방 완료로 바뀝니다"
-                        className="text-sm px-3 py-1.5 rounded-lg border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold">
+                        className="text-xs px-2 py-1 rounded-md border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold">
                         {o.rec ? `추가 처방 필요: ${o.missing.map(t => t.short || t.name).join(', ')}` : '처방 전'}
                       </button>
                       <span className="h-6 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
