@@ -146,7 +146,7 @@ function orderForPicking(tests, settings) {
   return [...tests].sort((a, b) => pos(a) - pos(b));
 }
 
-/* 검사 처방: 처방은 모든 검사실 검사를 한 번에 넣으므로, 어느 검사실에서 [처방 완료]를 눌러도
+/* 검사 처방: 처방은 모든 검사실 검사를 한 번에 넣으므로, 어느 검사실에서 [처방 전]을 눌러 처방 완료로 바꿔도
    그 환자의 모든 검사가 처방 완료로 표시됩니다 (직원 화면에만 표시).
    처방 완료 뒤 검사가 새로 추가되거나 다시 하게 되면 그 검사는 '처방 전'으로 돌아갑니다. */
 function orderedTests(p) {
@@ -2262,8 +2262,8 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         ) : groups.length >= 2 ? (
           <div className="flex-1 min-w-0 flex flex-wrap gap-2">
             <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
-            {/* 장비마다 컴퓨터를 따로 쓰므로 대기 0명인 장비도 항상 보여준다 */}
-            {groups.map(g => (
+            {/* 설정에서 '대기 0명이어도 보이기'를 켠 검사는 항상, 끈 검사는 기다리는 환자가 있을 때만 */}
+            {groups.filter(g => g.tests.some(t => t.showWhenEmpty !== false) || activeGroup?.key === g.key || roomList.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p)))).map(g => (
               <FilterChip
                 key={g.key}
                 active={activeGroup?.key === g.key}
@@ -2317,21 +2317,22 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 {!isVision && (() => {
                   const o = orderState(p, settings, room.id);
                   if (!o.needed.length) return null;
+                  // [처방 전] 한 칸을 누르면 같은 자리가 '처방 완료'로 바뀐다 (취소는 옆의 ↺)
                   if (o.complete) {
                     return (
-                      <span className="flex items-center gap-1.5 text-sm text-emerald-700">
-                        <span className="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-1"><Check size={13} />처방 완료 {fmtClock(o.rec.at)}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-sm px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 flex items-center gap-1"><Check size={14} />처방 완료 {fmtClock(o.rec.at)}</span>
                         <button type="button" onClick={() => setOrdered(p, false)} title="처방 완료 취소" aria-label="처방 완료 취소" className="p-1 rounded text-slate-300 hover:text-slate-600"><RotateCcw size={13} /></button>
                         <span className="h-6 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
                       </span>
                     );
                   }
                   return (
-                    <span className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-sm px-2 py-0.5 rounded-lg bg-orange-100 text-orange-800 font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <button type="button" onClick={() => setOrdered(p, true)} title="전산 처방을 넣은 뒤 누르면 처방 완료로 바뀝니다"
+                        className="text-sm px-3 py-1.5 rounded-lg border border-orange-500 bg-orange-500 hover:bg-orange-600 text-white font-semibold">
                         {o.rec ? `추가 처방 필요: ${o.missing.map(t => t.short || t.name).join(', ')}` : '처방 전'}
-                      </span>
-                      <button type="button" onClick={() => setOrdered(p, true)} className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium">처방 완료</button>
+                      </button>
                       <span className="h-6 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
                     </span>
                   );
@@ -4102,6 +4103,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         options: parseOptions(optionsText ?? (t.options || []).join(',')),
         popupOnClick: !!t.popupOnClick,
         machine: String(t.machine || '').trim(),
+        showWhenEmpty: t.showWhenEmpty !== false,
       })),
       procedures: (draft.procedures || [])
         .map(x => ({ ...x, name: (x.name || '').trim() }))
@@ -4264,6 +4266,16 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                             <span className="block text-xs text-slate-400">끄면 평소엔 바로 체크되고, 필요할 때만 오른쪽 클릭으로 창을 열어요</span>
                           </span>
                         </label>
+                        {/* 검사실 화면 위쪽 장비 버튼은 장비(분류)가 2개 이상일 때만 나오므로 그때만 보여줌 */}
+                        {machineGroups(tests).length >= 2 && (
+                          <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
+                            <input type="checkbox" checked={t.showWhenEmpty !== false} onChange={e => updateTest(t.id, { showWhenEmpty: e.target.checked })} className="w-4 h-4 mt-0.5" />
+                            <span>
+                              대기 0명이어도 위쪽 목록에 보이기
+                              <span className="block text-xs text-slate-400">검사실 화면 위쪽 장비 버튼. 끄면 기다리는 환자가 있을 때만 보여요 (같은 분류로 묶인 검사는 하나만 켜도 보임)</span>
+                            </span>
+                          </label>
+                        )}
                       </div>
                     </div>
                   ))}
