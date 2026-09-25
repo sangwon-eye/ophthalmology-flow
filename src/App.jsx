@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import * as XLSX from 'xlsx';
 import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe,
+  ChevronUp, ChevronDown, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -1182,12 +1182,16 @@ function TestToggle({ label, done, onToggle, emphasize, onSpecial, disabled = fa
   );
 }
 
-function TestPicker({ p, tests, onPick, onSpecial }) {
+// 오늘 검사: 평소에는 선택된 검사만 보여 주고, [검사 변경]을 누르면 모든 검사와 산동 설정(children)이 펼쳐집니다.
+function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
   if (!tests.length) return null;
+  const shown = open ? tests : tests.filter(t => p.assigned?.[t.id]);
   return (
     <div className="w-full flex flex-wrap items-center gap-1.5 mt-1">
       <span className="text-xs text-slate-400 mr-1">오늘 검사</span>
-      {tests.map(t => {
+      {!open && shown.length === 0 && <span className="text-xs text-slate-400">없음</span>}
+      {shown.map(t => {
         const on = !!p.assigned?.[t.id];
         const label = octEyeGroups(t).length ? 'OCT' : on ? testLabelWithOptions(t, p.detail?.[t.id]) : t.short;
         return (
@@ -1205,6 +1209,11 @@ function TestPicker({ p, tests, onPick, onSpecial }) {
           </SpecialPressButton>
         );
       })}
+      <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)}
+        className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 flex items-center gap-1">
+        {open ? <><ChevronUp size={12} />접기</> : <><Plus size={12} />검사 변경</>}
+      </button>
+      {open && children && <div className="w-full mt-1">{children}</div>}
     </div>
   );
 }
@@ -1465,6 +1474,7 @@ function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSa
 
 /* 직원 메모: 환자별 자유 메모 (예: 타과 진료 다녀오심, YAG 후 10:30 IOP 확인). 직원 화면에만 표시 */
 const PatientMemoContext = createContext(null);
+// 이름 줄 안에 들어갑니다. 메모가 없으면 작은 메모 아이콘, 있으면 내용이 보이고 누르면 수정합니다.
 function PatientMemo({ p, readOnly = false }) {
   const mutatePatients = useContext(PatientMemoContext);
   const [editing, setEditing] = useState(false);
@@ -1477,23 +1487,29 @@ function PatientMemo({ p, readOnly = false }) {
     mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, staffMemo: text } : x)));
     setEditing(false);
   };
+  const start = () => { setV(memo); setEditing(true); };
   if (editing) {
     return (
-      <div className="w-full flex items-center gap-2 mt-1">
+      <span className="w-full flex items-center gap-2 font-normal">
         <input autoFocus value={v} onChange={e => setV(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
           placeholder="직원 메모 (예: 타과 진료 다녀오심, YAG 후 10:30 IOP 확인)" className={`${INPUT} flex-1`} />
         <button type="button" onClick={save} className="text-sm px-3 py-2 rounded-lg bg-sky-600 text-white font-medium shrink-0">저장</button>
         <button type="button" onClick={() => setEditing(false)} className="text-sm px-2 py-2 text-slate-500 shrink-0">취소</button>
-      </div>
+      </span>
     );
   }
-  if (!memo && !canEdit) return null;
+  if (memo) {
+    const pill = <><StickyNote size={13} className="shrink-0" /><span className="truncate">{memo}</span></>;
+    return canEdit
+      ? <button type="button" onClick={start} title="눌러서 메모 수정" className="text-sm font-normal max-w-full bg-sky-50 border border-sky-200 text-sky-900 rounded-lg px-2 py-0.5 flex items-center gap-1">{pill}</button>
+      : <span className="text-sm font-normal max-w-full bg-sky-50 border border-sky-200 text-sky-900 rounded-lg px-2 py-0.5 flex items-center gap-1">{pill}</span>;
+  }
+  if (!canEdit) return null;
   return (
-    <div className="w-full flex items-center gap-2 mt-1 flex-wrap">
-      {memo && <span className="text-sm bg-sky-50 border border-sky-200 text-sky-900 rounded-lg px-3 py-1"><span className="font-semibold">메모</span> {memo}</span>}
-      {canEdit && <button type="button" onClick={() => { setV(memo); setEditing(true); }} className="text-xs text-slate-400 hover:text-slate-600 underline">{memo ? '메모 수정' : '+ 메모'}</button>}
-    </div>
+    <button type="button" onClick={start} title="직원 메모 추가" aria-label="직원 메모 추가" className="p-1 rounded text-slate-300 hover:text-sky-600 hover:bg-sky-50">
+      <StickyNote size={15} />
+    </button>
   );
 }
 
@@ -1554,10 +1570,10 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
               <AlertTriangle size={11} /> 진료 후 추가검사
             </span>
           )}
+          <PatientMemo p={p} />
         </div>
         <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</div>
         {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
-        <PatientMemo p={p} />
         <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
       </div>
       {(onUp || onDown) && (
@@ -1703,7 +1719,9 @@ function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCancel })
 }
 
 // 산동 여부·CR·점안 시각 기록. 모든 직원 화면의 환자 카드에서 같은 방식으로 사용
-function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true }) {
+// compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
+// togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
+function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);
@@ -1711,6 +1729,8 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true }) {
   const st = dilationState(p, prefs, waitMin);
   const eye = !cr && dil ? dilateEyeOf(p.dilateEye) : undefined;
   const [eyeModal, setEyeModal] = useState(false);
+  if (compact && !dil && !cr) return null;
+  if (togglesOnly) showDrops = false;
   const chip = (on) => `text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
   return (
     <div className="w-full flex flex-wrap items-center gap-1.5">
@@ -1752,7 +1772,7 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true }) {
           {cr ? `${i + 1}회 점안` : '점안'}{t ? ` ${fmtClock(t)}` : ''}
         </button>
       ))}
-      {st.need && <DilationBadge st={st} waitMin={waitMin} eye={eye} />}
+      {st.need && !togglesOnly && <DilationBadge st={st} waitMin={waitMin} eye={eye} />}
     </div>
   );
 }
@@ -2219,22 +2239,23 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
   return (
     <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length}>
 
-      {!isVision && groups.length >= 2 && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
-          {groups.map(g => (
-            <FilterChip
-              key={g.key}
-              active={activeGroup?.key === g.key}
-              onClick={() => setFilter(g.key)}
-              label={`${g.key} ${roomList.filter(p => groupPending(p, g)).length}명${roomList.some(p => g.tests.some(t => t.id === activeVf(p))) ? ' · 검사 중' : ''}`}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-        <div className="text-sm font-medium text-slate-500">{isVision ? `검사 대기 · ${roomList.length}명` : ''}</div>
+      {/* 장비 필터(검사실)·검사 대기 인원(시력실)과 정렬을 한 줄에 */}
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        {isVision ? (
+          <div className="text-sm font-medium text-slate-500">검사 대기 · {roomList.length}명</div>
+        ) : groups.length >= 2 ? (
+          <div className="flex flex-wrap gap-2">
+            <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
+            {groups.filter(g => activeGroup?.key === g.key || roomList.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p)))).map(g => (
+              <FilterChip
+                key={g.key}
+                active={activeGroup?.key === g.key}
+                onClick={() => setFilter(g.key)}
+                label={`${g.key} ${roomList.filter(p => groupPending(p, g)).length}명${roomList.some(p => g.tests.some(t => t.id === activeVf(p))) ? ' · 검사 중' : ''}`}
+              />
+            ))}
+          </div>
+        ) : <div />}
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
       </div>
 
@@ -2286,14 +2307,14 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   if (!o.needed.length) return null;
                   if (o.complete) {
                     return (
-                      <span className="w-full flex items-center gap-2 text-sm text-emerald-700">
+                      <span className="flex items-center gap-1.5 text-sm text-emerald-700">
                         <span className="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-1"><Check size={13} />처방 완료 {fmtClock(o.rec.at)}</span>
-                        <button type="button" onClick={() => setOrdered(p, false)} className="text-xs text-slate-400 underline">처방 완료 취소</button>
+                        <button type="button" onClick={() => setOrdered(p, false)} title="처방 완료 취소" aria-label="처방 완료 취소" className="p-1 rounded text-slate-300 hover:text-slate-600"><RotateCcw size={13} /></button>
                       </span>
                     );
                   }
                   return (
-                    <span className="w-full flex items-center gap-2 flex-wrap">
+                    <span className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-sm px-2 py-0.5 rounded-lg bg-orange-100 text-orange-800 font-medium">
                         {o.rec ? `추가 처방 필요: ${o.missing.map(t => t.short || t.name).join(', ')}` : '처방 전'}
                       </span>
@@ -2327,7 +2348,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 ))}
                 {isVision && firstVisitChip(p)}
                 {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="text-xs px-3 py-1.5 rounded-lg border border-rose-200 text-rose-700">접수 취소</button>}
-                <DilationRow p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 {otherRooms.length > 0 && (
                   <span className="text-xs text-slate-500">
                     다른 검사실 남음: {otherRooms.map(r => `${r.name} (${pendingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
@@ -2340,7 +2361,9 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     ))}
                   </div>
                 )}
-                <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)} />
+                <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
+                  <DilationRow togglesOnly p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                </TestPicker>
               </PatientRow>
             );
           }}
@@ -2367,9 +2390,9 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     <span className="t-name">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
                     {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
                     {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
+                    <PatientMemo p={p} />
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'}</div>
-                  <PatientMemo p={p} />
                 </div>
                 <div className="flex gap-2 shrink-0 items-center">
                   {firstVisitChip(p)}
@@ -2467,9 +2490,9 @@ function SimpleCard({ p, tone = 'slate', children }) {
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
         {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
         {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
+        <PatientMemo p={p} />
       </div>
       {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
-      <PatientMemo p={p} />
       <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
     </div>
   );
@@ -2786,9 +2809,9 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                 {inRoom.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-normal">초진</span>}
                 {inRoom.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-normal">2차 진료 · {inRoom.primaryDoctor} 후</span>}
                 {nextVisitNote(inRoom)}
+                <PatientMemo p={inRoom} />
               </div>
-              <div className="text-sm text-slate-400 mb-1">{inRoom.id} · 예약 {inRoom.reservation}</div>
-              <div className="mb-3"><PatientMemo p={inRoom} /></div>
+              <div className="text-sm text-slate-400 mb-3">{inRoom.id} · 예약 {inRoom.reservation}</div>
               <div className="bg-slate-50 rounded-xl p-3 mb-3">
                 <MeasureTable today={inRoom.measure} prev={previousMeasure(inRoom, history)} />
               </div>
@@ -2844,7 +2867,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                     <div className="w-full mb-1">
                       <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
                     </div>
-                    <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+                    <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
                     <button
                       type="button"
                       disabled={!!inRoom}
@@ -3093,7 +3116,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
               <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
             </>}
             <ProcedureList p={p} performer="resident" onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
-            <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+            <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             {inResidentProcedure(p) && <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
               처치 완료
             </button>}
@@ -3587,9 +3610,9 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
                   {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
+                  <PatientMemo p={p} readOnly={readOnly} />
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · {readOnly ? p.doctor : getStage(p, settings).label}</div>
-                <PatientMemo p={p} readOnly={readOnly} />
                 {!readOnly && p.linkWaiting && p.linkType === 'planned' && <div className="text-xs text-fuchsia-700 mt-0.5">검사는 1차 진료 전에 함께 합니다. 추가할 검사는 1차 진료 카드에 지정해주세요.</div>}
               </div>
               {!readOnly && <>
@@ -3622,8 +3645,12 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                   </div>
                 );
               })()}
-              <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }} onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }} />
-              <DilationRow showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+              <DilationRow compact showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+              <TestPicker p={p} tests={orderForPicking(allTests, settings)} defaultOpen={flag}
+                onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }}
+                onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }}>
+                <DilationRow togglesOnly p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+              </TestPicker>
               </>}
             </div>
             );
@@ -4511,9 +4538,8 @@ function PatientDirectory({ patients, settings, lastSync, onClose }) {
         {archived.isArchived && <div className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">{archived.loading ? '지난 명단을 불러오는 중입니다…' : archived.error ? '지난 명단을 불러오지 못했습니다. 서버 연결을 확인해주세요.' : '지난 날짜의 보관된 명단입니다.'}</div>}
         {!list.length ? <EmptyState text={archived.loading ? '불러오는 중…' : '조건에 맞는 환자가 없습니다. 검색어나 날짜를 확인해주세요.'} /> : list.map(p => (
           <div key={patientKey(p)} className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="flex flex-wrap items-center gap-2"><span className="t-name text-slate-900">{p.name}</span><span className="text-sm text-slate-500">{p.id} · {p.doctor || '담당 교수 미지정'}</span>{p.firstVisit && <span className="text-xs text-sky-700">초진</span>}</div>
+            <div className="flex flex-wrap items-center gap-2"><span className="t-name text-slate-900">{p.name}</span><span className="text-sm text-slate-500">{p.id} · {p.doctor || '담당 교수 미지정'}</span>{p.firstVisit && <span className="text-xs text-sky-700">초진</span>}<PatientMemo p={p} readOnly /></div>
             <div className="mt-1 text-xs text-slate-500">{p.date} · 예약 {p.reservation || '-'} · 접수 {p.checkin || '미접수'}</div>
-            <PatientMemo p={p} readOnly />
             <div className="mt-3 flex flex-wrap gap-2">{patientQueueLabels(p, settings).map(label => <span key={label} className={`rounded-lg border px-3 py-2 text-sm ${p.consultDone ? 'border-slate-200 bg-slate-50 text-slate-600' : activeVf(p) ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{label}</span>)}</div>
             {pendingProcedures(p).length > 0 && <div className="mt-2 text-xs text-slate-600">남은 처치: {pendingProcedures(p).map(x => `${x.name} (${PERFORMER_LABEL[x.performer] || x.performer})`).join(', ')}</div>}
           </div>
