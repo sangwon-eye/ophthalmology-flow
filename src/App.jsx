@@ -1532,6 +1532,24 @@ function PatientMemo({ p, readOnly = false }) {
 }
 
 /* 명단 보기 방식: 정렬(예약시간순·가나다순), 오전·오후 */
+// 지각 표시: 모든 직원 화면의 카드에서 눌러서 켜고 끔 (지각이면 대기 순서 뒤로)
+function LateChip({ p }) {
+  const mutatePatients = useContext(PatientMemoContext);
+  if (!mutatePatients) return p.late ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">지각</span> : null;
+  const pk = patientKey(p);
+  return (
+    <button
+      type="button"
+      aria-pressed={!!p.late}
+      onClick={() => patchPatient(mutatePatients, pk, x => setLate(x, !x.late))}
+      title={p.late ? '누르면 지각 취소' : '누르면 지각 표시 (지각은 대기 순서 뒤로)'}
+      className={`text-xs px-2 py-0.5 rounded-full border ${p.late ? 'bg-red-50 border-red-300 text-red-600 font-semibold' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'}`}
+    >
+      지각
+    </button>
+  );
+}
+
 function byName(a, b) {
   return String(a.name).localeCompare(String(b.name), 'ko') || String(a.id).localeCompare(String(b.id));
 }
@@ -1568,7 +1586,7 @@ function SegmentedToggle({ value, onChange, options, className = '' }) {
 const SORT_OPTIONS = [['time', '예약시간순'], ['name', '가나다순']];
 const SESSION_OPTIONS = [['all', '전체'], ['am', '오전'], ['pm', '오후']];
 
-function PatientRow({ p, index, color, handle, onUp, onDown, hideLate = false, children }) {
+function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
     <div className={`flex items-start gap-3 bg-white border ${c.border} rounded-xl p-4`}>
@@ -1581,7 +1599,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, hideLate = false, c
           {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
           {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
           {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
-          {p.late && !hideLate && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">지각</span>}
+          <LateChip p={p} />
           {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
           {p.consultHold && !p.consultDone && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 flex items-center gap-1">
@@ -2151,25 +2169,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
     </button>
   );
 
-  const toggleLate = (p) => {
-    const pk = patientKey(p);
-    const on = !p.late;
-    const before = { late: p.late, queueKey: p.queueKey };
-    patchPatient(mutatePatients, pk, x => setLate(x, on));
-    showToast(`${p.name} ${on ? '지각 표시' : '지각 취소'}`, () => patchPatient(mutatePatients, pk, () => before));
-  };
-  const lateChip = (p) => (
-    <button
-      type="button"
-      aria-pressed={!!p.late}
-      onClick={() => toggleLate(p)}
-      title="누르면 지각 표시 (지각은 대기 순서 뒤로)"
-      className={`text-xs px-2.5 py-1 rounded-full border ${p.late ? 'bg-red-50 border-red-300 text-red-600 font-semibold' : 'bg-white border-slate-300 text-slate-400'}`}
-    >
-      지각
-    </button>
-  );
-
   const testLabel = (key) => (key === VISION_KEY ? '시력/안압' : (settings.tests.find(t => t.id === key)?.short || '검사'));
 
   const writeDone = (pk, key, val, at) =>
@@ -2321,7 +2320,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 p={p}
                 index={idx}
                 color={color}
-                hideLate={isVision}
                 handle={handle}
                 onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
                 onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
@@ -2354,7 +2352,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   return (
                     <span className="flex items-center gap-1.5">
                       <button type="button" onClick={() => setOrdered(p, true)} title="전산 처방을 넣은 뒤 누르면 처방 완료로 바뀝니다"
-                        className="text-sm px-3 py-1.5 rounded-lg border border-orange-500 bg-orange-500 hover:bg-orange-600 text-white font-semibold">
+                        className="text-sm px-3 py-1.5 rounded-lg border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold">
                         {o.rec ? `추가 처방 필요: ${o.missing.map(t => t.short || t.name).join(', ')}` : '처방 전'}
                       </button>
                       <span className="h-6 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
@@ -2370,14 +2368,14 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   isVfTest(t) && !p.done?.[t.id] ? (
                     runningVf === t.id ? (
                       <div key={t.id} className={`${TEST_TILE} overflow-hidden border-amber-500 bg-amber-50 text-sm`}>
-                        <span className="px-3 font-semibold text-amber-900">{testLabelWithOptions(t, p.detail?.[t.id])} 검사 중 {fmtClock(p.vfStartedAt)}~</span>
-                        <button type="button" onClick={() => changeVf(p, t, 'finish')} className="self-stretch px-3 bg-green-600 text-white font-semibold">종료</button>
-                        <button type="button" onClick={() => changeVf(p, t, 'cancel')} className="self-stretch px-2.5 text-slate-500 border-l border-amber-300 bg-white">시작 취소</button>
+                        <span className="px-3 font-semibold text-amber-900">{testLabelWithOptions(t, p.detail?.[t.id])} 검사 중</span>
+                        <button type="button" onClick={() => changeVf(p, t, 'finish')} className="self-stretch px-3 bg-green-100 hover:bg-green-200 text-green-800 font-semibold border-l border-amber-300">종료</button>
+                        <button type="button" onClick={() => changeVf(p, t, 'cancel')} className="self-stretch px-2.5 text-slate-500 hover:text-slate-700 border-l border-amber-300 bg-white">시작 취소</button>
                       </div>
                     ) : (
                       <div key={t.id} className={`${TEST_TILE} overflow-hidden text-sm ${topTest?.id === t.id ? 'border-amber-400 bg-amber-50' : 'border-slate-300 bg-white'} ${runningVf ? 'opacity-40' : ''}`}>
                         <span className="px-3 font-semibold text-slate-800">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
-                        <button type="button" disabled={!!runningVf} onClick={() => changeVf(p, t, 'start')} className="self-stretch px-3 bg-amber-600 text-white font-semibold flex items-center gap-1">▶ 시작</button>
+                        <button type="button" disabled={!!runningVf} onClick={() => changeVf(p, t, 'start')} className="self-stretch px-3 bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold border-l border-amber-300 flex items-center gap-1">▶ 시작</button>
                       </div>
                     )
                   ) : <TestToggle
@@ -2391,7 +2389,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   />
                 ))}
                 {isVision && firstVisitChip(p)}
-                {isVision && lateChip(p)}
                 {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
                 <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 {otherRooms.length > 0 && (
@@ -2441,7 +2438,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 </div>
                 <div className="flex gap-2 shrink-0 items-center">
                   {firstVisitChip(p)}
-                  {lateChip(p)}
+                  <LateChip p={p} />
                   <button type="button" onClick={() => checkIn(p)} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">접수</button>
                 </div>
               </div>
