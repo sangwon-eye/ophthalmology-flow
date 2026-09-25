@@ -988,10 +988,10 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
   return (
     <div className="min-h-screen bg-slate-50">
       <div className={`sticky top-0 z-10 ${c.bg} border-b ${c.border}`}>
-        <div className="max-w-3xl mx-auto px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="max-w-3xl mx-auto px-5 py-2 flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <div className={`text-xs font-medium ${c.text} mb-0.5`}>Ophthalmology Flow</div>
-            <h1 className="text-xl font-semibold text-slate-900">
+            <div className={`text-[11px] leading-none font-medium ${c.text} mb-1`}>Ophthalmology Flow</div>
+            <h1 className="text-lg leading-tight font-semibold text-slate-900">
               {title}
               {typeof count === 'number' && <span className="ml-2 text-base font-normal text-slate-500">대기 {count}명</span>}
             </h1>
@@ -1011,7 +1011,9 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
   );
 }
 
-function EmptyState({ text }) {
+function EmptyState({ text, compact = false }) {
+  // compact: 아래에 다른 구역이 이어지는 곳 (큰 빈 칸 대신 한 줄)
+  if (compact) return <div className="py-2 text-slate-400 text-sm">{text}</div>;
   return <div className="text-center py-16 text-slate-400 text-sm">{text}</div>;
 }
 
@@ -1161,23 +1163,25 @@ function SpecialPressButton({ onClick, onSpecial, className, title, children, di
   );
 }
 
+// 검사실에서 할 검사 한 칸. '오늘 검사' 칩(얇은 테두리·둥근 모양)과 구분되도록 굵은 테두리의 네모 칸으로 그립니다.
+const TEST_TILE = 'min-h-[2.25rem] rounded-lg border-2 flex items-center select-none';
 function TestToggle({ label, done, onToggle, emphasize, onSpecial, disabled = false }) {
   const style = done
-    ? 'bg-green-50 border-green-300 text-green-700'
+    ? 'bg-green-50 border-green-400 text-green-800'
     : emphasize
-      ? 'bg-amber-50 border-amber-400 text-amber-800 font-medium'
-      : 'bg-white border-slate-300 text-slate-600';
+      ? 'bg-amber-50 border-amber-400 text-amber-900'
+      : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400';
   return (
     <SpecialPressButton
       disabled={disabled}
       onClick={() => onToggle(!done)}
       onSpecial={onSpecial}
       title={onSpecial ? '오른쪽 클릭: 단안·프로토콜 지정' : undefined}
-      className={`text-sm px-3 py-1.5 rounded-lg border flex items-center gap-1.5 select-none ${style}`}
+      className={`${TEST_TILE} text-sm font-semibold px-3 gap-1.5 ${style}`}
     >
       {done && <Check size={14} />}
       {label}
-      {emphasize && !done && <span className="text-xs">우선</span>}
+      {emphasize && !done && <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">우선</span>}
     </SpecialPressButton>
   );
 }
@@ -1209,11 +1213,21 @@ function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, children
           </SpecialPressButton>
         );
       })}
-      <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)}
-        className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 flex items-center gap-1">
-        {open ? <><ChevronUp size={12} />접기</> : <><Plus size={12} />검사 변경</>}
-      </button>
-      {open && children && <div className="w-full mt-1">{children}</div>}
+      {open && children && <>
+        <span className="h-5 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
+        {children}
+      </>}
+      {open ? (
+        <button type="button" aria-expanded="true" onClick={() => setOpen(false)}
+          className="w-full mt-1 py-1.5 rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 flex items-center justify-center gap-1">
+          <ChevronUp size={13} />접기
+        </button>
+      ) : (
+        <button type="button" aria-expanded="false" onClick={() => setOpen(true)}
+          className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 flex items-center gap-1">
+          <Plus size={12} />검사 변경
+        </button>
+      )}
     </div>
   );
 }
@@ -1721,7 +1735,7 @@ function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCancel })
 // 산동 여부·CR·점안 시각 기록. 모든 직원 화면의 환자 카드에서 같은 방식으로 사용
 // compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
-function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false }) {
+function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);
@@ -1733,7 +1747,7 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
   if (togglesOnly) showDrops = false;
   const chip = (on) => `text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
   return (
-    <div className="w-full flex flex-wrap items-center gap-1.5">
+    <div className={inline ? 'contents' : 'w-full flex flex-wrap items-center gap-1.5'}>
       {!cr && (
         <SpecialPressButton
           onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateOverride: !dil }))}
@@ -1792,7 +1806,7 @@ function ProcedureModal({ patient, procedures, onConfirm, onCancel }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
         <h3 className="text-lg font-medium mb-1 text-slate-900">{patient.name}님 처치</h3>
-        <p className="text-sm text-slate-500 mb-4">교수님 처치는 진료실 명단의 처치 대기로, 전공의 처치는 처치실로 갑니다. 처치가 끝나면 설명 대기로 넘어가요.</p>
+        <p className="text-sm text-slate-500 mb-4">진료 완료 후 설명 대기로 가서 '처치 중'으로 표시됩니다. 교수님 처치는 설명 대기 카드에서, 전공의 처치는 처치실에서 완료합니다.</p>
         <div className="space-y-2 mb-4">
           {procedures.length === 0 && <div className="text-sm text-slate-400">설정 &gt; 처치에서 처치 목록을 먼저 만들어주세요</div>}
           {procedures.map(x => (
@@ -1900,27 +1914,29 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
         <h3 className="text-lg font-medium mb-1 text-slate-900">{title}</h3>
         {subtitle && <p className="text-sm text-slate-500 mb-4">{subtitle}</p>}
         {followup && <div className="text-sm text-indigo-700 mb-3">다음 내원 담당: {followupDoctor || '미지정'}</div>}
-        <div className="space-y-2 mb-6">
-          {tests.length === 0 && <div className="text-sm text-slate-400">설정에 등록된 검사가 없습니다</div>}
+        {/* 2열 체크 칸. 세부 입력(단안·옵션)이 열린 칸만 한 줄 전체를 쓴다 */}
+        <div className="grid grid-cols-2 gap-2 mb-6">
+          {tests.length === 0 && <div className="col-span-2 text-sm text-slate-400">설정에 등록된 검사가 없습니다</div>}
           {visibleTests.map(t => {
             const checked = !!sel[t.id];
-            const hasOpts = (t.options || []).length > 0;
             const open = !!t.popupOnClick || (!followup && !!extraOpen[t.id]);
             return (
               <div
                 key={t.id}
                 onContextMenu={e => { e.preventDefault(); openExtra(t.id); }}
-                className={`rounded-xl border ${checked ? 'border-slate-300 bg-slate-50' : 'border-slate-200'}`}
+                className={`min-w-0 rounded-xl border ${checked ? 'border-slate-300 bg-slate-50' : 'border-slate-200'} ${checked && open ? 'col-span-2' : ''}`}
               >
-                <label className="flex items-center gap-3 p-3 cursor-pointer">
-                  <input type="checkbox" checked={checked} onChange={() => setSel(s => ({ ...s, [t.id]: !s[t.id] }))} className="w-5 h-5" />
-                  <span className="text-slate-700 flex-1">
-                    {t.short || t.name}
-                    {checked && !open && detail[t.id] && cleanDetail(detail[t.id]).eye !== 'OU' && (
-                      <span className="ml-2 text-xs text-slate-500">{cleanDetail(detail[t.id]).eye}만</span>
-                    )}
+                <label className="flex items-center gap-2.5 px-3 py-2 cursor-pointer">
+                  <input type="checkbox" checked={checked} onChange={() => setSel(s => ({ ...s, [t.id]: !s[t.id] }))} className="w-5 h-5 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-slate-700 truncate">
+                      {t.short || t.name}
+                      {checked && !open && detail[t.id] && cleanDetail(detail[t.id]).eye !== 'OU' && (
+                        <span className="ml-1.5 text-xs text-slate-500">{cleanDetail(detail[t.id]).eye}만</span>
+                      )}
+                    </span>
+                    <span className="block text-xs text-slate-400 truncate">{roomName(t.roomId)}</span>
                   </span>
-                  <span className="text-xs text-slate-400">{roomName(t.roomId)}</span>
                 </label>
                 {checked && open && (
                   <div className="px-3 pb-3">
@@ -1928,7 +1944,7 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
                   </div>
                 )}
                 {checked && !open && !followup && (
-                  <button type="button" onClick={() => openExtra(t.id)} className="text-xs text-slate-500 underline px-3 pb-3">
+                  <button type="button" onClick={() => openExtra(t.id)} className="block text-xs text-slate-500 underline -mt-1 pb-2 pl-10 pr-3">
                     단안·프로토콜 지정
                   </button>
                 )}
@@ -2240,13 +2256,14 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
     <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length}>
 
       {/* 장비 필터(검사실)·검사 대기 인원(시력실)과 정렬을 한 줄에 */}
-      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+      <div className="flex items-start justify-between gap-2 mb-3">
         {isVision ? (
-          <div className="text-sm font-medium text-slate-500">검사 대기 · {roomList.length}명</div>
+          <div className="self-center text-sm font-medium text-slate-500">검사 대기 · {roomList.length}명</div>
         ) : groups.length >= 2 ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex-1 min-w-0 flex flex-wrap gap-2">
             <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
-            {groups.filter(g => activeGroup?.key === g.key || roomList.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p)))).map(g => (
+            {/* 장비마다 컴퓨터를 따로 쓰므로 대기 0명인 장비도 항상 보여준다 */}
+            {groups.map(g => (
               <FilterChip
                 key={g.key}
                 active={activeGroup?.key === g.key}
@@ -2256,11 +2273,11 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
             ))}
           </div>
         ) : <div />}
-        <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
+        <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} className="shrink-0" />
       </div>
 
       {shown.length === 0 ? (
-        <EmptyState text="대기 중인 환자가 없습니다" />
+        <EmptyState compact={isVision} text="대기 중인 환자가 없습니다" />
       ) : (
         <DraggableList
           items={nameSort ? [...shown].sort(byName) : shown}
@@ -2285,11 +2302,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
                 onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
               >
-                {runningVf && (
-                  <div role="status" className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
-                    VF 검사 중 · {fmtClock(p.vfStartedAt)} 시작 · 다른 장비 호출 금지
-                  </div>
-                )}
                 {isVision && (
                   <div className="w-full space-y-1 mb-1">
                     <MeasureLine label="이전" m={prev} emptyText="이전 값 없음" />
@@ -2310,6 +2322,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                       <span className="flex items-center gap-1.5 text-sm text-emerald-700">
                         <span className="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-1"><Check size={13} />처방 완료 {fmtClock(o.rec.at)}</span>
                         <button type="button" onClick={() => setOrdered(p, false)} title="처방 완료 취소" aria-label="처방 완료 취소" className="p-1 rounded text-slate-300 hover:text-slate-600"><RotateCcw size={13} /></button>
+                        <span className="h-6 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
                       </span>
                     );
                   }
@@ -2319,6 +2332,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                         {o.rec ? `추가 처방 필요: ${o.missing.map(t => t.short || t.name).join(', ')}` : '처방 전'}
                       </span>
                       <button type="button" onClick={() => setOrdered(p, true)} className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium">처방 완료</button>
+                      <span className="h-6 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
                     </span>
                   );
                 })()}
@@ -2329,13 +2343,18 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 )}
                 {tests.filter(t => p.assigned?.[t.id] && (!isVision || t.id === 'ark')).map(t => (
                   isVfTest(t) && !p.done?.[t.id] ? (
-                    <div key={t.id} className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
-                      {runningVf === t.id ? <>
-                        <button type="button" onClick={() => changeVf(p, t, 'finish')} className="rounded-lg bg-green-600 px-3 py-2 text-sm text-white">VF 종료</button>
-                        <button type="button" onClick={() => changeVf(p, t, 'cancel')} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600">VF 시작 취소</button>
-                      </> : <button type="button" disabled={!!runningVf} onClick={() => changeVf(p, t, 'start')} className="rounded-lg bg-amber-600 px-3 py-2 text-sm text-white disabled:opacity-40">VF 시작</button>}
-                    </div>
+                    runningVf === t.id ? (
+                      <div key={t.id} className={`${TEST_TILE} overflow-hidden border-amber-500 bg-amber-50 text-sm`}>
+                        <span className="px-3 font-semibold text-amber-900">{testLabelWithOptions(t, p.detail?.[t.id])} 검사 중 {fmtClock(p.vfStartedAt)}~</span>
+                        <button type="button" onClick={() => changeVf(p, t, 'finish')} className="self-stretch px-3 bg-green-600 text-white font-semibold">종료</button>
+                        <button type="button" onClick={() => changeVf(p, t, 'cancel')} className="self-stretch px-2.5 text-slate-500 border-l border-amber-300 bg-white">시작 취소</button>
+                      </div>
+                    ) : (
+                      <div key={t.id} className={`${TEST_TILE} overflow-hidden text-sm ${topTest?.id === t.id ? 'border-amber-400 bg-amber-50' : 'border-slate-300 bg-white'} ${runningVf ? 'opacity-40' : ''}`}>
+                        <span className="px-3 font-semibold text-slate-800">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
+                        <button type="button" disabled={!!runningVf} onClick={() => changeVf(p, t, 'start')} className="self-stretch px-3 bg-amber-600 text-white font-semibold flex items-center gap-1">▶ 시작</button>
+                      </div>
+                    )
                   ) : <TestToggle
                     disabled={!!runningVf}
                     key={t.id}
@@ -2347,7 +2366,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   />
                 ))}
                 {isVision && firstVisitChip(p)}
-                {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="text-xs px-3 py-1.5 rounded-lg border border-rose-200 text-rose-700">접수 취소</button>}
+                {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
                 <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 {otherRooms.length > 0 && (
                   <span className="text-xs text-slate-500">
@@ -2362,7 +2381,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   </div>
                 )}
                 <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
-                  <DilationRow togglesOnly p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                  <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 </TestPicker>
               </PatientRow>
             );
@@ -2479,13 +2498,14 @@ function SectionTitle({ children, hint }) {
   );
 }
 
-function SimpleCard({ p, tone = 'slate', children }) {
+function SimpleCard({ p, tone = 'slate', badges, children }) {
   const c = COLOR_MAP[tone] || COLOR_MAP.slate;
   return (
     <div className={`bg-white border ${c.border} rounded-xl p-4 mb-3`}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="t-name text-slate-900">{p.name}</span>
         <span className="text-xs text-slate-400">{p.id}</span>
+        {badges}
         {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
         {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
@@ -2770,10 +2790,11 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                 const ps = procedureStatus(p);
                 const early = !!p.explainedEarly;
                 return (
-                <SimpleCard key={patientKey(p)} p={p} tone="emerald">
-                  {ps === 'doing' && <span className="text-sm px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">처치 중</span>}
-                  {ps === 'done' && <span className="text-sm px-2.5 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold">처치 완료</span>}
-                  {early && <span className="text-sm px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-medium">설명 완료{p.fuLater ? ' · FU 나중에' : ''}</span>}
+                <SimpleCard key={patientKey(p)} p={p} tone="emerald" badges={<>
+                  {ps === 'doing' && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300">처치 중</span>}
+                  {ps === 'done' && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold border border-green-300">처치 완료</span>}
+                  {early && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료{p.fuLater ? ' · FU 나중에' : ''}</span>}
+                </>}>
                   <ProcedureList p={p} onCancel={early ? undefined : uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
                   {pendingProcedures(p, 'prof').length > 0 && (
                     <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
@@ -2791,8 +2812,8 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                       className="text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 font-medium">
                       설명 완료 · FU 나중에
                     </button>
-                    <button type="button" onClick={() => undoFinishConsult(p)} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600 flex items-center gap-1">
-                      <RotateCcw size={14} /> 진료 완료 취소
+                    <button type="button" onClick={() => undoFinishConsult(p)} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1">
+                      <RotateCcw size={12} />진료 완료 취소
                     </button>
                   </>}
                 </SimpleCard>
@@ -2847,7 +2868,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
             {residentCount > 0 ? ` (처치실 ${residentCount}명)` : ''}
           </SectionTitle>
           {waiting.length === 0 ? (
-            <EmptyState text="검사를 모두 마친 환자가 없습니다" />
+            <EmptyState compact text="검사를 모두 마친 환자가 없습니다" />
           ) : (
             <DraggableList
               items={waiting}
@@ -3080,13 +3101,11 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
           ))}
         </div>
       )}
-      <div className="mb-8">
+      <div className={triage.length ? 'mb-8' : 'mb-4'}>
         <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
           검사 지정 대기 (초진 · 2차 진료) · {triage.length}명
         </SectionTitle>
-        {triage.length === 0 ? (
-          <div className="text-sm text-slate-400 py-3">검사 지정 대기 환자가 없습니다</div>
-        ) : triage.map(p => {
+        {triage.map(p => {
           const doneTests = allTests.filter(t => p.done?.[t.id]);
           return (
           <SimpleCard key={patientKey(p)} p={p} tone="sky">
@@ -3105,21 +3124,23 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
 
       <div>
         <SectionTitle hint="검사를 마친 초진 환자의 예진과 전공의 처치를 진행합니다.">처치 대기 · {procs.length}명</SectionTitle>
-        {procs.length === 0 ? (
-          <div className="text-sm text-slate-400 py-3">처치 대기 환자가 없습니다</div>
-        ) : procs.map(p => (
-          <SimpleCard key={patientKey(p)} p={p} tone="indigo">
-            {p.explainedEarly && inResidentProcedure(p) && <span className="text-sm px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-medium">설명 완료 · 처치 후 귀가</span>}
+        {procs.map(p => (
+          <SimpleCard key={patientKey(p)} p={p} tone="indigo"
+            badges={p.explainedEarly && inResidentProcedure(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료 · 처치 후 귀가</span>}>
             {needsTriageExam(p, settings) && <>
               <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
               <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
             </>}
-            <ProcedureList p={p} performer="resident" onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
+            {(p.procedures || []).some(x => x.performer === 'resident') && (
+              <div className="w-full flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex-1 min-w-0"><ProcedureList p={p} performer="resident" onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} /></div>
+                {inResidentProcedure(p) && <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium shrink-0">
+                  처치 완료
+                </button>}
+              </div>
+            )}
             <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
-            {inResidentProcedure(p) && <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
-              처치 완료
-            </button>}
           </SimpleCard>
         ))}
       </div>
@@ -3649,7 +3670,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
               <TestPicker p={p} tests={orderForPicking(allTests, settings)} defaultOpen={flag}
                 onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }}
                 onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }}>
-                <DilationRow togglesOnly p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
               </TestPicker>
               </>}
             </div>
