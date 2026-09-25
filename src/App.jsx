@@ -50,7 +50,6 @@ const DEFAULT_SETTINGS = {
     { id: 'p_res', name: '전공의 처치', performer: 'resident' },
   ],
   dilationWaitMin: 15,
-  lateGraceMin: 0,
   // 같은 날 2차 진료(다른 교수님)로 넘어갈 때 처치실에서 추가 검사를 확인할지
   linkCheckAdded: true,    // 진료 중에 추가된 2차 진료
   linkCheckPlanned: false, // 미리 명단에 예정된 2차 진료
@@ -590,13 +589,18 @@ function needsTestCheck(p, prefs) {
   return !crActive(p, prefs);
 }
 
-function applyCheckin(p, graceMin) {
+// 지각은 자동으로 정하지 않고 직원이 시력실 카드의 [지각]으로 표시합니다 (접수 전에 고른 값 유지).
+// 지각 환자는 제시간 환자들 뒤로 갑니다.
+function lateQueueKey(p, late) {
+  return (late ? 100000 : 0) + timeToMin(p.reservation) + timeToMin(p.checkin) / 10000;
+}
+function applyCheckin(p) {
   const checkin = nowHHMM();
-  const reservationMin = timeToMin(p.reservation);
-  const checkinMin = timeToMin(checkin);
-  const late = !!p.reservation && checkinMin > reservationMin + (Number(graceMin) || 0);
-  const queueKey = (late ? 100000 : 0) + reservationMin + checkinMin / 10000;
-  return { ...p, checkin, late, queueKey };
+  const late = !!p.late;
+  return { ...p, checkin, late, queueKey: lateQueueKey({ ...p, checkin }, late) };
+}
+function setLate(p, late) {
+  return p.checkin ? { ...p, late, queueKey: lateQueueKey(p, late) } : { ...p, late };
 }
 function undoCheckin(p) {
   if (!p.checkin || p.done?.[VISION_KEY] || p.consultDone || activeVf(p)) return p;
@@ -1564,7 +1568,7 @@ function SegmentedToggle({ value, onChange, options, className = '' }) {
 const SORT_OPTIONS = [['time', '예약시간순'], ['name', '가나다순']];
 const SESSION_OPTIONS = [['all', '전체'], ['am', '오전'], ['pm', '오후']];
 
-function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
+function PatientRow({ p, index, color, handle, onUp, onDown, hideLate = false, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
     <div className={`flex items-start gap-3 bg-white border ${c.border} rounded-xl p-4`}>
@@ -1577,7 +1581,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
           {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
           {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
           {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
-          {p.late && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">지각</span>}
+          {p.late && !hideLate && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">지각</span>}
           {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
           {p.consultHold && !p.consultDone && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 flex items-center gap-1">
@@ -2147,6 +2151,25 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
     </button>
   );
 
+  const toggleLate = (p) => {
+    const pk = patientKey(p);
+    const on = !p.late;
+    const before = { late: p.late, queueKey: p.queueKey };
+    patchPatient(mutatePatients, pk, x => setLate(x, on));
+    showToast(`${p.name} ${on ? '지각 표시' : '지각 취소'}`, () => patchPatient(mutatePatients, pk, () => before));
+  };
+  const lateChip = (p) => (
+    <button
+      type="button"
+      aria-pressed={!!p.late}
+      onClick={() => toggleLate(p)}
+      title="누르면 지각 표시 (지각은 대기 순서 뒤로)"
+      className={`text-xs px-2.5 py-1 rounded-full border ${p.late ? 'bg-red-50 border-red-300 text-red-600 font-semibold' : 'bg-white border-slate-300 text-slate-400'}`}
+    >
+      지각
+    </button>
+  );
+
   const testLabel = (key) => (key === VISION_KEY ? '시력/안압' : (settings.tests.find(t => t.id === key)?.short || '검사'));
 
   const writeDone = (pk, key, val, at) =>
@@ -2193,9 +2216,9 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
 
   const checkIn = (p) => {
     const pk = patientKey(p);
-    mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? applyCheckin(x, settings.lateGraceMin) : x)));
+    mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? applyCheckin(x) : x)));
     showToast(`${p.name} 접수`, () => mutatePatients(prev => prev.map(x => (patientKey(x) === pk
-      ? { ...x, checkin: '', late: false, queueKey: timeToMin(x.reservation) }
+      ? { ...x, checkin: '', late: !!p.late, queueKey: timeToMin(x.reservation) }
       : x))));
   };
 
@@ -2298,6 +2321,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 p={p}
                 index={idx}
                 color={color}
+                hideLate={isVision}
                 handle={handle}
                 onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
                 onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
@@ -2367,6 +2391,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   />
                 ))}
                 {isVision && firstVisitChip(p)}
+                {isVision && lateChip(p)}
                 {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
                 <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 {otherRooms.length > 0 && (
@@ -2416,6 +2441,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 </div>
                 <div className="flex gap-2 shrink-0 items-center">
                   {firstVisitChip(p)}
+                  {lateChip(p)}
                   <button type="button" onClick={() => checkIn(p)} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">접수</button>
                 </div>
               </div>
@@ -4109,7 +4135,6 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         .map(x => ({ ...x, name: (x.name || '').trim() }))
         .filter(x => x.name),
       dilationWaitMin: Math.max(1, Math.round(Number(draft.dilationWaitMin) || 15)),
-      lateGraceMin: Math.max(0, Math.round(Number(draft.lateGraceMin) || 0)),
     };
     setDraft(toDraft(cleaned));
     setDirty(false);
@@ -4415,14 +4440,6 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
             <p className="text-sm text-slate-500 mb-3">점안 후 이 시간이 지나면 '산동 완료'로 표시돼요. CR은 4번째 점안부터 계산합니다.</p>
             <div className="flex items-center gap-2">
               <input type="number" min="1" value={draft.dilationWaitMin} onChange={e => updateDraft(d => ({ ...d, dilationWaitMin: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-              <span className="text-sm text-slate-600">분</span>
-            </div>
-          </div>
-          <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="font-medium text-slate-900 mb-1">지각 유예 시간</div>
-            <p className="text-sm text-slate-500 mb-3">예약시간보다 이 시간 안에 접수하면 지각으로 처리하지 않습니다. 0분이면 1분만 늦어도 지각이에요.</p>
-            <div className="flex items-center gap-2">
-              <input type="number" min="0" value={draft.lateGraceMin} onChange={e => updateDraft(d => ({ ...d, lateGraceMin: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
               <span className="text-sm text-slate-600">분</span>
             </div>
           </div>
