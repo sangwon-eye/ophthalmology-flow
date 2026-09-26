@@ -1640,9 +1640,13 @@ function KioskNoteEditor({ p }) {
     return (
       <div className="w-full flex items-center gap-2 flex-wrap">
         {p.kioskNote || p.skipVision
-          ? <button type="button" onClick={start} title="눌러서 수정" className="text-left text-xs px-2 py-1 rounded-lg bg-violet-50 border border-violet-200 text-violet-900">
-              접수 안내{p.skipVision ? ' · 시력검사 없이 바로 진료' : ''}{p.kioskNote ? `: ${p.kioskNote}` : ''}
-            </button>
+          ? <span className="inline-flex items-stretch rounded-lg bg-violet-50 border border-violet-200 text-violet-900 text-xs">
+              <button type="button" onClick={start} title="눌러서 수정" className="text-left px-2 py-1">
+                접수 안내{p.skipVision ? ' · 시력검사 없이 바로 진료' : ''}{p.kioskNote ? `: ${p.kioskNote}` : ''}
+              </button>
+              <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ kioskNote: '', skipVision: false }))}
+                title="이 환자 접수 안내 지우기" aria-label={`${p.name} 접수 안내 지우기`} className="px-2 border-l border-violet-200 text-violet-400 hover:text-red-600">×</button>
+            </span>
           : <button type="button" onClick={start} className="text-xs text-slate-400 hover:text-violet-700 underline">접수 안내 추가</button>}
       </div>
     );
@@ -3824,6 +3828,21 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
   const mq = manageQuery.trim();
   const byDate = dayAll.filter(p => (!manageDoctor || p.doctor === manageDoctor) && inSession(p, session)
     && (!mq || String(p.name || '').includes(mq) || String(p.id).includes(mq))).sort(sortMode === 'name' ? byName : byQueue);
+  // 접수 안내 일괄 적용: 지금 보이는 명단(날짜·교수·오전/오후·검색) 중 접수 전 환자에게 한 번에 적용. 바로 되돌릴 수 있습니다.
+  const [bulkNote, setBulkNote] = useState(null);
+  const [bulkNoteDone, setBulkNoteDone] = useState(null);
+  const applyBulkNote = (targets, text, skip, verb) => {
+    const keys = new Set(targets.map(patientKey));
+    const snapshot = Object.fromEntries(targets.map(p => [patientKey(p), { kioskNote: p.kioskNote || '', skipVision: !!p.skipVision }]));
+    mutatePatients(prev => prev.map(p => (keys.has(patientKey(p)) && !p.checkin ? { ...p, kioskNote: text, skipVision: skip } : p)));
+    setBulkNote(null);
+    setBulkNoteDone({ label: `${manageDate} ${manageDoctor || '모든 교수님'}${sessionLabel} ${targets.length}명 ${verb}.`, snapshot });
+  };
+  const undoBulkNote = () => {
+    const { snapshot } = bulkNoteDone;
+    mutatePatients(prev => prev.map(p => (snapshot[patientKey(p)] ? { ...p, ...snapshot[patientKey(p)] } : p)));
+    setBulkNoteDone(null);
+  };
   // 전체 삭제: 지금 보이는 명단(날짜 + 선택한 교수)을 한 번에 지웁니다. 바로 되돌릴 수 있습니다.
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const sessionLabel = session === 'am' ? ' 오전' : session === 'pm' ? ' 오후' : '';
@@ -4015,6 +4034,11 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                 <Trash2 size={14} /> {`${manageDoctor ? `${manageDoctor} ` : ''}${sessionLabel.trim() ? `${sessionLabel.trim()} ` : ''}전체 삭제`}
               </button>
             )}
+            {!readOnly && byDate.length > 0 && (
+              <button type="button" onClick={() => { setBulkNote({ text: '', skip: false }); setMessage(''); }} className="text-sm px-3 py-2 rounded-lg border border-violet-300 text-violet-700 bg-white">
+                접수 안내 일괄 적용
+              </button>
+            )}
             <div className="ml-auto flex gap-2 flex-wrap">
               <SegmentedToggle value={session} onChange={setSession} options={SESSION_OPTIONS} />
               <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
@@ -4026,6 +4050,39 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
               <button type="button" onClick={undoBulkDelete} className="text-sm font-semibold text-amber-300 px-3 py-1 rounded-lg flex items-center gap-1 shrink-0"><RotateCcw size={14} /> 되돌리기</button>
             </div>
           )}
+          {bulkNoteDone && (
+            <div className="bg-violet-800 text-white text-sm rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
+              <span>{bulkNoteDone.label}</span>
+              <button type="button" onClick={undoBulkNote} className="text-sm font-semibold text-amber-300 px-3 py-1 rounded-lg flex items-center gap-1 shrink-0"><RotateCcw size={14} /> 되돌리기</button>
+            </div>
+          )}
+          {bulkNote && (() => {
+            const targets = byDate.filter(p => !p.checkin && !p.consultDone);
+            const skipped = byDate.length - targets.length;
+            return (
+              <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
+                  <h3 className="text-lg font-medium text-slate-900 mb-1">접수 안내 일괄 적용</h3>
+                  <p className="text-sm text-slate-600 mb-3">
+                    <b>{manageDate} {manageDoctor || '모든 교수님'}{sessionLabel}{mq ? ` · '${mq}' 검색` : ''}</b> 명단 중 접수 전 환자 <b>{targets.length}명</b>에게 적용합니다.
+                    {skipped > 0 && <span className="text-slate-500"> (이미 접수했거나 진료가 끝난 {skipped}명은 제외)</span>}
+                  </p>
+                  <input autoFocus value={bulkNote.text} onChange={e => setBulkNote(b => ({ ...b, text: e.target.value }))} aria-label="일괄 접수 안내 문구"
+                    placeholder="예: 바로 29번방으로 오세요" className={INPUT} />
+                  <label className="flex items-center gap-2 text-sm text-slate-700 mt-3 cursor-pointer">
+                    <input type="checkbox" checked={bulkNote.skip} onChange={e => setBulkNote(b => ({ ...b, skip: e.target.checked }))} className="w-4 h-4" />
+                    시력검사 없이 바로 진료
+                  </label>
+                  <p className="text-xs text-slate-500 mt-3">적용한 뒤에도 환자 카드에서 한 명씩 고치거나 × 로 지울 수 있습니다. 이미 적힌 안내는 새 문구로 바뀝니다.</p>
+                  <div className="flex gap-2 mt-5 flex-wrap">
+                    <button type="button" onClick={() => setBulkNote(null)} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+                    <button type="button" onClick={() => applyBulkNote(targets, '', false, '안내를 지웠습니다')} className="flex-1 py-3 rounded-xl border border-violet-300 text-violet-700">이 명단 안내 모두 지우기</button>
+                    <button type="button" disabled={!bulkNote.text.trim() && !bulkNote.skip} onClick={() => applyBulkNote(targets, bulkNote.text.trim(), bulkNote.skip, '안내를 적용했습니다')} className="flex-1 py-3 rounded-xl bg-violet-600 text-white font-medium disabled:opacity-40">{targets.length}명에 적용</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           {bulkConfirm && (
             <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl p-6 w-full max-w-md">
