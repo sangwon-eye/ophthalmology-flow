@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import * as XLSX from 'xlsx';
 import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote,
+  ChevronUp, ChevronDown, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS = {
   // 시력방 이름 (직원 화면 / 환자용 화면)
   vision: { name: '시력 / 안압 검사실', patientName: '시력검사실' },
   dilationWaitMin: 15,
+  lateGraceMin: 0, // 바코드 접수에서만: 예약시간보다 이 시간 넘게 늦게 찍으면 지각
   // 같은 날 2차 진료(다른 교수님)로 넘어갈 때 처치실에서 추가 검사를 확인할지
   linkCheckAdded: true,    // 진료 중에 추가된 2차 진료
   linkCheckPlanned: false, // 미리 명단에 예정된 2차 진료
@@ -600,22 +601,39 @@ function needsTestCheck(p, prefs) {
   return !crActive(p, prefs);
 }
 
-// 지각은 자동으로 정하지 않고 직원이 시력실 카드의 [지각]으로 표시합니다 (접수 전에 고른 값 유지).
+// 지각: 직원 [접수]는 자동으로 정하지 않고 카드의 [지각]으로 표시합니다 (접수 전에 고른 값 유지).
+// 바코드 접수(autoLate)만 찍은 시각이 예약 + 유예시간보다 늦으면 자동으로 지각입니다.
 // 지각 환자는 제시간 환자들 뒤로 갑니다.
 function lateQueueKey(p, late) {
   return (late ? 100000 : 0) + timeToMin(p.reservation) + timeToMin(p.checkin) / 10000;
 }
-function applyCheckin(p) {
+function applyCheckin(p, { autoLate = false, graceMin = 0 } = {}) {
   const checkin = nowHHMM();
-  const late = !!p.late;
-  return { ...p, checkin, late, queueKey: lateQueueKey({ ...p, checkin }, late) };
+  const late = autoLate
+    ? !!p.late || (!!p.reservation && timeToMin(checkin) > timeToMin(p.reservation) + (Number(graceMin) || 0))
+    : !!p.late;
+  let next = { ...p, checkin, late, queueKey: lateQueueKey({ ...p, checkin }, late) };
+  // 명단 관리에서 '시력검사 없이 바로 진료'로 정한 환자는 접수하자마자 시력/안압을 건너뜁니다.
+  if (p.skipVision && !p.done?.[VISION_KEY]) {
+    next = {
+      ...next,
+      assigned: { ...next.assigned, ark: false },
+      done: { ...next.done, [VISION_KEY]: true },
+      doneAt: { ...(next.doneAt || {}), [VISION_KEY]: Date.now() },
+      visionSkipped: true,
+    };
+  }
+  return next;
 }
 function setLate(p, late) {
   return p.checkin ? { ...p, late, queueKey: lateQueueKey(p, late) } : { ...p, late };
 }
 function undoCheckin(p) {
-  if (!p.checkin || p.done?.[VISION_KEY] || p.consultDone || activeVf(p)) return p;
-  return { ...p, checkin: '', late: false, queueKey: timeToMin(p.reservation) };
+  if (!p.checkin || p.consultDone || activeVf(p)) return p;
+  if (p.done?.[VISION_KEY] && !p.visionSkipped) return p;
+  const undone = { ...p, checkin: '', late: false, queueKey: timeToMin(p.reservation) };
+  if (!p.visionSkipped) return undone;
+  return { ...undone, done: { ...p.done, [VISION_KEY]: false }, doneAt: { ...(p.doneAt || {}), [VISION_KEY]: null }, visionSkipped: false };
 }
 
 function updateTodayTests(p, tests, sel, detail) {
@@ -1598,6 +1616,51 @@ function PatientMemo({ p, readOnly = false }) {
 }
 
 /* 명단 보기 방식: 정렬(예약시간순·가나다순), 오전·오후 */
+// 접수 안내 (관리자 명단 관리에서 환자별로 적음): 바코드 접수 화면에 크게 보여주는 문구와 '시력검사 없이 바로 진료'
+function KioskNoteLine({ p }) {
+  if (!p.kioskNote && !p.skipVision) return null;
+  return (
+    <div className="text-xs text-violet-800 mt-0.5">
+      접수 안내{p.skipVision ? ' · 시력검사 없이 바로 진료' : ''}{p.kioskNote ? `: ${p.kioskNote}` : ''}
+    </div>
+  );
+}
+function KioskNoteEditor({ p }) {
+  const mutatePatients = useContext(PatientMemoContext);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+  const [skip, setSkip] = useState(false);
+  const pk = patientKey(p);
+  const start = () => { setText(p.kioskNote || ''); setSkip(!!p.skipVision); setEditing(true); };
+  const save = () => {
+    patchPatient(mutatePatients, pk, () => ({ kioskNote: text.trim(), skipVision: skip }));
+    setEditing(false);
+  };
+  if (!editing) {
+    return (
+      <div className="w-full flex items-center gap-2 flex-wrap">
+        {p.kioskNote || p.skipVision
+          ? <button type="button" onClick={start} title="눌러서 수정" className="text-left text-xs px-2 py-1 rounded-lg bg-violet-50 border border-violet-200 text-violet-900">
+              접수 안내{p.skipVision ? ' · 시력검사 없이 바로 진료' : ''}{p.kioskNote ? `: ${p.kioskNote}` : ''}
+            </button>
+          : <button type="button" onClick={start} className="text-xs text-slate-400 hover:text-violet-700 underline">접수 안내 추가</button>}
+      </div>
+    );
+  }
+  return (
+    <div className="w-full rounded-lg border border-violet-200 bg-violet-50 p-2 flex items-center gap-2 flex-wrap">
+      <input autoFocus value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+        placeholder="바코드 접수 때 보여줄 문구 (예: 시력검사 없이 바로 5번 진료실 앞으로 오세요)" className={`${INPUT} flex-1 min-w-[16rem]`} />
+      <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer">
+        <input type="checkbox" checked={skip} onChange={e => setSkip(e.target.checked)} className="w-4 h-4" />
+        시력검사 없이 바로 진료
+      </label>
+      <button type="button" onClick={save} className="text-sm px-3 py-2 rounded-lg bg-violet-600 text-white font-medium">저장</button>
+      <button type="button" onClick={() => setEditing(false)} className="text-sm px-2 py-2 text-slate-500">취소</button>
+    </div>
+  );
+}
+
 // 지각 표시: 모든 직원 화면의 카드에서 눌러서 켜고 끔 (지각이면 대기 순서 뒤로)
 function LateChip({ p }) {
   const mutatePatients = useContext(PatientMemoContext);
@@ -2195,6 +2258,112 @@ function SettingsPasswordCard() {
   );
 }
 
+// 바코드 접수 (대기 공간에서 환자가 직접 찍음). 바코드 인식기는 키보드처럼 환자번호를 치고 Enter를 누릅니다.
+function findKioskPatient(patients, code) {
+  const exact = patients.filter(p => String(p.id).trim() === code);
+  if (exact.length) return exact;
+  const strip = (v) => String(v).trim().replace(/^0+/, '');
+  if (!strip(code)) return [];
+  return patients.filter(p => strip(p.id) === strip(code));
+}
+function beep(ok) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.frequency.value = ok ? 880 : 220;
+    g.gain.value = 0.15;
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + (ok ? 0.15 : 0.4));
+    o.onended = () => ctx.close();
+  } catch { /* 소리를 못 내도 접수에는 영향 없음 */ }
+}
+function KioskView({ patients, settings, mutatePatients, onExit }) {
+  const [result, setResult] = useState(null);
+  const [askPassword, setAskPassword] = useState(false);
+  const buffer = useRef('');
+  const lastKey = useRef(0);
+  const clearTimer = useRef(null);
+  const latest = useRef({ patients, settings });
+  latest.current = { patients, settings };
+
+  const show = (r) => {
+    setResult(r);
+    beep(r.ok);
+    clearTimeout(clearTimer.current);
+    clearTimer.current = setTimeout(() => setResult(null), 5000);
+  };
+  const handle = async (code) => {
+    const { patients: list, settings: s } = latest.current;
+    const found = findKioskPatient(list, code);
+    const waiting = found.filter(p => !p.consultDone);
+    const p = waiting.find(x => !x.checkin) || waiting[0];
+    if (!p) {
+      show({ ok: false, title: found.length ? '오늘 진료가 끝났습니다' : '오늘 예약 명단에서 찾지 못했습니다', sub: '접수처에 문의해 주세요' });
+      return;
+    }
+    if (p.checkin) {
+      show({ ok: true, title: `${patientBoardName(p)}님은 이미 접수되었습니다`, note: p.kioskNote, sub: p.kioskNote ? '' : '잠시 기다려 주세요' });
+      return;
+    }
+    const pk = patientKey(p);
+    try {
+      await mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin
+        ? applyCheckin(x, { autoLate: true, graceMin: s.lateGraceMin }) : x)));
+      show({ ok: true, title: `${patientBoardName(p)}님 접수되었습니다`, note: p.kioskNote, sub: p.kioskNote ? '' : '잠시 기다려 주세요' });
+    } catch {
+      show({ ok: false, title: '지금 접수할 수 없습니다', sub: '접수처에 문의해 주세요' });
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (askPassword) return;
+      const now = Date.now();
+      if (now - lastKey.current > 1000) buffer.current = '';
+      lastKey.current = now;
+      if (e.key === 'Enter') {
+        const code = buffer.current.trim();
+        buffer.current = '';
+        if (code) handle(code);
+        e.preventDefault();
+      } else if (e.key.length === 1) {
+        buffer.current += e.key;
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); clearTimeout(clearTimer.current); };
+  }, [askPassword]);
+
+  const exit = async () => {
+    try {
+      const r = await lockApi('');
+      if (r.enabled) { setAskPassword(true); return; }
+    } catch { /* 서버가 꺼져 있으면 그냥 나감 */ }
+    onExit();
+  };
+
+  return (
+    <div className={`min-h-screen flex flex-col items-center justify-center p-8 text-center ${result ? (result.ok ? 'bg-emerald-50' : 'bg-red-50') : 'bg-slate-50'}`}>
+      {!result ? (
+        <>
+          <div className="text-5xl mb-6" aria-hidden="true">▮▯▮▮▯▮</div>
+          <h1 className="text-4xl font-semibold text-slate-900 mb-4">병원 카드의 바코드를 찍어 주세요</h1>
+          <p className="text-2xl text-slate-500">찍으면 바로 접수됩니다</p>
+        </>
+      ) : (
+        <div role="status">
+          <h1 className={`text-4xl font-semibold mb-6 ${result.ok ? 'text-emerald-800' : 'text-red-700'}`}>{result.title}</h1>
+          {result.note && <p className="text-4xl font-bold text-violet-900 bg-white border-4 border-violet-300 rounded-2xl px-8 py-6 mb-4">{result.note}</p>}
+          {result.sub && <p className="text-3xl text-slate-600">{result.sub}</p>}
+        </div>
+      )}
+      <button type="button" onClick={exit} className="fixed bottom-3 right-4 text-xs text-slate-300 hover:text-slate-500">관리</button>
+      {askPassword && <PasswordModal onOk={() => { setAskPassword(false); onExit(); }} onCancel={() => setAskPassword(false)} />}
+    </div>
+  );
+}
+
 function RoleSelect({ settings, onSelect, onSetToday }) {
   const items = [
     { key: 'vision', label: visionNames(settings).name, sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue' },
@@ -2208,6 +2377,7 @@ function RoleSelect({ settings, onSelect, onSetToday }) {
     { key: 'procedure', label: treatRoomOf(settings).name, sub: roomTests(settings, treatRoomOf(settings).id).length ? '진료 전 검사 · 예진 · 전공의 처치' : '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo' },
     { key: 'consult', label: '진료실', sub: '교수님별 진료 대기', icon: Stethoscope, color: 'amber' },
     { key: 'board', label: '환자용 화면', sub: '대기 명단 모니터', icon: Monitor, color: 'slate' },
+    { key: 'kiosk', label: '바코드 접수', sub: '대기 공간 · 환자가 직접 찍음', icon: ScanBarcode, color: 'slate' },
     { key: 'admin', label: '관리자', sub: '명단 업로드 · FU 지정', icon: ClipboardList, color: 'slate' },
     { key: 'settings', label: '설정', sub: '검사 · 검사실 · 교수', icon: Settings, color: 'slate' },
     { key: 'directory', label: '전체 환자 명단', sub: '환자 찾기 · 진행 상황', icon: Search, color: 'slate' },
@@ -2364,8 +2534,8 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
   const checkIn = (p) => {
     const pk = patientKey(p);
     mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? applyCheckin(x) : x)));
-    showToast(`${p.name} 접수`, () => mutatePatients(prev => prev.map(x => (patientKey(x) === pk
-      ? { ...x, checkin: '', late: !!p.late, queueKey: timeToMin(x.reservation) }
+    showToast(`${p.name} 접수${p.skipVision ? ' (시력검사 없이 바로 진료)' : ''}`, () => mutatePatients(prev => prev.map(x => (patientKey(x) === pk
+      ? { ...x, checkin: '', late: !!p.late, queueKey: timeToMin(x.reservation), assigned: p.assigned, done: p.done, doneAt: p.doneAt, visionSkipped: false }
       : x))));
   };
 
@@ -2586,6 +2756,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     <PatientMemo p={p} />
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'}</div>
+                  <KioskNoteLine p={p} />
                 </div>
                 <div className="flex gap-2 shrink-0 items-center">
                   {firstVisitChip(p)}
@@ -2693,6 +2864,7 @@ function SimpleCard({ p, tone = 'slate', badges, children }) {
         {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
         <PatientMemo p={p} />
       </div>
+      <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</div>
       {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
       <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
     </div>
@@ -3863,6 +4035,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                   </div>
                 );
               })()}
+              {!p.checkin && !p.consultDone ? <KioskNoteEditor p={p} /> : (p.kioskNote || p.skipVision) && <div className="w-full"><KioskNoteLine p={p} /></div>}
               <DilationRow compact showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
               <TestPicker p={p} tests={orderForPicking(allTests, settings)} defaultOpen={flag}
                 onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }}
@@ -4310,6 +4483,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         patientName: (draft.vision?.patientName || '').trim() || (draft.vision?.name || '').trim() || DEFAULT_SETTINGS.vision.patientName,
       },
       dilationWaitMin: Math.max(1, Math.round(Number(draft.dilationWaitMin) || 15)),
+      lateGraceMin: Math.max(0, Math.round(Number(draft.lateGraceMin) || 0)),
     };
     setDraft(toDraft(cleaned));
     setDirty(false);
@@ -4633,6 +4807,14 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
             </div>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="font-medium text-slate-900 mb-1">지각 유예 시간 (바코드 접수)</div>
+            <p className="text-sm text-slate-500 mb-3">환자가 바코드를 찍은 시각이 예약시간보다 이 시간 넘게 늦으면 자동으로 지각이 됩니다. 0분이면 1분만 늦어도 지각이에요. 직원이 [접수]를 누를 때는 자동 지각이 없고, 어느 쪽이든 카드의 [지각]으로 바꿀 수 있습니다.</p>
+            <div className="flex items-center gap-2">
+              <input type="number" min="0" aria-label="지각 유예 시간" value={draft.lateGraceMin ?? 0} onChange={e => updateDraft(d => ({ ...d, lateGraceMin: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              <span className="text-sm text-slate-600">분</span>
+            </div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="font-medium text-slate-900 mb-1">같은 날 두 교수님 진료 (2차 진료)</div>
             <p className="text-sm text-slate-500 mb-3">1차 진료의 설명 완료 후 2차 진료로 넘어갈 때, 처치실에서 추가 검사를 먼저 확인할지 정합니다. 끄면 바로 2차 교수님 진료 대기로 갑니다.</p>
             <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
@@ -4867,6 +5049,9 @@ export default function App() {
         lastSync={lastSync}
       />
     );
+  }
+  if (role === 'kiosk') {
+    return <KioskView patients={patientsToday} settings={settings} mutatePatients={mutatePatients} onExit={onBack} />;
   }
   if (role === 'procedure') {
     return (
