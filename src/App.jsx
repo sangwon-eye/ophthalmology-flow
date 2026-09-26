@@ -174,8 +174,39 @@ function clearOrders(p, testIds) {
   return Object.fromEntries(Object.entries(p.orders).map(([room, rec]) => [room, { ...rec, tests: (rec.tests || []).filter(id => !testIds.includes(id)) }]));
 }
 
+// 검사 전 처치실 준비 단계 (예: FAG 동의서 · skin test 20분). 설정에서 검사마다 켭니다.
+// p.prep[testId] = { startedAt, result: 'neg' | 'pos', at, name }
+function hasPrep(t) { return !!t?.prepOn; }
+function prepOf(p, t) { return p.prep?.[t.id] || null; }
+// 준비 결과가 음성이어야 검사실에서 검사할 수 있음
+function prepBlocked(p, t) { return hasPrep(t) && prepOf(p, t)?.result !== 'neg'; }
+// 양성이면 그 검사는 보류 (검사실 대기에서 빠지고, 진료실에 표시)
+function prepPositive(p, t) { return hasPrep(t) && prepOf(p, t)?.result === 'pos'; }
+function prepWaitMin(t) { return Math.max(0, Number(t?.prepWaitMin ?? 20) || 0); }
+// 처치실에서 준비할 검사 (지정됐고, 아직 안 했고, 결과 전)
+function prepPendingTests(p, settings) {
+  return sortedTests(settings).filter(t => hasPrep(t) && p.assigned?.[t.id] && !p.done?.[t.id] && !prepOf(p, t)?.result);
+}
+function prepPositiveNames(p) {
+  return Object.values(p.prep || {}).filter(x => x?.result === 'pos').map(x => x.name).filter(Boolean);
+}
+
+// 진료 전 처치 (예: PRP, YAG만 받으러 온 환자): 처치실에서 먼저 하고, 검사가 있으면 그다음 검사실로
+function preProcPending(p) {
+  return (p.preProcs || []).some(x => !x.done);
+}
+
+// 남은 검사 (준비 전인 검사 포함, 양성으로 보류된 검사는 뺌)
+function remainingTests(p, settings, roomId) {
+  return roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id] && !prepPositive(p, t));
+}
+// 지금 그 검사실에서 할 수 있는 검사. 처치실 검사는 '검사실 대기 중에도 바로'(예: OSDI)를 켠 것만
+// 다른 검사실 검사가 남아 있을 때도 할 수 있고, 나머지(예: Syringing)는 다른 검사실 검사가 끝난 뒤에 합니다.
 function pendingTests(p, settings, roomId) {
-  return roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
+  const list = roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id] && !prepBlocked(p, t));
+  if (roomId !== treatRoomOf(settings).id) return list;
+  const othersLeft = settings.rooms.some(r => r.id !== roomId && remainingTests(p, settings, r.id).length > 0);
+  return othersLeft ? list.filter(t => t.withExams) : list;
 }
 
 // 시력/안압을 마쳤고, 초진이면 처치실에서 검사 지정까지 마친 상태 → 검사실로 갈 수 있음
@@ -186,11 +217,9 @@ function pastVision(p) {
   return !!p.checkin && visionComplete(p) && (!(p.firstVisit || p.addOnCheck) || !!p.triageAssigned || !!p.triageDone);
 }
 
-// 처치실의 진료 전 검사는 다른 검사실 검사가 모두 끝난 뒤 대기에 뜹니다.
+// 진료 전 처치가 남아 있으면 검사실보다 처치가 먼저입니다.
 function roomPending(p, settings, roomId) {
-  if (!pastVision(p) || pendingTests(p, settings, roomId).length === 0) return false;
-  if (roomId !== treatRoomOf(settings).id) return true;
-  return !settings.rooms.some(r => r.id !== roomId && pendingTests(p, settings, r.id).length > 0);
+  return pastVision(p) && !preProcPending(p) && pendingTests(p, settings, roomId).length > 0;
 }
 
 function pendingRooms(p, settings) {
@@ -200,12 +229,12 @@ function pendingRooms(p, settings) {
 // 지정된 검사를 모두 마침
 function testsComplete(p, settings) {
   if (!pastVision(p) || activeVf(p)) return false;
-  return sortedTests(settings).every(t => !p.assigned?.[t.id] || p.done?.[t.id]);
+  return sortedTests(settings).every(t => !p.assigned?.[t.id] || p.done?.[t.id] || prepPositive(p, t));
 }
 
 // 진료 받을 준비가 됨 (검사 모두 완료, 초진이면 예진까지 완료)
 function allDone(p, settings) {
-  return testsComplete(p, settings)
+  return testsComplete(p, settings) && !preProcPending(p)
     && (!p.firstVisit || p.triageRequired === false || !!p.triageDone)
     && (!p.extraTriage || !!p.triageDone);
 }
@@ -227,7 +256,7 @@ function treatRequested(p) {
   return !p.consultDone && !!p.treatRequest;
 }
 function inTreatRoom(p, settings) {
-  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p);
+  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p) || (pastVision(p) && preProcPending(p));
 }
 function pendingProcedures(p, performer) {
   return (p.procedures || []).filter(x => !x.done && (!performer || x.performer === performer));
@@ -262,7 +291,10 @@ function getStage(p, settings) {
   if (!visionComplete(p)) return { label: '시력/안압 검사 대기', area: 'vision' };
   if (treatRequested(p)) return { label: '처치실 대기 (진료실 요청 확인)', area: 'treatReq' };
   if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
+  if (preProcPending(p)) return { label: `처치실 대기 (진료 전 처치: ${(p.preProcs || []).filter(x => !x.done).map(x => x.name).join(', ')})`, area: 'preProc' };
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
+  const prepNames = prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => t.short || t.name);
+  if (prepNames.length) return { label: `처치실 대기 (${prepNames.join(', ')} 검사 준비)`, area: 'prep' };
   const rooms = pendingRooms(p, settings);
   if (rooms.length) return { label: `${rooms.map(r => r.name).join(', ')} 검사 대기`, area: 'exam' };
   if (needsTriageExam(p, settings)) return { label: '처치실 대기 (예진)', area: 'triageExam' };
@@ -408,8 +440,14 @@ function fillFollowupNames(prev, list) {
   });
   return changed ? next : prev;
 }
+// 진료 전 처치 목록 만들기 (설정 > 처치의 id 목록 → 환자 기록)
+function makePreProcs(ids, settings) {
+  return (ids || []).map(id => (settings.procedures || []).find(x => x.id === id)).filter(Boolean)
+    .map(x => ({ uid: newId('pp'), procId: x.id, name: x.name, performer: x.performer, done: false, doneAt: null }));
+}
 function buildPatient(raw, fuMap, settings) {
   const fu = followupForDoctor(fuMap[raw.id], raw.doctor);
+  const preProcs = makePreProcs(fu?.preProcs, settings);
   const assigned = { [VISION_KEY]: true };
   const detail = {};
   settings.tests.forEach(t => {
@@ -441,6 +479,9 @@ function buildPatient(raw, fuMap, settings) {
     triageDone: false,
     seen: false,
     ignoredFuToday: false,
+    // 다음 내원 진료 전 처치(PRP 등)가 지정돼 있으면 시력검사 없이 처치실로
+    preProcs,
+    skipVision: preProcs.length > 0 || undefined,
     consultDone: false,
     consultHold: false,
     calledRoom: null,
@@ -1665,6 +1706,159 @@ function KioskNoteEditor({ p }) {
   );
 }
 
+// 히스토리 (시력방에서 입력): 초진·FU loss·중간 내원 환자의 병력.
+// 환자 기록 p.hx = { htn, dm, dmYears, pmh, surgery, cc, at }. 기저질환·수술력은 환자별로 저장해 다음 내원 때 미리 채움.
+const loadHx = (meta) => loadKey('patient-history', {}, meta);
+const HxContext = createContext({ store: {}, mutate: null, fuMap: {}, measure: {} });
+const HX_SURGERIES = ['백내장 OD', '백내장 OS', '녹내장', '망막·유리체', '굴절교정', '사시', '안검'];
+// OCS '초진'이어도 우리 프로그램에 지난 기록(FU 지정·이전 시력·히스토리)이 있으면 예정된 FU로 보고 추천하지 않음
+function hxSuggested(p, ctx) {
+  if (!p.firstVisit) return false;
+  const pastMeasure = Array.isArray(ctx.measure?.[p.id]) && ctx.measure[p.id].some(r => r.date < p.date);
+  return !ctx.fuMap?.[p.id] && !pastMeasure && !ctx.store?.[p.id];
+}
+function hxNeeded(p, ctx) {
+  return typeof p.hxNeeded === 'boolean' ? p.hxNeeded : hxSuggested(p, ctx);
+}
+function hxSummary(hx) {
+  if (!hx) return '';
+  const yn = (v) => (v === true ? '(+)' : v === false ? '(−)' : '');
+  return [
+    hx.htn !== undefined && hx.htn !== null ? `HTN${yn(hx.htn)}` : '',
+    hx.dm !== undefined && hx.dm !== null ? `DM${yn(hx.dm)}${hx.dm && hx.dmYears ? ` ${hx.dmYears}년` : ''}` : '',
+    hx.pmh ? `과거력: ${hx.pmh}` : '',
+    hx.surgery ? `수술력: ${hx.surgery}` : '',
+    hx.cc ? `주호소: ${hx.cc}` : '',
+  ].filter(Boolean).join(' · ');
+}
+function HistoryLine({ p }) {
+  if (p.hx) {
+    return <div className="w-full text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg px-3 py-1.5"><span className="font-semibold mr-1">Hx</span>{hxSummary(p.hx) || '특이사항 없음'}</div>;
+  }
+  if (p.hxMissing) return <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 font-semibold">History 미입력</span>;
+  return null;
+}
+function HistoryModal({ p, onClose }) {
+  const ctx = useContext(HxContext);
+  const mutatePatients = useContext(PatientMemoContext);
+  const base = p.hx || ctx.store?.[p.id] || {};
+  const [f, setF] = useState(() => ({ htn: base.htn ?? null, dm: base.dm ?? null, dmYears: base.dmYears || '', pmh: base.pmh || '', surgery: base.surgery || '', cc: p.hx?.cc || '' }));
+  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
+  const tokens = f.surgery.split(',').map(t => t.trim()).filter(Boolean);
+  const toggleSurgery = (t) => set('surgery', (tokens.includes(t) ? tokens.filter(x => x !== t) : [...tokens, t]).join(', '));
+  const save = () => {
+    const at = Date.now();
+    const hx = { htn: f.htn, dm: f.dm, dmYears: f.dm ? String(f.dmYears).trim() : '', pmh: f.pmh.trim(), surgery: f.surgery.trim(), cc: f.cc.trim(), at };
+    patchPatient(mutatePatients, patientKey(p), () => ({ hx, hxMissing: false }));
+    if (ctx.mutate) ctx.mutate(prev => ({ ...(prev || {}), [p.id]: { htn: hx.htn, dm: hx.dm, dmYears: hx.dmYears, pmh: hx.pmh, surgery: hx.surgery, date: p.date, updatedAt: at } }));
+    onClose();
+  };
+  const YesNo = ({ k, label }) => (
+    <div className="flex items-center gap-3">
+      <span className="w-16 text-sm font-medium text-slate-700">{label}</span>
+      <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
+        {[[true, '있음'], [false, '없음']].map(([v, t]) => (
+          <button key={t} type="button" aria-label={`${label} ${t}`} aria-pressed={f[k] === v} onClick={() => set(k, f[k] === v ? null : v)}
+            className={`px-4 py-1.5 rounded-md text-sm ${f[k] === v ? 'bg-white text-slate-900 font-semibold shadow' : 'text-slate-500'}`}>{t}</button>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-full overflow-y-auto">
+        <h3 className="text-lg font-medium text-slate-900 mb-1">{p.name}님 History</h3>
+        {!p.hx && ctx.store?.[p.id] && <p className="text-xs text-slate-500 mb-3">지난번({ctx.store[p.id].date}) 입력한 내용을 미리 채웠습니다. 바뀐 것만 고치세요.</p>}
+        <div className="space-y-3 mt-3">
+          <YesNo k="htn" label="고혈압" />
+          <div className="flex items-center gap-3 flex-wrap">
+            <YesNo k="dm" label="당뇨" />
+            {f.dm && <label className="flex items-center gap-1.5 text-sm text-slate-700">유병기간 <input aria-label="당뇨 유병기간" value={f.dmYears} onChange={e => set('dmYears', e.target.value)} className="w-16 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" /> 년</label>}
+          </div>
+          <label className="block text-sm text-slate-700">기타 과거력
+            <input value={f.pmh} onChange={e => set('pmh', e.target.value)} placeholder="예: 고지혈증, 갑상선" className={INPUT} />
+          </label>
+          <div className="text-sm text-slate-700">이전 안과 수술력
+            <div className="flex flex-wrap gap-1.5 my-1.5">
+              {HX_SURGERIES.map(t => (
+                <button key={t} type="button" aria-pressed={tokens.includes(t)} onClick={() => toggleSurgery(t)}
+                  className={`text-xs px-2.5 py-1 rounded-full border ${tokens.includes(t) ? 'bg-sky-600 border-sky-600 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>{t}</button>
+              ))}
+            </div>
+            <input value={f.surgery} onChange={e => set('surgery', e.target.value)} placeholder="직접 입력 (쉼표로 구분)" aria-label="이전 안과 수술력" className={INPUT} />
+          </div>
+          <label className="block text-sm text-slate-700">주호소
+            <input value={f.cc} onChange={e => set('cc', e.target.value)} placeholder="예: 우안 흐림 2주" className={INPUT} />
+          </label>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="button" onClick={save} className="flex-1 py-3 rounded-xl bg-sky-600 text-white font-medium">저장</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// 시력방 카드: 히스토리 입력 버튼, 필요 표시(자동 추천 + 직원 판단)
+function HistoryControl({ p }) {
+  const ctx = useContext(HxContext);
+  const mutatePatients = useContext(PatientMemoContext);
+  const [open, setOpen] = useState(false);
+  const need = hxNeeded(p, ctx);
+  const pk = patientKey(p);
+  return (
+    <div className="w-full flex items-center gap-2 flex-wrap">
+      {p.hx && <HistoryLine p={p} />}
+      {!p.hx && need && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-semibold">History 필요</span>}
+      <button type="button" onClick={() => setOpen(true)}
+        className={`text-sm px-3 py-1.5 rounded-lg font-medium ${!p.hx && need ? 'bg-sky-600 text-white' : 'border border-sky-300 text-sky-700 bg-white'}`}>
+        {p.hx ? 'History 수정' : 'History 입력'}
+      </button>
+      {!p.hx && need && <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: false }))} className="text-xs text-slate-400 hover:text-slate-600 underline">필요 없음</button>}
+      {!p.hx && !need && p.firstVisit && <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: true }))} className="text-xs text-slate-400 hover:text-slate-600 underline">History 필요로 표시</button>}
+      {open && <HistoryModal p={p} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+// 진료 전 처치 (관리자 명단 관리): PRP·YAG처럼 처치만 받으러 온 환자. 넣으면 시력검사 없이 처치실부터
+function PreProcEditor({ p, procedures }) {
+  const mutatePatients = useContext(PatientMemoContext);
+  const pk = patientKey(p);
+  const list = p.preProcs || [];
+  const locked = !!p.checkin || !!p.consultDone;
+  const add = (id) => {
+    const x = (procedures || []).find(v => v.id === id);
+    if (!x) return;
+    patchPatient(mutatePatients, pk, cur => ({
+      preProcs: [...(cur.preProcs || []), ...makePreProcs([id], { procedures })],
+      skipVision: true,
+    }));
+  };
+  const remove = (uid) => patchPatient(mutatePatients, pk, cur => {
+    const rest = (cur.preProcs || []).filter(i => i.uid !== uid);
+    return { preProcs: rest, ...(rest.length ? {} : { skipVision: false }) };
+  });
+  if (locked && !list.length) return null;
+  return (
+    <div className="w-full flex items-center gap-2 flex-wrap text-xs">
+      {list.length > 0 && <span className="text-slate-500">진료 전 처치</span>}
+      {list.map(i => (
+        <span key={i.uid} className={`inline-flex items-stretch rounded-lg border ${i.done ? 'border-slate-200 bg-slate-50 text-slate-400 line-through' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
+          <span className="px-2 py-1">{i.name}</span>
+          {!locked && <button type="button" onClick={() => remove(i.uid)} aria-label={`${p.name} ${i.name} 빼기`} className="px-2 border-l border-rose-200 text-rose-400 hover:text-red-600">×</button>}
+        </span>
+      ))}
+      {!locked && (procedures || []).length > 0 && (
+        <select value="" aria-label={`${p.name} 진료 전 처치 추가`} onChange={e => add(e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-500">
+          <option value="">+ 진료 전 처치</option>
+          {procedures.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
 // 지각 표시: 모든 직원 화면의 카드에서 눌러서 켜고 끔 (지각이면 대기 순서 뒤로)
 function LateChip({ p }) {
   const mutatePatients = useContext(PatientMemoContext);
@@ -1733,6 +1927,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
           {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
           {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
           <LateChip p={p} />
+          {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 준비 양성 · 보류</span>}
           {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
           {p.consultHold && !p.consultDone && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 flex items-center gap-1">
@@ -2031,7 +2226,8 @@ function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, confirmLabel, onConfirm, onLater, onCancel }) {
+function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onCancel }) {
+  const [preSel, setPreSel] = useState(() => preProcChoice?.initial || []);
   const tests = orderForPicking(rawTests, settings);
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
   const [linkDoctor, setLinkDoctor] = useState('');
@@ -2172,9 +2368,25 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
             )}
           </div>
         )}
+        {preProcChoice && (settings.procedures || []).length > 0 && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 mb-6">
+            <div className="text-sm text-slate-700 mb-2">다음 내원 진료 전 처치 <span className="text-xs text-slate-500">(고르면 시력검사 없이 처치실부터)</span></div>
+            <div className="flex flex-wrap gap-1.5">
+              {(settings.procedures || []).map(x => {
+                const on = preSel.includes(x.id);
+                return (
+                  <button key={x.id} type="button" aria-pressed={on} onClick={() => setPreSel(v => (on ? v.filter(i => i !== x.id) : [...v, x.id]))}
+                    className={`text-sm px-3 py-1.5 rounded-full border ${on ? 'bg-rose-600 border-rose-600 text-white font-medium' : 'bg-white border-slate-300 text-slate-600'}`}>
+                    {on ? '✓ ' : ''}{x.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div className="flex gap-3">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
-          <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor }, triageRequired, linkDoctor)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>
+          <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor, preProcs: preSel }, triageRequired, linkDoctor)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>
         </div>
         {onLater && (
           <button type="button" onClick={() => onLater(linkDoctor)} className="w-full mt-2 py-2.5 rounded-xl border border-emerald-300 text-emerald-700 text-sm font-medium">
@@ -2282,6 +2494,13 @@ function beep(ok) {
     o.onended = () => ctx.close();
   } catch { /* 소리를 못 내도 접수에는 영향 없음 */ }
 }
+// 접수 안내 문구가 없어도 진료 전 처치 환자에게는 처치실로 가라고 안내
+function kioskNoteFor(p, settings) {
+  if (p.kioskNote) return p.kioskNote;
+  if (!preProcPending(p)) return '';
+  const t = treatRoomOf(settings);
+  return `시력검사 없이 바로 ${t.patientName || t.name}로 오세요`;
+}
 function KioskView({ patients, settings, mutatePatients, onExit }) {
   const [result, setResult] = useState(null);
   const [askPassword, setAskPassword] = useState(false);
@@ -2307,14 +2526,14 @@ function KioskView({ patients, settings, mutatePatients, onExit }) {
       return;
     }
     if (p.checkin) {
-      show({ ok: true, title: `${patientBoardName(p)}님은 이미 접수되었습니다`, note: p.kioskNote, sub: p.kioskNote ? '' : '잠시 기다려 주세요' });
+      show({ ok: true, title: `${patientBoardName(p)}님은 이미 접수되었습니다`, note: kioskNoteFor(p, s), sub: kioskNoteFor(p, s) ? '' : '잠시 기다려 주세요' });
       return;
     }
     const pk = patientKey(p);
     try {
       await mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin
         ? applyCheckin(x, { autoLate: true, graceMin: s.lateGraceMin }) : x)));
-      show({ ok: true, title: `${patientBoardName(p)}님 접수되었습니다`, note: p.kioskNote, sub: p.kioskNote ? '' : '잠시 기다려 주세요' });
+      show({ ok: true, title: `${patientBoardName(p)}님 접수되었습니다`, note: kioskNoteFor(p, s), sub: kioskNoteFor(p, s) ? '' : '잠시 기다려 주세요' });
     } catch {
       show({ ok: false, title: '지금 접수할 수 없습니다', sub: '접수처에 문의해 주세요' });
     }
@@ -2509,14 +2728,19 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
     patchPatient(mutatePatients, patientKey(p), x => updateVf(x, t.id, action, at));
   };
 
+  // History가 필요한데 안 적고 시력/안압을 끝내면: 경고만 하고 진료실 카드에 'History 미입력' 표시
+  const hxCtx = useContext(HxContext);
+  const hxWarn = (p, key) => key === VISION_KEY && !p.hx && hxNeeded(p, hxCtx);
   const markDone = (p, key, val) => {
     if (activeVf(p)) return;
     const pk = patientKey(p);
     writeDone(pk, key, val, Date.now());
     if (val) {
+      const noHx = hxWarn(p, key);
+      if (noHx) patchPatient(mutatePatients, pk, () => ({ hxMissing: true }));
       const noIop = key === VISION_KEY && !hasIop(p);
       const toTriage = key === VISION_KEY && p.firstVisit ? ', 처치실로' : '';
-      showToast(`${p.name} ${testLabel(key)} 완료${noIop ? ' (안압 값 없음)' : ''}${toTriage}`, () => writeDone(pk, key, false, null));
+      showToast(`${p.name} ${testLabel(key)} 완료${noIop ? ' (안압 값 없음)' : ''}${toTriage}${noHx ? ' · ⚠ History 미입력' : ''}`, () => writeDone(pk, key, false, null));
     }
   };
 
@@ -2575,11 +2799,12 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
       }
       if (complete) {
         nx = { ...nx, done: { ...nx.done, [doneKey]: true }, doneAt: { ...(nx.doneAt || {}), [doneKey]: at } };
+        if (hxWarn(x, doneKey)) nx = { ...nx, hxMissing: true };
       }
       return nx;
     }));
     mutateHistory(prev => mergeHistory(prev, p.id, p.date, patch));
-    if (complete) showToast(`${p.name} ${testLabel(doneKey)} 완료`, () => writeDone(pk, doneKey, false, null));
+    if (complete) showToast(`${p.name} ${testLabel(doneKey)} 완료${hxWarn(p, doneKey) ? ' · ⚠ History 미입력' : ''}`, () => writeDone(pk, doneKey, false, null));
   };
 
   // 되돌리기 목록
@@ -2643,7 +2868,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
             const pk = patientKey(p);
             const runningVf = activeVf(p);
             const topTest = showPriority && !runningVf ? pendingTests(p, settings, room.id)[0] : null;
-            const otherRooms = isVision ? [] : settings.rooms.filter(r => r.id !== room.id && pendingTests(p, settings, r.id).length > 0);
+            const otherRooms = isVision ? [] : settings.rooms.filter(r => r.id !== room.id && remainingTests(p, settings, r.id).length > 0);
             const prev = previousMeasure(p, history);
             const notes = notesOf(p, allTests);
             return (
@@ -2661,6 +2886,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     {hasAnyValue(p.measure) && <MeasureLine label="오늘" m={p.measure} fields={['ucva', 'bcva', 'nct']} />}
                   </div>
                 )}
+                {isVision && <HistoryControl p={p} />}
                 {roomHasGat && p.assigned?.[GAT_ID] && (
                   <div className="w-full space-y-1 mb-1">
                     <MeasureLine label="이전" m={prev} fields={['nct', 'gat']} emptyText="이전 안압 없음" />
@@ -2696,7 +2922,13 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   </button>
                 )}
                 {tests.filter(t => p.assigned?.[t.id] && (!isVision || t.id === 'ark')).map(t => (
-                  isVfTest(t) && !p.done?.[t.id] ? (
+                  !p.done?.[t.id] && prepBlocked(p, t) ? (
+                    // 처치실 준비(예: skin test)가 끝나야 할 수 있는 검사: 잠긴 칸으로 상태만 보여줌
+                    <div key={t.id} title="처치실 준비가 끝나면 할 수 있어요" className={`${TEST_TILE} px-3 text-sm ${prepPositive(p, t) ? 'border-red-300 bg-red-50 text-red-700' : 'border-dashed border-slate-300 bg-slate-50 text-slate-500'}`}>
+                      <span className="font-semibold">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
+                      <span className="ml-1.5 text-xs">{prepPositive(p, t) ? `${t.prepName || '준비'} 양성 · 보류` : prepOf(p, t)?.startedAt ? `${t.prepName || '준비'} 중` : `${t.prepName || '준비'} 전`}</span>
+                    </div>
+                  ) : isVfTest(t) && !p.done?.[t.id] ? (
                     runningVf === t.id ? (
                       <div key={t.id} className={`${TEST_TILE} overflow-hidden border-amber-500 bg-amber-50 text-sm`}>
                         <span className="px-3 font-semibold text-amber-900">{testLabelWithOptions(t, p.detail?.[t.id])} 검사 중</span>
@@ -2724,7 +2956,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 {otherRooms.length > 0 && (
                   <span className="text-xs text-slate-500">
-                    다른 검사실 남음: {otherRooms.map(r => `${r.name} (${pendingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
+                    다른 검사실 남음: {otherRooms.map(r => `${r.name} (${remainingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
                   </span>
                 )}
                 {notes.length > 0 && (
@@ -2868,6 +3100,7 @@ function SimpleCard({ p, tone = 'slate', badges, children }) {
         <span className="t-name text-slate-900">{p.name}</span>
         <span className="text-xs text-slate-400">{p.id}</span>
         {badges}
+        {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 준비 양성 · 보류</span>}
         {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
         {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
@@ -3016,6 +3249,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
         dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
+        preProcs: dil?.preProcs?.length ? dil.preProcs : undefined,
         name: p.name,
         visitDate: p.date,
         updatedAt: at,
@@ -3199,6 +3433,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
               <div className="bg-slate-50 rounded-xl p-3 mb-3">
                 <MeasureTable today={inRoom.measure} prev={previousMeasure(inRoom, history)} />
               </div>
+              {(inRoom.hx || inRoom.hxMissing) && <div className="mb-3"><HistoryLine p={inRoom} /></div>}
               {inRoomTests.length > 0 && (
                 <div className="text-sm text-slate-700 mb-2">
                   <span className="text-xs text-slate-400 mr-2">오늘 검사</span>
@@ -3251,6 +3486,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
                     <div className="w-full mb-1">
                       <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
                     </div>
+                    <HistoryLine p={p} />
                     <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
                     <button
                       type="button"
@@ -3305,6 +3541,7 @@ function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, s
           initial={explainFor.assigned}
           initialDetail={explainFor.detail}
           dilation={{ crAvailable: !!doctorPrefs?.[explainFor.doctor]?.cr, initial: dilationInitial(explainFor) }}
+          preProcChoice={{ initial: [] }}
           confirmLabel="설명 완료"
           onConfirm={completeExplain}
           onLater={(linkDoctor) => completeExplain(null, null, null, false, linkDoctor, { later: true })}
@@ -3423,6 +3660,26 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
     showToast(p.name + ' 예진 완료, 진료 대기로', () => patchPatient(mutatePatients, patientKey(p), () => ({ triageDone: false, triageAt: null })));
   };
 
+  // 검사 준비 (예: FAG 동의서 · skin test): 시작 → 대기 시간 → 음성이면 검사실로, 양성이면 보류
+  const prepList = patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).length > 0).sort(order);
+  const setPrep = (p, t, value, msg) => {
+    const pk = patientKey(p);
+    const before = p.prep?.[t.id] || null;
+    patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: value } }));
+    if (msg) showToast(msg, () => patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: before } })));
+  };
+  // 진료 전 처치 (예: PRP, YAG): 처치 완료 후 검사가 있으면 검사실, 없으면 진료 대기로
+  const preProcList = patients.filter(p => !p.consultDone && pastVision(p) && preProcPending(p)).sort(order);
+  const finishPreProcs = (p) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    patchPatient(mutatePatients, pk, x => ({ preProcs: (x.preProcs || []).map(i => (i.done ? i : { ...i, done: true, doneAt: at })) }));
+    const next = { ...p, preProcs: (p.preProcs || []).map(i => ({ ...i, done: true })) };
+    showToast(`${p.name} 진료 전 처치 완료, ${pendingRooms(next, settings).length ? '검사실로' : '진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
+      preProcs: (x.preProcs || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
+    })));
+  };
+
   const finishResident = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
@@ -3446,7 +3703,58 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   };
 
   return (
-    <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} count={requests.length + triage.length + procs.length + patients.filter(p => !p.consultDone && roomPending(p, settings, treatRoomOf(settings).id)).length}>
+    <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} count={requests.length + triage.length + procs.length + preProcList.length + prepList.length + patients.filter(p => !p.consultDone && roomPending(p, settings, treatRoomOf(settings).id)).length}>
+      {preProcList.length > 0 && (
+        <div className="mb-8">
+          <SectionTitle hint="시력검사 없이 처치부터 하러 온 환자입니다 (예: PRP, YAG). 처치가 끝나면 검사가 있으면 검사실, 없으면 진료 대기로 갑니다.">진료 전 처치 · {preProcList.length}명</SectionTitle>
+          {preProcList.map(p => (
+            <SimpleCard key={patientKey(p)} p={p} tone="rose">
+              <div className="w-full flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-sm text-slate-800">
+                  {(p.preProcs || []).filter(x => !x.done).map(x => <span key={x.uid} className="font-semibold mr-3">{x.name}</span>)}
+                  {sortedTests(settings).some(t => p.assigned?.[t.id] && !p.done?.[t.id]) && <span className="text-xs text-slate-500">처치 후 검사: {sortedTests(settings).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ')}</span>}
+                </div>
+                <button type="button" onClick={() => finishPreProcs(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium shrink-0">처치 완료</button>
+              </div>
+              <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+            </SimpleCard>
+          ))}
+        </div>
+      )}
+      {prepList.length > 0 && (
+        <div className="mb-8">
+          <SectionTitle hint="검사 전에 처치실에서 준비할 환자입니다 (예: FAG 동의서 · skin test). 시간이 지나면 결과를 눌러주세요.">검사 준비 · {prepList.length}명</SectionTitle>
+          {prepList.map(p => (
+            <SimpleCard key={patientKey(p)} p={p} tone="violet">
+              {prepPendingTests(p, settings).map(t => {
+                const st = prepOf(p, t);
+                const wait = prepWaitMin(t);
+                const mins = st?.startedAt ? Math.floor((Date.now() - st.startedAt) / 60000) : 0;
+                const ready = !!st?.startedAt && mins >= wait;
+                return (
+                  <div key={t.id} className="w-full flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-slate-900">{t.short || t.name}</span>
+                    <span className="text-sm text-slate-600">{t.prepName || '검사 준비'}</span>
+                    {!st?.startedAt ? (
+                      <button type="button" onClick={() => setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${t.prepName || '준비'} 시작`)}
+                        className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium">{t.prepName || '준비'} 시작</button>
+                    ) : <>
+                      <span className={`text-sm px-2.5 py-1 rounded-lg font-semibold ${ready ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                        {fmtClock(st.startedAt)} 시작 · {ready ? `${mins}분 · 결과 확인` : `${mins}분 / ${wait}분`}
+                      </span>
+                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'neg', at: Date.now() }, `${p.name} ${t.short || t.name} 준비 음성, 검사실로`)}
+                        className={`text-sm px-3 py-2 rounded-lg font-medium ${ready ? 'bg-green-600 text-white' : 'border border-green-300 text-green-700'}`}>음성 · 검사 진행</button>
+                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 준비 양성, 검사 보류`)}
+                        className="text-sm px-3 py-2 rounded-lg border border-red-300 text-red-700 font-medium">양성 · 보류</button>
+                      <button type="button" onClick={() => setPrep(p, t, null)} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={12} />시작 취소</button>
+                    </>}
+                  </div>
+                );
+              })}
+            </SimpleCard>
+          ))}
+        </div>
+      )}
       {/* 진료 전 검사 (설정에서 처치실에 둔 검사, 예: Syringing) — 검사실 화면과 같은 카드 */}
       {roomTests(settings, treatRoomOf(settings).id).length > 0 && (
         <StationView embedded mode={treatRoomOf(settings).id} settings={settings} doctorPrefs={doctorPrefs} patients={patients}
@@ -3837,10 +4145,13 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
   // 접수 안내 일괄 적용: 지금 보이는 명단(날짜·교수·오전/오후·검색) 중 접수 전 환자에게 한 번에 적용. 바로 되돌릴 수 있습니다.
   const [bulkNote, setBulkNote] = useState(null);
   const [bulkNoteDone, setBulkNoteDone] = useState(null);
-  const applyBulkNote = (targets, text, skip, verb) => {
+  const applyBulkNote = (targets, text, skip, verb, procId = '') => {
     const keys = new Set(targets.map(patientKey));
-    const snapshot = Object.fromEntries(targets.map(p => [patientKey(p), { kioskNote: p.kioskNote || '', skipVision: !!p.skipVision }]));
-    mutatePatients(prev => prev.map(p => (keys.has(patientKey(p)) && !p.checkin ? { ...p, kioskNote: text, skipVision: skip } : p)));
+    const snapshot = Object.fromEntries(targets.map(p => [patientKey(p), { kioskNote: p.kioskNote || '', skipVision: !!p.skipVision, preProcs: p.preProcs || [] }]));
+    mutatePatients(prev => prev.map(p => (keys.has(patientKey(p)) && !p.checkin ? {
+      ...p, kioskNote: text, skipVision: skip,
+      ...(procId && !(p.preProcs || []).some(i => i.procId === procId && !i.done) ? { preProcs: [...(p.preProcs || []), ...makePreProcs([procId], settings)] } : {}),
+    } : p)));
     setBulkNote(null);
     setBulkNoteDone({ label: `${manageDate} ${manageDoctor || '모든 교수님'}${sessionLabel} ${targets.length}명 ${verb}.`, snapshot });
   };
@@ -3932,6 +4243,8 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
           dilateOverride: dil?.mode === 'yes' ? true : dil?.mode === 'no' ? false : undefined,
           dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
           cr: !!dil?.cr,
+          preProcs: makePreProcs(dil?.preProcs, settings),
+          skipVision: (dil?.preProcs?.length ? true : p.skipVision) || undefined,
         };
       }));
     }
@@ -3941,6 +4254,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
         dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
         cr: dil?.cr || undefined,
+        preProcs: dil?.preProcs?.length ? dil.preProcs : undefined,
         name: fuEdit.name || nameOf(id),
         visitDate: fuEdit.visitDate || fuMap[id]?.fuLater?.date,
         updatedAt: Date.now(),
@@ -4079,11 +4393,20 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                     <input type="checkbox" checked={bulkNote.skip} onChange={e => setBulkNote(b => ({ ...b, skip: e.target.checked }))} className="w-4 h-4" />
                     시력검사 없이 바로 진료
                   </label>
+                  {(settings.procedures || []).length > 0 && (
+                    <label className="flex items-center gap-2 text-sm text-slate-700 mt-3">
+                      진료 전 처치 추가
+                      <select value={bulkNote.proc || ''} aria-label="일괄 진료 전 처치" onChange={e => setBulkNote(b => ({ ...b, proc: e.target.value, skip: e.target.value ? true : b.skip }))} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white">
+                        <option value="">없음</option>
+                        {settings.procedures.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+                      </select>
+                    </label>
+                  )}
                   <p className="text-xs text-slate-500 mt-3">적용한 뒤에도 환자 카드에서 한 명씩 고치거나 × 로 지울 수 있습니다. 이미 적힌 안내는 새 문구로 바뀝니다.</p>
                   <div className="flex gap-2 mt-5 flex-wrap">
                     <button type="button" onClick={() => setBulkNote(null)} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
                     <button type="button" onClick={() => applyBulkNote(targets, '', false, '안내를 지웠습니다')} className="flex-1 py-3 rounded-xl border border-violet-300 text-violet-700">이 명단 안내 모두 지우기</button>
-                    <button type="button" disabled={!bulkNote.text.trim() && !bulkNote.skip} onClick={() => applyBulkNote(targets, bulkNote.text.trim(), bulkNote.skip, '안내를 적용했습니다')} className="flex-1 py-3 rounded-xl bg-violet-600 text-white font-medium disabled:opacity-40">{targets.length}명에 적용</button>
+                    <button type="button" disabled={!bulkNote.text.trim() && !bulkNote.skip && !bulkNote.proc} onClick={() => applyBulkNote(targets, bulkNote.text.trim(), bulkNote.skip, '안내를 적용했습니다', bulkNote.proc)} className="flex-1 py-3 rounded-xl bg-violet-600 text-white font-medium disabled:opacity-40">{targets.length}명에 적용</button>
                   </div>
                 </div>
               </div>
@@ -4163,6 +4486,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                 );
               })()}
               {!p.checkin && !p.consultDone ? <KioskNoteEditor p={p} /> : (p.kioskNote || p.skipVision) && <div className="w-full"><KioskNoteLine p={p} /></div>}
+              <PreProcEditor p={p} procedures={settings.procedures} />
               <DilationRow compact showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
               <TestPicker p={p} tests={orderForPicking(allTests, settings)} defaultOpen={flag}
                 onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }}
@@ -4208,7 +4532,8 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
           {fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
           {fuIds.flatMap(id => followupRows(id, fuMap[id])).map(({ id, doctor: fuDoctor, fu }) => {
             const dilText = [fu.dilate === 'yes' ? `산동 함${dilateEyeOf(fu.dilateEye) ? ` (${DILATE_EYE_LABEL[fu.dilateEye]})` : ''}` : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
-            const names = [allTests.filter(t => fu[t.id]).map(t => testLabelWithOptions(t, fu.detail?.[t.id])).join(', '), dilText].filter(Boolean).join(' / ');
+            const preText = (fu.preProcs || []).map(pid => (settings.procedures || []).find(x => x.id === pid)?.name).filter(Boolean).join(', ');
+            const names = [preText && `진료 전 처치: ${preText}`, allTests.filter(t => fu[t.id]).map(t => testLabelWithOptions(t, fu.detail?.[t.id])).join(', '), dilText].filter(Boolean).join(' / ');
             const fuNotes = allTests
               .filter(t => fu[t.id] && String(fu.detail?.[t.id]?.note ?? '').trim())
               .map(t => ({ id: t.id, short: t.short, note: String(fu.detail[t.id].note).trim() }));
@@ -4272,6 +4597,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
           initial={fuEdit}
           initialDetail={fuEdit.detail}
           dilation={{ crAvailable: crAnywhere, initial: { mode: fuEdit.dilate || 'default', cr: !!fuEdit.cr, eye: fuEdit.dilateEye } }}
+          preProcChoice={{ initial: fuEdit.preProcs || [] }}
           confirmLabel="저장"
           onConfirm={saveFuEdit}
           onCancel={() => setFuEdit(null)}
@@ -4396,8 +4722,13 @@ function RoomNotices({ settings, compact }) {
 }
 
 function ExamBoardList({ patients, settings, compact }) {
+  // 처치실에서 먼저 할 일(진료 전 처치, 검사 준비)도 함께 안내
+  const treat = treatRoomOf(settings);
+  const treatTodo = (p) => !pastVision(p) ? [] : preProcPending(p)
+    ? (p.preProcs || []).filter(x => !x.done).map(x => x.name)
+    : prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => `${t.name || t.short} 검사 준비`);
   const list = patients
-    .filter(p => !p.consultDone && pendingRooms(p, settings).length > 0)
+    .filter(p => !p.consultDone && (pendingRooms(p, settings).length > 0 || treatTodo(p).length > 0))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
   return (
     <div>
@@ -4412,6 +4743,11 @@ function ExamBoardList({ patients, settings, compact }) {
               <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(p)}</span>
               <div className="flex flex-wrap gap-2 justify-end">
                 {activeVf(p) && <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
+                {!activeVf(p) && treatTodo(p).length > 0 && (
+                  <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200`}>
+                    {treat.patientName || treat.name}: {treatTodo(p).join(', ')}
+                  </span>
+                )}
                 {(activeVf(p) ? [] : pendingRooms(p, settings)).map(r => {
                   const c = COLOR_MAP[roomColor(settings, r.id)];
                   return (
@@ -4635,6 +4971,10 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         popupOnClick: !!t.popupOnClick,
         machine: String(t.machine || '').trim(),
         showWhenEmpty: t.showWhenEmpty !== false,
+        prepOn: !!t.prepOn,
+        prepName: String(t.prepName || '').trim() || (t.prepOn ? '검사 준비' : ''),
+        prepWaitMin: Math.max(0, Math.round(Number(t.prepWaitMin ?? 20) || 0)),
+        withExams: !!t.withExams,
       })),
       procedures: (draft.procedures || [])
         .map(x => ({ ...x, name: (x.name || '').trim() }))
@@ -4814,6 +5154,30 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                             <span className="block text-xs text-slate-400">끄면 평소엔 바로 체크되고, 필요할 때만 오른쪽 클릭으로 창을 열어요</span>
                           </span>
                         </label>
+                        <div className="flex items-start gap-2 text-sm text-slate-700 py-2 flex-wrap">
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input type="checkbox" checked={!!t.prepOn} onChange={e => updateTest(t.id, { prepOn: e.target.checked, prepName: t.prepName || '동의서 · skin test', prepWaitMin: t.prepWaitMin ?? 20 })} className="w-4 h-4 mt-0.5" />
+                            <span>
+                              처치실 준비 단계
+                              <span className="block text-xs text-slate-400">예: FAG. 처치실에서 준비(동의서 · skin test)를 하고 시간이 지나 음성이면 검사실로</span>
+                            </span>
+                          </label>
+                          {t.prepOn && <>
+                            <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-40" />
+                            <label className="flex items-center gap-1 text-xs text-slate-600">
+                              <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16" />분 뒤 결과 확인
+                            </label>
+                          </>}
+                        </div>
+                        {r.builtin === 'treat' && (
+                          <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
+                            <input type="checkbox" checked={!!t.withExams} onChange={e => updateTest(t.id, { withExams: e.target.checked })} className="w-4 h-4 mt-0.5" />
+                            <span>
+                              검사실 대기 중에도 바로 하기
+                              <span className="block text-xs text-slate-400">예: OSDI 설문. 켜면 다른 검사실 검사를 기다리는 동안에도 처치실 목록에 뜹니다. 끄면 다른 검사 뒤에 (예: Syringing)</span>
+                            </span>
+                          </label>
+                        )}
                         {/* 검사실 화면 위쪽 장비 버튼은 장비(분류)가 2개 이상일 때만 나오므로 그때만 보여줌 */}
                         {machineGroups(tests).length >= 2 && (
                           <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
@@ -5029,6 +5393,9 @@ function patientQueueLabels(p, settings) {
   if (!p.checkin) labels.push('접수 전 · 미접수');
   if (p.checkin && !visionComplete(p)) labels.push(`${visionNames(settings).name} · 접수 완료 / 시력·안압 검사 대기`);
   if (needsTriageAssign(p)) labels.push(`${treatRoomOf(settings).name} · 초진 검사 지정 대기`);
+  if (pastVision(p) && preProcPending(p)) labels.push(`${treatRoomOf(settings).name} · 진료 전 처치 (${(p.preProcs || []).filter(x => !x.done).map(x => x.name).join(', ')})`);
+  prepPendingTests(p, settings).filter(() => pastVision(p)).forEach(t => labels.push(`${treatRoomOf(settings).name} · ${t.short || t.name} ${t.prepName || '준비'}${prepOf(p, t)?.startedAt ? ` 중 (${fmtClock(prepOf(p, t).startedAt)} 시작)` : ' 대기'}`));
+  if (prepPositiveNames(p).length) labels.push(`${prepPositiveNames(p).join(', ')} 준비 양성 · 보류`);
   pendingRooms(p, settings).forEach(r => {
     const tests = pendingTests(p, settings, r.id).map(t => testLabelWithOptions(t, p.detail?.[t.id])).join(', ');
     labels.push(`${r.name} · ${tests}${activeVf(p) ? ' (VF 진행 중 · 다른 장비 호출 금지)' : ' 대기'}`);
@@ -5159,16 +5526,17 @@ export default function App() {
   const [doctorPrefs, mutateDoctorPrefs, syncDoctorPrefs, markDoctorPrefs] = useSharedStore('doctor-prefs', loadDoctorPrefs, {});
   const [todayOverride, mutateTodayOverride, syncTodayOverride, markTodayOverride] = useSharedStore('today-override', loadTodayOverride, null);
   const [boardNotices, mutateBoardNotices, syncBoardNotices, markBoardNotices] = useSharedStore('board-notices', loadNotices, { notices: {}, presets: NOTICE_PRESETS });
+  const [hxStore, mutateHxStore, syncHxStore, markHxStore] = useSharedStore('patient-history', loadHx, {});
   const [lastSync, setLastSync] = useState(null);
   // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
   forcedToday = todayOverride?.date && todayOverride.setOn === realTodayISO() ? todayOverride.date : null;
   const setToday = (date) => mutateTodayOverride(() => (date && date !== realTodayISO() ? { date, setOn: realTodayISO() } : null));
 
   const refresh = useCallback(async () => {
-    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride(), markBoardNotices()];
-    let p, f, d, s, h, dp, to, bn;
+    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride(), markBoardNotices(), markHxStore()];
+    let p, f, d, s, h, dp, to, bn, hx;
     try {
-      [p, f, d, s, h, dp, to, bn] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs(), loadTodayOverride(), loadNotices()]);
+      [p, f, d, s, h, dp, to, bn, hx] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs(), loadTodayOverride(), loadNotices(), loadHx()]);
     } catch {
       return; // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다.
     }
@@ -5180,8 +5548,9 @@ export default function App() {
     syncDoctorPrefs(dp, marks[5]);
     syncTodayOverride(to, marks[6]);
     syncBoardNotices(bn, marks[7]);
+    syncHxStore(hx, marks[8]);
     setLastSync(new Date());
-  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, markBoardNotices, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride, syncBoardNotices]);
+  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, markBoardNotices, markHxStore, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride, syncBoardNotices, syncHxStore]);
 
   useEffect(() => {
     refresh();
@@ -5299,7 +5668,9 @@ export default function App() {
   };
   return <PatientMemoContext.Provider value={mutatePatients}>
     <NoticeContext.Provider value={boardNotices || { notices: {} }}>
-      <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
+      <HxContext.Provider value={{ store: hxStore || {}, mutate: mutateHxStore, fuMap, measure: history }}>
+        <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
+      </HxContext.Provider>
     </NoticeContext.Provider>
     {askPassword && <PasswordModal onOk={() => { setAskPassword(false); setRole('settings'); }} onCancel={() => setAskPassword(false)} />}
     {lockError && !role && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm rounded-xl px-4 py-2 z-50">{lockError}</div>}
