@@ -2348,18 +2348,24 @@ function KioskView({ patients, settings, mutatePatients, onExit }) {
   };
 
   return (
-    <div className={`min-h-screen flex flex-col items-center justify-center p-8 text-center ${result ? (result.ok ? 'bg-emerald-50' : 'bg-red-50') : 'bg-slate-50'}`}>
+    // 저시력 환자도 읽을 수 있게: 화면 너비에 맞춰 아주 큰 글씨, 진한 글자·밝은 바탕의 높은 대비
+    <div className={`min-h-screen flex flex-col items-center justify-center px-6 py-8 text-center break-keep ${result ? (result.ok ? 'bg-white' : 'bg-red-50') : 'bg-white'}`}>
       {!result ? (
         <>
-          <div className="text-5xl mb-6" aria-hidden="true">▮▯▮▮▯▮</div>
-          <h1 className="text-4xl font-semibold text-slate-900 mb-4">병원 카드의 바코드를 찍어 주세요</h1>
-          <p className="text-2xl text-slate-500">찍으면 바로 접수됩니다</p>
+          <h1 className="font-bold text-slate-900 leading-tight mb-6" style={{ fontSize: 'clamp(2.5rem, 6vw, 5.5rem)' }}>진료카드 QR 코드를<br />찍어 주세요</h1>
+          <p className="font-semibold text-slate-700" style={{ fontSize: 'clamp(1.75rem, 3.5vw, 3rem)' }}>찍으면 바로 접수됩니다</p>
         </>
       ) : (
-        <div role="status">
-          <h1 className={`text-4xl font-semibold mb-6 ${result.ok ? 'text-emerald-800' : 'text-red-700'}`}>{result.title}</h1>
-          {result.note && <p className="text-4xl font-bold text-violet-900 bg-white border-4 border-violet-300 rounded-2xl px-8 py-6 mb-4">{result.note}</p>}
-          {result.sub && <p className="text-3xl text-slate-600">{result.sub}</p>}
+        <div role="status" className="w-full max-w-6xl">
+          <h1 className={`font-bold leading-tight mb-8 ${result.ok ? 'text-slate-900' : 'text-red-800'}`} style={{ fontSize: 'clamp(2.5rem, 6.5vw, 6rem)' }}>
+            {result.ok && <span className="text-emerald-700">✓ </span>}{result.title}
+          </h1>
+          {result.note && (
+            <p className="font-extrabold leading-snug text-black bg-yellow-300 border-8 border-black rounded-3xl px-8 py-8 mb-6" style={{ fontSize: 'clamp(2.75rem, 7vw, 6.5rem)' }}>
+              {result.note}
+            </p>
+          )}
+          {result.sub && <p className="font-semibold text-slate-800" style={{ fontSize: 'clamp(2rem, 4.5vw, 4rem)' }}>{result.sub}</p>}
         </div>
       )}
       <button type="button" onClick={exit} className="fixed bottom-3 right-4 text-xs text-slate-300 hover:text-slate-500">관리</button>
@@ -2381,7 +2387,7 @@ function RoleSelect({ settings, onSelect, onSetToday }) {
     { key: 'procedure', label: treatRoomOf(settings).name, sub: roomTests(settings, treatRoomOf(settings).id).length ? '진료 전 검사 · 예진 · 전공의 처치' : '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo' },
     { key: 'consult', label: '진료실', sub: '교수님별 진료 대기', icon: Stethoscope, color: 'amber' },
     { key: 'board', label: '환자용 화면', sub: '대기 명단 모니터', icon: Monitor, color: 'slate' },
-    { key: 'kiosk', label: '바코드 접수', sub: '대기 공간 · 환자가 직접 찍음', icon: ScanBarcode, color: 'slate' },
+    { key: 'kiosk', label: 'QR 접수', sub: '대기 공간 · 환자가 직접 찍음 (바코드도 가능)', icon: ScanBarcode, color: 'slate' },
     { key: 'admin', label: '관리자', sub: '명단 업로드 · FU 지정', icon: ClipboardList, color: 'slate' },
     { key: 'settings', label: '설정', sub: '검사 · 검사실 · 교수', icon: Settings, color: 'slate' },
     { key: 'directory', label: '전체 환자 명단', sub: '환자 찾기 · 진행 상황', icon: Search, color: 'slate' },
