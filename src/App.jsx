@@ -3621,7 +3621,70 @@ function UploadResult({ result, patients, onRemove, onShowList }) {
 /* ------------------------------------------------------------------ */
 /* 관리자 화면                                                          */
 /* ------------------------------------------------------------------ */
-function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, mutatePatients, mutateFu, mutateDoctors, mutateDoctorPrefs, onBack, lastSync }) {
+// 관리자 > 대기 화면 안내: 시력방·검사실별·교수님별 문구 (직접 지울 때까지 유지)
+function NoticeInput({ label, sub, value, presets, onSave }) {
+  const [v, setV] = useState(value || '');
+  useEffect(() => { setV(value || ''); }, [value]);
+  const save = (text) => { if (text.trim() !== String(value || '').trim()) onSave(text.trim()); };
+  return (
+    <div className={`rounded-xl border p-3 ${value ? 'border-yellow-400 bg-yellow-50' : 'border-slate-200 bg-white'}`}>
+      <div className="text-sm font-medium text-slate-900 mb-2">{label}{sub && <span className="ml-2 text-xs font-normal text-slate-500">{sub}</span>}</div>
+      <div className="flex gap-2 flex-wrap items-center">
+        <input aria-label={`${label} 안내 문구`} value={v} onChange={e => setV(e.target.value)} onBlur={() => save(v)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          placeholder="환자용 화면에 보일 안내 (비워 두면 안 보임)" className={`${INPUT} flex-1 min-w-[16rem]`} />
+        <select aria-label={`${label} 자주 쓰는 문구`} value="" onChange={e => { if (e.target.value) { setV(e.target.value); save(e.target.value); } }}
+          className="text-sm border border-slate-300 rounded-lg px-2 py-2 bg-white max-w-[12rem]">
+          <option value="">문구 고르기</option>
+          {presets.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        {value && <button type="button" onClick={() => { setV(''); onSave(''); }} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600">지우기</button>}
+      </div>
+    </div>
+  );
+}
+function BoardNoticeAdmin({ settings, doctors, doctorPrefs, value, mutate }) {
+  const notices = value?.notices || {};
+  const presets = Array.isArray(value?.presets) ? value.presets : NOTICE_PRESETS;
+  const [newPreset, setNewPreset] = useState('');
+  const setNotice = (key, text) => mutate(prev => ({ ...prev, notices: { ...(prev?.notices || {}), [key]: text } }));
+  const setPresets = (fn) => mutate(prev => ({ ...prev, presets: fn(Array.isArray(prev?.presets) ? prev.presets : NOTICE_PRESETS) }));
+  const addPreset = () => {
+    const t = newPreset.trim();
+    if (t) setPresets(list => (list.includes(t) ? list : [...list, t]));
+    setNewPreset('');
+  };
+  const vn = visionNames(settings);
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-slate-500">적은 문구는 환자용 대기 화면에 노란 띠로 바로 나타나고, 지울 때까지 계속 보입니다. 칸을 벗어나거나 Enter를 누르면 저장됩니다.</p>
+      <NoticeInput label={vn.patientName} sub="시력방" value={notices.vision} presets={presets} onSave={t => setNotice('vision', t)} />
+      {settings.rooms.map(r => (
+        <NoticeInput key={r.id} label={r.patientName || r.name} sub={r.name !== (r.patientName || r.name) ? r.name : '검사실'} value={notices[`room:${r.id}`]} presets={presets} onSave={t => setNotice(`room:${r.id}`, t)} />
+      ))}
+      {doctors.map(d => (
+        <NoticeInput key={d} label={`${d} 진료실`} sub={consultRoomLabel(doctorPrefs, d)} value={notices[`doctor:${d}`]} presets={presets} onSave={t => setNotice(`doctor:${d}`, t)} />
+      ))}
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="font-medium text-slate-900 mb-2">자주 쓰는 문구</div>
+        <div className="space-y-1 mb-3">
+          {presets.map(t => (
+            <div key={t} className="flex items-center justify-between gap-2 text-sm text-slate-700 border-b border-slate-100 py-1">
+              <span>{t}</span>
+              <button type="button" onClick={() => setPresets(list => list.filter(x => x !== t))} className="text-xs text-slate-400 hover:text-red-600">삭제</button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input aria-label="새 자주 쓰는 문구" value={newPreset} onChange={e => setNewPreset(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPreset(); }} placeholder="새 문구" className={`${INPUT} flex-1`} />
+          <button type="button" onClick={addPreset} className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium shrink-0">추가</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, mutatePatients, mutateFu, mutateDoctors, mutateDoctorPrefs, boardNotices, mutateBoardNotices, onBack, lastSync }) {
   const [todayDetail, setTodayDetail] = useState(null);
   const todayEdit = patients.find(p => patientKey(p) === todayDetail?.key);
   const todayTest = settings.tests.find(t => t.id === todayDetail?.testId);
@@ -3864,6 +3927,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
     { key: 'manual', label: '환자 추가' },
     { key: 'today', label: '명단 관리' },
     { key: 'fu', label: 'FU 지정 관리' },
+    { key: 'notice', label: '대기 화면 안내' },
   ];
 
   return (
@@ -4049,6 +4113,10 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
         </div>
       )}
 
+      {tab === 'notice' && (
+        <BoardNoticeAdmin settings={settings} doctors={doctors} doctorPrefs={doctorPrefs} value={boardNotices} mutate={mutateBoardNotices} />
+      )}
+
       {tab === 'fu' && (
         <div>
           <div className="flex items-center gap-2 mb-4 bg-white border border-slate-300 rounded-lg px-3 py-2">
@@ -4225,16 +4293,43 @@ function BoardNumberRow({ n, name, color, compact, note }) {
   );
 }
 
-function VisionBoardList({ patients, compact }) {
-  const list = patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p)).sort(byQueue);
-  if (!list.length) return <BoardEmpty />;
+// 대기 화면 안내 문구 (관리자 > 대기 화면 안내에서 입력, 모든 환자용 화면 공유)
+const NOTICE_PRESETS = ['예약시간이 빠른 환자부터 먼저 검사합니다', '현재 약 30분 정도 지연되고 있습니다', '잠시 후 순서대로 불러드리겠습니다'];
+const loadNotices = (meta) => loadKey('board-notices', { notices: {}, presets: NOTICE_PRESETS }, meta);
+const NoticeContext = createContext({ notices: {} });
+function useNotice(key) {
+  return String(useContext(NoticeContext)?.notices?.[key] || '').trim();
+}
+function BoardNotice({ text, label, compact }) {
+  if (!text) return null;
   return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
-      {list.map((p, i) => (
-        <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="blue" compact={compact} note={i === 0 ? '다음 순서' : ''} />
-      ))}
+    <div role="status" className={`bg-yellow-100 border-2 border-yellow-400 rounded-xl ${compact ? 'px-3 py-2 text-base' : 'px-4 py-3 text-xl'} font-semibold text-yellow-900 mb-3`}>
+      📢 {label ? <span className="font-bold">{label}: </span> : null}{text}
     </div>
   );
+}
+
+function VisionBoardList({ patients, compact }) {
+  const notice = useNotice('vision');
+  const list = patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p)).sort(byQueue);
+  return (
+    <div>
+      <BoardNotice text={notice} compact={compact} />
+      {!list.length ? <BoardEmpty /> : (
+        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
+          {list.map((p, i) => (
+            <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="blue" compact={compact} note={i === 0 ? '다음 순서' : ''} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function RoomNotices({ settings, compact }) {
+  const notices = useContext(NoticeContext)?.notices || {};
+  return settings.rooms
+    .filter(r => String(notices[`room:${r.id}`] || '').trim())
+    .map(r => <BoardNotice key={r.id} label={r.patientName || r.name} text={String(notices[`room:${r.id}`]).trim()} compact={compact} />);
 }
 
 function ExamBoardList({ patients, settings, compact }) {
@@ -4246,6 +4341,7 @@ function ExamBoardList({ patients, settings, compact }) {
       <div className={`bg-teal-50 border border-teal-200 rounded-xl ${compact ? 'p-3 text-sm' : 'p-4'} text-teal-900 mb-3`}>
         검사 순서는 기계 상황에 따라 달라집니다. 이름이 불리면 안내된 검사실로 와주세요.
       </div>
+      <RoomNotices settings={settings} compact={compact} />
       {list.length === 0 ? <BoardEmpty /> : (
         <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
           {list.map(p => (
@@ -4297,6 +4393,7 @@ function ConsultBoardSection({ doctor, patients, settings, compact, plain, roomL
   const inRoom = mine.find(inConsult);
   const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
   const testing = mine.filter(p => !p.seen && !allDone(p, settings)).length;
+  const notice = useNotice(`doctor:${doctor}`);
   return (
     <div className={plain ? '' : 'bg-white border border-amber-200 rounded-2xl p-4'}>
       {!plain && (
@@ -4305,6 +4402,7 @@ function ConsultBoardSection({ doctor, patients, settings, compact, plain, roomL
           {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-amber-700`}>{roomLabel}</span>}
         </div>
       )}
+      <BoardNotice text={notice} compact={compact} />
       {inRoom && (
         <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">
           <span className="text-sm text-amber-700 font-medium">진료 중{roomLabel ? ` · ${roomLabel}` : ''}</span>
@@ -4997,16 +5095,17 @@ export default function App() {
   const [history, mutateHistory, syncHistory, markHistory] = useSharedStore('measure-history', loadHistory, {});
   const [doctorPrefs, mutateDoctorPrefs, syncDoctorPrefs, markDoctorPrefs] = useSharedStore('doctor-prefs', loadDoctorPrefs, {});
   const [todayOverride, mutateTodayOverride, syncTodayOverride, markTodayOverride] = useSharedStore('today-override', loadTodayOverride, null);
+  const [boardNotices, mutateBoardNotices, syncBoardNotices, markBoardNotices] = useSharedStore('board-notices', loadNotices, { notices: {}, presets: NOTICE_PRESETS });
   const [lastSync, setLastSync] = useState(null);
   // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
   forcedToday = todayOverride?.date && todayOverride.setOn === realTodayISO() ? todayOverride.date : null;
   const setToday = (date) => mutateTodayOverride(() => (date && date !== realTodayISO() ? { date, setOn: realTodayISO() } : null));
 
   const refresh = useCallback(async () => {
-    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride()];
-    let p, f, d, s, h, dp, to;
+    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride(), markBoardNotices()];
+    let p, f, d, s, h, dp, to, bn;
     try {
-      [p, f, d, s, h, dp, to] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs(), loadTodayOverride()]);
+      [p, f, d, s, h, dp, to, bn] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs(), loadTodayOverride(), loadNotices()]);
     } catch {
       return; // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다.
     }
@@ -5017,8 +5116,9 @@ export default function App() {
     syncHistory(h, marks[4]);
     syncDoctorPrefs(dp, marks[5]);
     syncTodayOverride(to, marks[6]);
+    syncBoardNotices(bn, marks[7]);
     setLastSync(new Date());
-  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride]);
+  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, markBoardNotices, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride, syncBoardNotices]);
 
   useEffect(() => {
     refresh();
@@ -5096,6 +5196,8 @@ export default function App() {
         mutateFu={mutateFu}
         mutateDoctors={mutateDoctors}
         mutateDoctorPrefs={mutateDoctorPrefs}
+        boardNotices={boardNotices}
+        mutateBoardNotices={mutateBoardNotices}
         onBack={onBack}
         lastSync={lastSync}
       />
@@ -5133,7 +5235,9 @@ export default function App() {
   return <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} />;
   };
   return <PatientMemoContext.Provider value={mutatePatients}>
-    <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
+    <NoticeContext.Provider value={boardNotices || { notices: {} }}>
+      <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
+    </NoticeContext.Provider>
     {askPassword && <PasswordModal onOk={() => { setAskPassword(false); setRole('settings'); }} onCancel={() => setAskPassword(false)} />}
     {lockError && !role && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm rounded-xl px-4 py-2 z-50">{lockError}</div>}
     {directoryOpen && <PatientDirectory patients={patients} settings={settings} lastSync={lastSync} onClose={() => setDirectoryOpen(false)} />}
