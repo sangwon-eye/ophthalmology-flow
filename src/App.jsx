@@ -741,6 +741,9 @@ function fieldText(m, key) {
   if (!od && !os) return '';
   return `${od || '-'} / ${os || '-'}`;
 }
+function hasFieldValue(m, fields) {
+  return fields.some(k => fieldText(m, k));
+}
 function hasIop(p) {
   return !!(String(p.measure?.nct?.od ?? '').trim() || String(p.measure?.nct?.os ?? '').trim() || p.assigned?.[GAT_ID]);
 }
@@ -1345,15 +1348,18 @@ function TestToggle({ label, done, onToggle, emphasize, onSpecial, disabled = fa
 }
 
 // 오늘 검사: 평소에는 선택된 검사만 보여 주고, [검사 변경]을 누르면 모든 검사와 산동 설정(children)이 펼쳐집니다.
-function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, children }) {
+// inline: 접힌 상태를 카드의 버튼 줄 안에 끼워 넣음 (chipsWhenClosed=false면 [검사 변경]만. 검사실은 위의 검사 칸과 겹치므로)
+function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, inline = false, chipsWhenClosed = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   if (!tests.length) return null;
   const shown = open ? tests : tests.filter(t => p.assigned?.[t.id]);
-  return (
-    <div className="w-full flex flex-wrap items-center gap-1.5 mt-1">
-      <span className="text-xs text-slate-400 mr-1">오늘 검사</span>
-      {!open && shown.length === 0 && <span className="text-xs text-slate-400">없음</span>}
-      {shown.map(t => {
+  const openButton = (
+    <button type="button" aria-expanded="false" onClick={() => setOpen(true)}
+      className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 flex items-center gap-1">
+      <Plus size={12} />검사 변경
+    </button>
+  );
+  const chip = (t) => {
         const on = !!p.assigned?.[t.id];
         const label = octEyeGroups(t).length ? 'OCT' : on ? testLabelWithOptions(t, p.detail?.[t.id]) : t.short;
         return (
@@ -1370,7 +1376,13 @@ function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, children
             {t.popupOnClick && <ChevronDown size={12} className="shrink-0 opacity-60" />}
           </SpecialPressButton>
         );
-      })}
+  };
+  if (inline && !open) return <>{chipsWhenClosed && shown.map(chip)}{openButton}</>;
+  return (
+    <div className="w-full flex flex-wrap items-center gap-1.5 mt-1">
+      <span className="text-xs text-slate-400 mr-1">오늘 검사</span>
+      {!open && shown.length === 0 && <span className="text-xs text-slate-400">없음</span>}
+      {shown.map(chip)}
       {open && children && <>
         <span className="h-5 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
         {children}
@@ -1380,12 +1392,7 @@ function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, children
           className="w-full mt-1 py-1.5 rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 flex items-center justify-center gap-1">
           <ChevronUp size={13} />접기
         </button>
-      ) : (
-        <button type="button" aria-expanded="false" onClick={() => setOpen(true)}
-          className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 flex items-center gap-1">
-          <Plus size={12} />검사 변경
-        </button>
-      )}
+      ) : openButton}
     </div>
   );
 }
@@ -1695,7 +1702,7 @@ function KioskNoteLine({ p }) {
     </div>
   );
 }
-function KioskNoteEditor({ p }) {
+function KioskNoteEditor({ p, inline = false }) {
   const mutatePatients = useContext(PatientMemoContext);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
@@ -1708,7 +1715,7 @@ function KioskNoteEditor({ p }) {
   };
   if (!editing) {
     return (
-      <div className="w-full flex items-center gap-2 flex-wrap">
+      <div className={inline ? 'contents' : 'w-full flex items-center gap-2 flex-wrap'}>
         {p.kioskNote || p.skipVision
           ? <span className="inline-flex items-stretch rounded-lg bg-violet-50 border border-violet-200 text-violet-900 text-xs">
               <button type="button" onClick={start} title="눌러서 수정" className="text-left px-2 py-1">
@@ -1898,22 +1905,28 @@ function HistoryControl({ p }) {
   const need = hxNeeded(p, ctx);
   const pk = patientKey(p);
   return (
-    <div className="w-full flex items-center gap-2 flex-wrap">
-      {p.hx && <HistoryLine p={p} />}
-      {!p.hx && need && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-semibold">History 필요</span>}
-      <button type="button" onClick={() => setOpen(true)}
-        className={`text-sm px-3 py-1.5 rounded-lg font-medium ${!p.hx && need ? 'bg-sky-600 text-white' : 'border border-sky-300 text-sky-700 bg-white'}`}>
-        {p.hx ? 'History 수정' : 'History 입력'}
-      </button>
+    <>
+      {!p.hx && (
+        <button type="button" onClick={() => setOpen(true)}
+          className={`text-sm px-3 py-1.5 rounded-lg font-medium ${need ? 'bg-amber-500 text-white' : 'border border-sky-300 text-sky-700 bg-white'}`}>
+          {need ? 'History 필요' : 'History 입력'}
+        </button>
+      )}
       {!p.hx && need && <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: false }))} className="text-xs text-slate-400 hover:text-slate-600 underline">필요 없음</button>}
-      {!p.hx && !need && p.firstVisit && <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: true }))} className="text-xs text-slate-400 hover:text-slate-600 underline">History 필요로 표시</button>}
+      {!p.hx && !need && p.firstVisit && <button type="button" aria-label="History 필요로 표시" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: true }))} className="text-xs text-slate-400 hover:text-slate-600 underline">필요로 표시</button>}
+      {p.hx && (
+        <div className="order-last w-full flex items-stretch text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg overflow-hidden">
+          <div className="flex-1 min-w-0 px-3 py-1.5"><span className="font-semibold mr-1">Hx</span>{hxSummary(p.hx, ctx.fields) || '특이사항 없음'}</div>
+          <button type="button" onClick={() => setOpen(true)} aria-label="History 수정" className="px-3 text-xs font-medium text-sky-700 border-l border-sky-200 hover:bg-sky-100 shrink-0">수정</button>
+        </div>
+      )}
       {open && <HistoryModal p={p} onClose={() => setOpen(false)} />}
-    </div>
+    </>
   );
 }
 
 // 진료 전 처치 (관리자 명단 관리): PRP·YAG처럼 처치만 받으러 온 환자. 넣으면 시력검사 없이 처치실부터
-function PreProcEditor({ p, procedures }) {
+function PreProcEditor({ p, procedures, inline = false }) {
   const mutatePatients = useContext(PatientMemoContext);
   const pk = patientKey(p);
   const list = p.preProcs || [];
@@ -1932,8 +1945,8 @@ function PreProcEditor({ p, procedures }) {
   });
   if (locked && !list.length) return null;
   return (
-    <div className="w-full flex items-center gap-2 flex-wrap text-xs">
-      {list.length > 0 && <span className="text-slate-500">진료 전 처치</span>}
+    <div className={inline ? 'contents text-xs' : 'w-full flex items-center gap-2 flex-wrap text-xs'}>
+      {list.length > 0 && <span className="text-xs text-slate-500">진료 전 처치</span>}
       {list.map(i => (
         <span key={i.uid} className={`inline-flex items-stretch rounded-lg border ${i.done ? 'border-slate-200 bg-slate-50 text-slate-400 line-through' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
           <span className="px-2 py-1">{i.name}</span>
@@ -2004,7 +2017,7 @@ function SegmentedToggle({ value, onChange, options, className = '' }) {
 const SORT_OPTIONS = [['time', '예약시간순'], ['name', '가나다순']];
 const SESSION_OPTIONS = [['all', '전체'], ['am', '오전'], ['pm', '오후']];
 
-function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
+function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirst, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
     <div className={`flex items-start gap-3 bg-white border ${c.border} rounded-xl p-4`}>
@@ -2015,7 +2028,9 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
           <span className="t-name text-slate-900">{p.name}</span>
           <span className="text-xs text-slate-400">{p.id}</span>
           {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
-          {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
+          {onToggleFirst
+            ? <button type="button" onClick={onToggleFirst} title="누르면 초진 ↔ 재진" className={`text-xs px-2 py-0.5 rounded-full border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'}`}>{p.firstVisit ? '초진' : '재진'}</button>
+            : p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
           {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
           <LateChip p={p} />
           {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 검사 취소</span>}
@@ -2175,7 +2190,8 @@ function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCancel })
 // 산동 여부·CR·점안 시각 기록. 모든 직원 화면의 환자 카드에서 같은 방식으로 사용
 // compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
-function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, note = '' }) {
+// group: 카드 버튼 줄 안에 산동·점안을 한 덩어리로 (줄이 넘치면 함께 다음 줄로)
+function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, note = '' }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);
@@ -2190,7 +2206,7 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
   if (togglesOnly) showDrops = false;
   const chip = (on) => `text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
   return (
-    <div className={inline ? 'contents' : 'w-full flex flex-wrap items-center gap-1.5'}>
+    <div className={group ? 'inline-flex flex-wrap items-center gap-1.5' : inline ? 'contents' : 'w-full flex flex-wrap items-center gap-1.5'}>
       {!cr && (
         <SpecialPressButton
           onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateOverride: !dil }))}
@@ -2978,18 +2994,26 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 handle={handle}
                 onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
                 onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
+                onToggleFirst={isVision ? () => toggleFirstVisit(pk) : undefined}
               >
-                {isVision && (
-                  <div className="w-full space-y-1 mb-1">
-                    <MeasureLine label="이전" m={prev} emptyText="이전 값 없음" />
+                {/* 값이 있는 줄만 보여줌 (값 없음 줄은 생략) */}
+                {isVision && (hasAnyValue(prev) || hasAnyValue(p.measure)) && (
+                  <div className="w-full space-y-1">
+                    {hasAnyValue(prev) && <MeasureLine label="이전" m={prev} />}
                     {hasAnyValue(p.measure) && <MeasureLine label="오늘" m={p.measure} fields={['ucva', 'bcva', 'nct']} />}
                   </div>
                 )}
-                {isVision && <HistoryControl p={p} />}
-                {roomHasGat && p.assigned?.[GAT_ID] && (
-                  <div className="w-full space-y-1 mb-1">
-                    <MeasureLine label="이전" m={prev} fields={['nct', 'gat']} emptyText="이전 안압 없음" />
-                    <MeasureLine label="오늘" m={p.measure} fields={['nct', 'gat']} emptyText="오늘 안압 없음" />
+                {roomHasGat && p.assigned?.[GAT_ID] && (hasFieldValue(prev, ['nct', 'gat']) || hasFieldValue(p.measure, ['nct', 'gat'])) && (
+                  <div className="w-full space-y-1">
+                    {hasFieldValue(prev, ['nct', 'gat']) && <MeasureLine label="이전" m={prev} fields={['nct', 'gat']} />}
+                    {hasFieldValue(p.measure, ['nct', 'gat']) && <MeasureLine label="오늘" m={p.measure} fields={['nct', 'gat']} />}
+                  </div>
+                )}
+                {notes.length > 0 && (
+                  <div className="w-full text-xs bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-2 space-y-0.5">
+                    {notes.map(n => (
+                      <div key={n.id}><span className="font-medium">{n.short}</span> {n.note}</div>
+                    ))}
                   </div>
                 )}
                 {!isVision && (() => {
@@ -3020,6 +3044,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     측정값 입력
                   </button>
                 )}
+                {isVision && <HistoryControl p={p} />}
                 {tests.filter(t => p.assigned?.[t.id] && t.id !== VISION_KEY).map(t => (
                   !p.done?.[t.id] && prepBlocked(p, t) ? (
                     // 처치실 준비(예: skin test)가 끝나야 할 수 있는 검사: 잠긴 칸으로 상태만 보여줌
@@ -3050,24 +3075,17 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     onSpecial={isVision ? undefined : () => openSpecial(p, t)}
                   />
                 ))}
-                {isVision && firstVisitChip(p)}
-                {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
-                <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                {/* 접힌 [검사 변경]은 검사 칸 줄 끝에. 검사실은 위 검사 칸과 겹치는 '오늘 검사' 칩을 접힌 상태에서 숨김 */}
+                <TestPicker inline chipsWhenClosed={isVision} p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
+                  <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                </TestPicker>
+                <DilationRow compact group p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 {otherRooms.length > 0 && (
                   <span className="text-xs text-slate-500">
                     다른 검사실 남음: {otherRooms.map(r => `${r.name} (${remainingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
                   </span>
                 )}
-                {notes.length > 0 && (
-                  <div className="w-full text-xs bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-2 space-y-0.5">
-                    {notes.map(n => (
-                      <div key={n.id}><span className="font-medium">{n.short}</span> {n.note}</div>
-                    ))}
-                  </div>
-                )}
-                <TestPicker p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
-                  <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
-                </TestPicker>
+                {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
               </PatientRow>
             );
           }}
@@ -3105,9 +3123,11 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   <button type="button" onClick={() => checkIn(p)} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">접수</button>
                 </div>
               </div>
-              <div className="mt-2">
-                <MeasureLine label="이전" m={previousMeasure(p, history)} emptyText="이전 값 없음" />
-              </div>
+              {hasAnyValue(previousMeasure(p, history)) && (
+                <div className="mt-2">
+                  <MeasureLine label="이전" m={previousMeasure(p, history)} />
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -4583,23 +4603,25 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                 <ConfirmButton label="삭제" onConfirm={() => removeOne(patientKey(p))} />
               </div>
               {(() => {
+                // 이전 시력 · 접수 안내 · 진료 전 처치를 한 줄에 (이전 시력이 없으면 [이전 시력 입력] 버튼만)
                 const prev = previousMeasure(p, history);
                 const missing = !hasVisionValue(prev);
                 return (
-                  <div className="w-full flex items-center gap-2 flex-wrap">
-                    <MeasureLine label="이전" m={prev} emptyText="이전 시력 없음" />
-                    {missing && (
+                  <div className="w-full flex items-center gap-x-3 gap-y-2 flex-wrap">
+                    {missing ? (
                       <button type="button" onClick={() => setPrevFor(patientKey(p))} className="text-xs px-2.5 py-1 rounded-lg border border-orange-300 text-orange-700 bg-orange-50 font-medium">이전 시력 입력</button>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <MeasureLine label="이전" m={prev} />
+                        {prev?.source === 'manual' && <button type="button" onClick={() => setPrevFor(patientKey(p))} className="text-xs text-slate-400 underline">수정</button>}
+                      </span>
                     )}
-                    {!missing && prev?.source === 'manual' && (
-                      <button type="button" onClick={() => setPrevFor(patientKey(p))} className="text-xs text-slate-400 underline">수정</button>
-                    )}
+                    {!p.checkin && !p.consultDone ? <KioskNoteEditor inline p={p} /> : (p.kioskNote || p.skipVision) && <KioskNoteLine p={p} />}
+                    <PreProcEditor inline p={p} procedures={settings.procedures} />
+                    <DilationRow compact group showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                   </div>
                 );
               })()}
-              {!p.checkin && !p.consultDone ? <KioskNoteEditor p={p} /> : (p.kioskNote || p.skipVision) && <div className="w-full"><KioskNoteLine p={p} /></div>}
-              <PreProcEditor p={p} procedures={settings.procedures} />
-              <DilationRow compact showDrops={false} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
               <TestPicker p={p} tests={orderForPicking(allTests, settings)} defaultOpen={flag}
                 onPick={(t, on) => { if (p.consultDone) return; if (t.popupOnClick) setTodayDetail({ key: patientKey(p), testId: t.id }); else setTodayTest(patientKey(p), t, !on); }}
                 onSpecial={t => { if (!p.consultDone) setTodayDetail({ key: patientKey(p), testId: t.id }); }}>
