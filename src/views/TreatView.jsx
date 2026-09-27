@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf } from '../core/flow.jsx';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -88,7 +88,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   // 검사 준비 (예: FAG 동의서 · skin test): 시작 → 대기 시간 → 음성이면 검사실로, 양성이면 보류
   const prepList = patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).length > 0).sort(order);
   // '바로 넘어감'(예: MMP): 시작하면 검사는 완료로 넘어가고, 시간이 되면 여기서 결과를 확인
-  const checkList = patients.filter(p => prepChecks(p, settings).length > 0).sort(order);
+  // '[끝 · 확인]을 눌러야 완료'(예: Schirmer) 처치실 검사도 시간이 되면 여기에 함께 (진료 전 검사 칸에서도 확인 가능)
+  const timedDue = (p, now = Date.now()) => roomTests(settings, treatRoomOf(settings).id)
+    .filter(t => isTimed(t) && !prepGoMode(t) && p.assigned?.[t.id] && prepRunning(p, t) && prepDue(prepOf(p, t), t, now));
+  const checkList = patients.filter(p => prepChecks(p, settings).length > 0 || timedDue(p).length > 0).sort(order);
   // 시간 표시를 새로 그리고, 시간이 된 준비·확인이 새로 생기면 알림
   const [, setTick] = useState(0);
   const seenDue = useRef(null);
@@ -133,6 +136,12 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const st = prepOf(p, t);
     patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: { ...(x.prep?.[t.id] || st), checked: Date.now() } } }));
     showToast(`${p.name} ${t.short || t.name} 확인`, () => patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: st } })));
+  };
+  const confirmTimed = (p, t) => {
+    const pk = patientKey(p);
+    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
+    patchPatient(mutatePatients, pk, x => prepConfirmPatch(x, t, settings, Date.now()));
+    showToast(`${p.name} ${t.short || t.name} 완료`, () => patchPatient(mutatePatients, pk, () => before));
   };
   const setPrep = (p, t, value, msg) => {
     const pk = patientKey(p);
@@ -194,7 +203,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   const prepStarted = (p) => prepPendingTests(p, settings).some(t => prepOf(p, t)?.startedAt);
   const staleOf = (p) => staleMinutes(p, settings, now);
   const summary = [
-    { id: 'treat-check', label: '결과 확인', list: checkList, due: checkList.filter(p => prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length },
+    { id: 'treat-check', label: '결과 확인', list: checkList, due: checkList.filter(p => timedDue(p, now).length > 0 || prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length },
     { id: 'treat-preproc', label: '진료 전 처치', list: preProcList, stale: preProcList.filter(staleOf).length },
     { id: 'treat-prep', label: '검사 준비', list: prepList,
       due: prepList.filter(p => prepPendingTests(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length,
@@ -212,9 +221,16 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} sub={summaryBar} count={requests.length + triage.length + procs.length + preProcList.length + prepList.length + checkList.length + examList.length}>
       {checkList.length > 0 && (
         <div id="treat-check" className="mb-8 scroll-mt-36">
-          <SectionTitle hint="시작하면 바로 다음으로 넘어가는 검사(예: MMP)입니다. 정한 시간이 되면 초록으로 바뀌니 결과를 보고 [확인]을 눌러주세요.">결과 확인 · {checkList.length}명</SectionTitle>
+          <SectionTitle hint="시간이 된 검사를 모아 봅니다. 바로 넘어가는 검사(예: MMP)는 시작부터 여기 있고, [끝 · 확인]을 눌러야 하는 검사(예: Schirmer)는 시간이 되면 올라옵니다. 결과를 보고 [확인]을 눌러주세요.">결과 확인 · {checkList.length}명</SectionTitle>
           {checkList.map(p => (
             <SimpleCard key={patientKey(p)} p={p} tone="violet">
+              {timedDue(p).map(t => (
+                <div key={`due-${t.id}`} className="flex items-center gap-2 flex-wrap mr-4">
+                  <span className="text-sm font-semibold text-slate-900">{t.short || t.name}</span>
+                  <button type="button" onClick={() => confirmTimed(p, t)} title="누르면 검사 완료 (진료 전 검사 칸에서 눌러도 같음)"
+                    className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">{prepLabel(t)} {fmtClock(prepOf(p, t).startedAt)} · 확인</button>
+                </div>
+              ))}
               {prepChecks(p, settings).map(t => {
                 const st = prepOf(p, t);
                 const due = prepDue(st, t);
