@@ -252,6 +252,7 @@ export function BoardNoticeAdmin({ settings, doctors, doctorPrefs, value, mutate
     <div className="space-y-3">
       <p className="text-sm text-slate-500">적은 문구는 환자용 대기 화면에 노란 띠로 바로 나타나고, 지울 때까지 계속 보입니다. 칸을 벗어나거나 Enter를 누르면 저장됩니다.</p>
       <NoticeInput label={vn.patientName} sub="시력방" value={notices.vision} presets={presets} onSave={t => setNotice('vision', t)} />
+      <NoticeInput label="검사실 전체" sub="환자용 화면 검사실 칸 맨 위 (방 이름 없이)" value={notices.exams} presets={presets} onSave={t => setNotice('exams', t)} />
       {settings.rooms.map(r => (
         <NoticeInput key={r.id} label={r.patientName || r.name} sub={r.name !== (r.patientName || r.name) ? r.name : ''} value={notices[`room:${r.id}`]} presets={presets} onSave={t => setNotice(`room:${r.id}`, t)} />
       ))}

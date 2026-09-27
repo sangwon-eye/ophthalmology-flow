@@ -125,6 +125,7 @@ export function RoomNotices({ settings, compact }) {
 export function ExamBoardList({ patients, settings, compact }) {
   // 처치실에서 먼저 할 일(진료 전 처치, 검사 준비)도 함께 안내
   const treat = treatRoomOf(settings);
+  const examsNotice = useNotice('exams');
   const treatTodo = (p) => !pastVision(p) ? [] : preProcPending(p)
     ? (p.preProcs || []).filter(x => !x.done).map(x => x.name)
     : prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => `${t.name || t.short} 검사 준비`);
@@ -133,9 +134,7 @@ export function ExamBoardList({ patients, settings, compact }) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
   return (
     <div>
-      <div className={`bg-teal-50 border border-teal-200 rounded-xl ${compact ? 'p-3 text-sm' : 'p-4'} text-teal-900 mb-3`}>
-        검사 순서는 기계 상황에 따라 달라집니다. 이름이 불리면 안내된 검사실로 와주세요.
-      </div>
+      <BoardNotice text={examsNotice} compact={compact} />
       <RoomNotices settings={settings} compact={compact} />
       {list.length === 0 ? <BoardEmpty /> : (
         <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
