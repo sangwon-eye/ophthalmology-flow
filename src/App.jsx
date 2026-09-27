@@ -161,7 +161,8 @@ function orderedTests(p) {
   return [...new Set(Object.values(p.orders || {}).flatMap(r => r?.tests || []))];
 }
 function orderState(p, settings, roomId) {
-  const needed = roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
+  // 처방이 필요 없는 검사(예: OSDI 설문)는 처방 전/완료 표시에서 뺍니다
+  const needed = roomTests(settings, roomId).filter(t => p.assigned?.[t.id] && !p.done?.[t.id] && !t.noOrder);
   const covered = orderedTests(p);
   const at = Math.max(0, ...Object.values(p.orders || {}).map(r => r?.at || 0));
   const rec = at ? { at } : null;
@@ -209,12 +210,18 @@ function pendingTests(p, settings, roomId) {
   return othersLeft ? list.filter(t => t.withExams) : list;
 }
 
+// 처치실에서 오늘 검사를 정할 환자: 초진, 또는 시력방에서 History를 적고 '처치실에서 검사 지정'으로 보낸 환자
+function assignAtTreat(p) {
+  return !!(p.firstVisit || p.hxAssign);
+}
 // 시력/안압을 마쳤고, 초진이면 처치실에서 검사 지정까지 마친 상태 → 검사실로 갈 수 있음
+// 시력방에서 하는 검사 id (설정의 시력방 검사, 예: ARK). App이 설정을 읽을 때마다 갱신합니다.
+let VISION_TEST_IDS = ['ark'];
 function visionComplete(p) {
-  return !!p.done?.[VISION_KEY] && (!p.assigned?.ark || !!p.done?.ark);
+  return !!p.done?.[VISION_KEY] && VISION_TEST_IDS.every(id => !p.assigned?.[id] || !!p.done?.[id]);
 }
 function pastVision(p) {
-  return !!p.checkin && visionComplete(p) && (!(p.firstVisit || p.addOnCheck) || !!p.triageAssigned || !!p.triageDone);
+  return !!p.checkin && visionComplete(p) && (!(assignAtTreat(p) || p.addOnCheck) || !!p.triageAssigned || !!p.triageDone);
 }
 
 // 진료 전 처치가 남아 있으면 검사실보다 처치가 먼저입니다.
@@ -235,7 +242,7 @@ function testsComplete(p, settings) {
 // 진료 받을 준비가 됨 (검사 모두 완료, 초진이면 예진까지 완료)
 function allDone(p, settings) {
   return testsComplete(p, settings) && !preProcPending(p)
-    && (!p.firstVisit || p.triageRequired === false || !!p.triageDone)
+    && (!assignAtTreat(p) || p.triageRequired === false || !!p.triageDone)
     && (!p.extraTriage || !!p.triageDone);
 }
 
@@ -243,12 +250,12 @@ function allDone(p, settings) {
 // 초진: 시력/안압 후 처치실에서 검사 지정 대기
 // 2차 진료: 1차 진료 설명 완료 후 처치실에서 추가 검사 확인 대기 (설정에서 켠 경우)
 function needsTriageAssign(p) {
-  return !p.consultDone && !!p.checkin && visionComplete(p) && !!(p.firstVisit || p.addOnCheck) && !p.triageAssigned && !p.triageDone;
+  return !p.consultDone && !!p.checkin && visionComplete(p) && !!(assignAtTreat(p) || p.addOnCheck) && !p.triageAssigned && !p.triageDone;
 }
 // 초진: 검사를 모두 마치고(또는 검사 없음) 처치실 처치 대기에서 예진 대기
 // 초진 예진, 또는 처치실에서 '예진 추가'한 환자
 function needsTriageExam(p, settings) {
-  const wanted = (!!p.firstVisit && p.triageRequired !== false) || !!p.extraTriage;
+  const wanted = (assignAtTreat(p) && p.triageRequired !== false) || !!p.extraTriage;
   return !p.consultDone && wanted && !p.triageDone && testsComplete(p, settings);
 }
 // 진료실에서 '처치실 확인 요청'으로 보낸 환자
@@ -290,7 +297,7 @@ function getStage(p, settings) {
   if (!p.checkin) return { label: '접수 대기', area: 'reception' };
   if (!visionComplete(p)) return { label: '시력/안압 검사 대기', area: 'vision' };
   if (treatRequested(p)) return { label: '처치실 대기 (진료실 요청 확인)', area: 'treatReq' };
-  if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
+  if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : p.hxAssign ? '처치실 대기 (검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
   if (preProcPending(p)) return { label: `처치실 대기 (진료 전 처치: ${(p.preProcs || []).filter(x => !x.done).map(x => x.name).join(', ')})`, area: 'preProc' };
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
   const prepNames = prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => t.short || t.name);
@@ -311,6 +318,8 @@ const DILATE_EYE_LABEL = { OD: '우안 (OD)', OS: '좌안 (OS)' };
 function dilateEyeOf(value) { return ['OD', 'OS'].includes(value) ? value : undefined; }
 function needsDilation(p, prefs) {
   if (typeof p.dilateOverride === 'boolean') return p.dilateOverride;
+  // 산동이 필요한 진료 전 처치(예: PRP)가 남아 있으면 접수하자마자 '산동 함'
+  if ((p.preProcs || []).some(x => x.dilate && !x.done)) return true;
   return !!prefs?.[p.doctor]?.dilate;
 }
 function crActive(p, prefs) {
@@ -443,7 +452,7 @@ function fillFollowupNames(prev, list) {
 // 진료 전 처치 목록 만들기 (설정 > 처치의 id 목록 → 환자 기록)
 function makePreProcs(ids, settings) {
   return (ids || []).map(id => (settings.procedures || []).find(x => x.id === id)).filter(Boolean)
-    .map(x => ({ uid: newId('pp'), procId: x.id, name: x.name, performer: x.performer, done: false, doneAt: null }));
+    .map(x => ({ uid: newId('pp'), procId: x.id, name: x.name, performer: x.performer, dilate: !!x.dilate, done: false, doneAt: null }));
 }
 function buildPatient(raw, fuMap, settings) {
   const fu = followupForDoctor(fuMap[raw.id], raw.doctor);
@@ -658,7 +667,7 @@ function applyCheckin(p, { autoLate = false, graceMin = 0 } = {}) {
   if (p.skipVision && !p.done?.[VISION_KEY]) {
     next = {
       ...next,
-      assigned: { ...next.assigned, ark: false },
+      assigned: { ...next.assigned, ...Object.fromEntries(VISION_TEST_IDS.map(id => [id, false])) },
       done: { ...next.done, [VISION_KEY]: true },
       doneAt: { ...(next.doneAt || {}), [VISION_KEY]: Date.now() },
       visionSkipped: true,
@@ -953,7 +962,8 @@ const loadTodayOverride = (meta) => loadKey('today-override', null, meta);
 const TREAT_ROOM = { id: 'treat', name: '처치실', patientName: '처치실', showPriority: false, builtin: 'treat' };
 function ensureBuiltins(s) {
   if (!s.rooms.some(r => r.builtin === 'treat')) s = { ...s, rooms: [...s.rooms, TREAT_ROOM] };
-  s = { ...s, tests: s.tests.some(t => t.id === 'ark') ? s.tests.map(t => t.id === 'ark' ? { ...t, roomId: 'vision', builtin: 'ark' } : t) : [ARK_TEST, ...s.tests] };
+  // ARK는 설정에서 지우면(arkRemoved) 다시 넣지 않습니다
+  s = { ...s, tests: s.tests.some(t => t.id === 'ark') ? s.tests.map(t => t.id === 'ark' ? { ...t, roomId: 'vision', builtin: 'ark' } : t) : s.arkRemoved ? s.tests : [ARK_TEST, ...s.tests] };
   if (s.tests.some(t => t.id === GAT_ID)) {
     return { ...s, tests: s.tests.map(t => (t.id === GAT_ID ? { ...t, builtin: 'gat' } : t)) };
   }
@@ -977,6 +987,7 @@ async function loadSettings(meta) {
     procedures: Array.isArray(base.procedures) ? base.procedures : DEFAULT_SETTINGS.procedures,
     dilationWaitMin: Number.isFinite(Number(base.dilationWaitMin)) ? Number(base.dilationWaitMin) : 15,
     vision: { ...DEFAULT_SETTINGS.vision, ...(base.vision || {}) },
+    hxFields: hxFieldsOf(base),
   };
 }
 function treatRoomOf(settings) {
@@ -1129,7 +1140,7 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
             {extra}
             <TextSizeControl />
             <button type="button" onClick={onBack} className="text-sm px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
-              화면 전환
+              메인 화면
             </button>
           </div>
         </div>
@@ -1709,8 +1720,20 @@ function KioskNoteEditor({ p }) {
 // 히스토리 (시력방에서 입력): 초진·FU loss·중간 내원 환자의 병력.
 // 환자 기록 p.hx = { htn, dm, dmYears, pmh, surgery, cc, at }. 기저질환·수술력은 환자별로 저장해 다음 내원 때 미리 채움.
 const loadHx = (meta) => loadKey('patient-history', {}, meta);
-const HxContext = createContext({ store: {}, mutate: null, fuMap: {}, measure: {} });
-const HX_SURGERIES = ['백내장 OD', '백내장 OS', '녹내장', '망막·유리체', '굴절교정', '사시', '안검'];
+const HxContext = createContext({ store: {}, mutate: null, fuMap: {}, measure: {}, fields: null });
+// History 양식: 설정 > 기타에서 항목을 바꿀 수 있습니다.
+// type: yn(있음/없음), ynYears(있음/없음 + 기간), text(한 줄), long(여러 줄). keep: 다음 내원 때 미리 채움
+const DEFAULT_HX_FIELDS = [
+  { id: 'htn', label: '고혈압', short: 'HTN', type: 'yn', keep: true },
+  { id: 'dm', label: '당뇨', short: 'DM', type: 'ynYears', keep: true },
+  { id: 'pmh', label: '기타 과거력', short: '과거력', type: 'text', keep: true },
+  { id: 'surgery', label: '이전 안과 수술력', short: '수술력', type: 'long', keep: true },
+  { id: 'cc', label: '주호소', short: '주호소', type: 'text', keep: false },
+];
+const HX_TYPES = [['yn', '있음/없음'], ['ynYears', '있음/없음 + 기간(년)'], ['text', '한 줄 글'], ['long', '여러 줄 글']];
+function hxFieldsOf(settings) {
+  return Array.isArray(settings?.hxFields) && settings.hxFields.length ? settings.hxFields : DEFAULT_HX_FIELDS;
+}
 // OCS '초진'이어도 우리 프로그램에 지난 기록(FU 지정·이전 시력·히스토리)이 있으면 예정된 FU로 보고 추천하지 않음
 function hxSuggested(p, ctx) {
   if (!p.firstVisit) return false;
@@ -1720,20 +1743,23 @@ function hxSuggested(p, ctx) {
 function hxNeeded(p, ctx) {
   return typeof p.hxNeeded === 'boolean' ? p.hxNeeded : hxSuggested(p, ctx);
 }
-function hxSummary(hx) {
+function hxSummary(hx, fields = DEFAULT_HX_FIELDS) {
   if (!hx) return '';
-  const yn = (v) => (v === true ? '(+)' : v === false ? '(−)' : '');
-  return [
-    hx.htn !== undefined && hx.htn !== null ? `HTN${yn(hx.htn)}` : '',
-    hx.dm !== undefined && hx.dm !== null ? `DM${yn(hx.dm)}${hx.dm && hx.dmYears ? ` ${hx.dmYears}년` : ''}` : '',
-    hx.pmh ? `과거력: ${hx.pmh}` : '',
-    hx.surgery ? `수술력: ${hx.surgery}` : '',
-    hx.cc ? `주호소: ${hx.cc}` : '',
-  ].filter(Boolean).join(' · ');
+  const name = (f) => f.short || f.label;
+  return fields.map(f => {
+    const v = hx[f.id];
+    if (f.type === 'yn' || f.type === 'ynYears') {
+      if (v !== true && v !== false) return '';
+      return `${name(f)}${v ? '(+)' : '(−)'}${v && f.type === 'ynYears' && hx[`${f.id}Years`] ? ` ${hx[`${f.id}Years`]}년` : ''}`;
+    }
+    const t = String(v ?? '').trim().replace(/\s*\n\s*/g, ', ');
+    return t ? `${name(f)}: ${t}` : '';
+  }).filter(Boolean).join(' · ');
 }
 function HistoryLine({ p }) {
+  const ctx = useContext(HxContext);
   if (p.hx) {
-    return <div className="w-full text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg px-3 py-1.5"><span className="font-semibold mr-1">Hx</span>{hxSummary(p.hx) || '특이사항 없음'}</div>;
+    return <div className="w-full text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg px-3 py-1.5"><span className="font-semibold mr-1">Hx</span>{hxSummary(p.hx, ctx.fields) || '특이사항 없음'}</div>;
   }
   if (p.hxMissing) return <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 font-semibold">History 미입력</span>;
   return null;
@@ -1741,27 +1767,41 @@ function HistoryLine({ p }) {
 function HistoryModal({ p, onClose }) {
   const ctx = useContext(HxContext);
   const mutatePatients = useContext(PatientMemoContext);
-  const base = p.hx || ctx.store?.[p.id] || {};
-  const [f, setF] = useState(() => ({ htn: base.htn ?? null, dm: base.dm ?? null, dmYears: base.dmYears || '', pmh: base.pmh || '', surgery: base.surgery || '', cc: p.hx?.cc || '' }));
-  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
-  const tokens = f.surgery.split(',').map(t => t.trim()).filter(Boolean);
-  const toggleSurgery = (t) => set('surgery', (tokens.includes(t) ? tokens.filter(x => x !== t) : [...tokens, t]).join(', '));
+  const fields = ctx.fields || DEFAULT_HX_FIELDS;
+  const stored = ctx.store?.[p.id] || {};
+  // 이번 기록이 있으면 그대로, 없으면 지난번에 저장한 항목(미리 채우기 켠 것)만
+  const [f, setF] = useState(() => {
+    const out = {};
+    fields.forEach(x => {
+      const src = p.hx || (x.keep ? stored : {});
+      out[x.id] = x.type === 'yn' || x.type === 'ynYears' ? (src[x.id] ?? null) : String(src[x.id] ?? '');
+      if (x.type === 'ynYears') out[`${x.id}Years`] = String(src[`${x.id}Years`] ?? '');
+    });
+    return out;
+  });
+  const set = (k, v) => setF(cur => ({ ...cur, [k]: v }));
+  // History를 적은 환자는 시력 후 처치실에서 오늘 검사를 정함 (초진은 원래 그렇게 감)
+  const [toTreat, setToTreat] = useState(() => (p.firstVisit ? true : p.hx ? !!p.hxAssign : !visionComplete(p)));
   const save = () => {
     const at = Date.now();
-    const hx = { htn: f.htn, dm: f.dm, dmYears: f.dm ? String(f.dmYears).trim() : '', pmh: f.pmh.trim(), surgery: f.surgery.trim(), cc: f.cc.trim(), at };
-    patchPatient(mutatePatients, patientKey(p), () => ({ hx, hxMissing: false }));
-    if (ctx.mutate) ctx.mutate(prev => ({ ...(prev || {}), [p.id]: { htn: hx.htn, dm: hx.dm, dmYears: hx.dmYears, pmh: hx.pmh, surgery: hx.surgery, date: p.date, updatedAt: at } }));
+    const hx = { at };
+    const keep = {};
+    fields.forEach(x => {
+      const v = typeof f[x.id] === 'string' ? f[x.id].trim() : f[x.id];
+      hx[x.id] = v;
+      if (x.type === 'ynYears') hx[`${x.id}Years`] = v ? String(f[`${x.id}Years`] || '').trim() : '';
+      if (x.keep) { keep[x.id] = hx[x.id]; if (x.type === 'ynYears') keep[`${x.id}Years`] = hx[`${x.id}Years`]; }
+    });
+    patchPatient(mutatePatients, patientKey(p), () => ({ hx, hxMissing: false, ...(p.firstVisit ? {} : { hxAssign: toTreat }) }));
+    if (ctx.mutate) ctx.mutate(prev => ({ ...(prev || {}), [p.id]: { ...keep, date: p.date, updatedAt: at } }));
     onClose();
   };
-  const YesNo = ({ k, label }) => (
-    <div className="flex items-center gap-3">
-      <span className="w-16 text-sm font-medium text-slate-700">{label}</span>
-      <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
-        {[[true, '있음'], [false, '없음']].map(([v, t]) => (
-          <button key={t} type="button" aria-label={`${label} ${t}`} aria-pressed={f[k] === v} onClick={() => set(k, f[k] === v ? null : v)}
-            className={`px-4 py-1.5 rounded-md text-sm ${f[k] === v ? 'bg-white text-slate-900 font-semibold shadow' : 'text-slate-500'}`}>{t}</button>
-        ))}
-      </div>
+  const yesNo = (x) => (
+    <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
+      {[[true, '있음'], [false, '없음']].map(([v, t]) => (
+        <button key={t} type="button" aria-label={`${x.label} ${t}`} aria-pressed={f[x.id] === v} onClick={() => set(x.id, f[x.id] === v ? null : v)}
+          className={`px-4 py-1.5 rounded-md text-sm ${f[x.id] === v ? 'bg-white text-slate-900 font-semibold shadow' : 'text-slate-500'}`}>{t}</button>
+      ))}
     </div>
   );
   return (
@@ -1770,26 +1810,29 @@ function HistoryModal({ p, onClose }) {
         <h3 className="text-lg font-medium text-slate-900 mb-1">{p.name}님 History</h3>
         {!p.hx && ctx.store?.[p.id] && <p className="text-xs text-slate-500 mb-3">지난번({ctx.store[p.id].date}) 입력한 내용을 미리 채웠습니다. 바뀐 것만 고치세요.</p>}
         <div className="space-y-3 mt-3">
-          <YesNo k="htn" label="고혈압" />
-          <div className="flex items-center gap-3 flex-wrap">
-            <YesNo k="dm" label="당뇨" />
-            {f.dm && <label className="flex items-center gap-1.5 text-sm text-slate-700">유병기간 <input aria-label="당뇨 유병기간" value={f.dmYears} onChange={e => set('dmYears', e.target.value)} className="w-16 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" /> 년</label>}
-          </div>
-          <label className="block text-sm text-slate-700">기타 과거력
-            <input value={f.pmh} onChange={e => set('pmh', e.target.value)} placeholder="예: 고지혈증, 갑상선" className={INPUT} />
-          </label>
-          <div className="text-sm text-slate-700">이전 안과 수술력
-            <div className="flex flex-wrap gap-1.5 my-1.5">
-              {HX_SURGERIES.map(t => (
-                <button key={t} type="button" aria-pressed={tokens.includes(t)} onClick={() => toggleSurgery(t)}
-                  className={`text-xs px-2.5 py-1 rounded-full border ${tokens.includes(t) ? 'bg-sky-600 border-sky-600 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>{t}</button>
-              ))}
-            </div>
-            <input value={f.surgery} onChange={e => set('surgery', e.target.value)} placeholder="직접 입력 (쉼표로 구분)" aria-label="이전 안과 수술력" className={INPUT} />
-          </div>
-          <label className="block text-sm text-slate-700">주호소
-            <input value={f.cc} onChange={e => set('cc', e.target.value)} placeholder="예: 우안 흐림 2주" className={INPUT} />
-          </label>
+          {fields.map(x => (
+            x.type === 'yn' || x.type === 'ynYears' ? (
+              <div key={x.id} className="flex items-center gap-3 flex-wrap">
+                <span className="w-28 text-sm font-medium text-slate-700">{x.label}</span>
+                {yesNo(x)}
+                {x.type === 'ynYears' && f[x.id] === true && (
+                  <label className="flex items-center gap-1.5 text-sm text-slate-700">기간 <input aria-label={`${x.label} 기간`} value={f[`${x.id}Years`]} onChange={e => set(`${x.id}Years`, e.target.value)} className="w-16 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" /> 년</label>
+                )}
+              </div>
+            ) : (
+              <label key={x.id} className="block text-sm text-slate-700">{x.label}
+                {x.type === 'long'
+                  ? <textarea aria-label={x.label} rows={3} value={f[x.id]} onChange={e => set(x.id, e.target.value)} className={`${INPUT} resize-y`} />
+                  : <input aria-label={x.label} value={f[x.id]} onChange={e => set(x.id, e.target.value)} className={INPUT} />}
+              </label>
+            )
+          ))}
+          {!p.firstVisit && (
+            <label className="flex items-center gap-2 text-sm text-slate-800 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 cursor-pointer">
+              <input type="checkbox" checked={toTreat} onChange={e => setToTreat(e.target.checked)} className="w-4 h-4" />
+              시력검사 후 처치실에서 오늘 검사 정하기
+            </label>
+          )}
         </div>
         <div className="flex gap-3 mt-6">
           <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
@@ -1927,7 +1970,7 @@ function PatientRow({ p, index, color, handle, onUp, onDown, children }) {
           {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
           {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
           <LateChip p={p} />
-          {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 준비 양성 · 보류</span>}
+          {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 검사 취소</span>}
           {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
           {p.consultHold && !p.consultDone && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 flex items-center gap-1">
@@ -2085,7 +2128,7 @@ function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCancel })
 // 산동 여부·CR·점안 시각 기록. 모든 직원 화면의 환자 카드에서 같은 방식으로 사용
 // compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
-function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false }) {
+function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, note = '' }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);
@@ -2123,6 +2166,7 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
           {cr ? 'CR 함' : 'CR 안 함'}
         </button>
       )}
+      {note && showDrops && st.need && st.given === 0 && <span className="text-xs text-amber-700">{note}</span>}
       {showDrops && st.need && st.drops.map((t, i) => (
         <button
           key={i}
@@ -2665,14 +2709,14 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
   if (!isVision && !room) {
     return (
       <ScreenShell title="검사실" color="slate" onBack={onBack} lastSync={lastSync}>
-        <EmptyState text="이 검사실은 설정에서 삭제되었습니다. 화면 전환을 눌러 다시 선택해주세요." />
+        <EmptyState text="이 검사실은 설정에서 삭제되었습니다. 메인 화면을 눌러 다시 선택해주세요." />
       </ScreenShell>
     );
   }
 
   const color = isVision ? 'blue' : roomColor(settings, room.id);
   const title = isVision ? visionNames(settings).name : room.name;
-  const tests = isVision ? [VISION_TEST, ARK_TEST] : roomTests(settings, room.id);
+  const tests = isVision ? [VISION_TEST, ...roomTests(settings, 'vision')] : roomTests(settings, room.id);
   const groups = isVision ? [] : machineGroups(tests);
   const allTests = sortedTests(settings);
   const showPriority = !isVision && !!room.showPriority && groups.length >= 2;
@@ -2739,7 +2783,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
       const noHx = hxWarn(p, key);
       if (noHx) patchPatient(mutatePatients, pk, () => ({ hxMissing: true }));
       const noIop = key === VISION_KEY && !hasIop(p);
-      const toTriage = key === VISION_KEY && p.firstVisit ? ', 처치실로' : '';
+      const toTriage = key === VISION_KEY && assignAtTreat(p) ? ', 처치실로' : '';
       showToast(`${p.name} ${testLabel(key)} 완료${noIop ? ' (안압 값 없음)' : ''}${toTriage}${noHx ? ' · ⚠ History 미입력' : ''}`, () => writeDone(pk, key, false, null));
     }
   };
@@ -2921,12 +2965,12 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     측정값 입력
                   </button>
                 )}
-                {tests.filter(t => p.assigned?.[t.id] && (!isVision || t.id === 'ark')).map(t => (
+                {tests.filter(t => p.assigned?.[t.id] && t.id !== VISION_KEY).map(t => (
                   !p.done?.[t.id] && prepBlocked(p, t) ? (
                     // 처치실 준비(예: skin test)가 끝나야 할 수 있는 검사: 잠긴 칸으로 상태만 보여줌
                     <div key={t.id} title="처치실 준비가 끝나면 할 수 있어요" className={`${TEST_TILE} px-3 text-sm ${prepPositive(p, t) ? 'border-red-300 bg-red-50 text-red-700' : 'border-dashed border-slate-300 bg-slate-50 text-slate-500'}`}>
                       <span className="font-semibold">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
-                      <span className="ml-1.5 text-xs">{prepPositive(p, t) ? `${t.prepName || '준비'} 양성 · 보류` : prepOf(p, t)?.startedAt ? `${t.prepName || '준비'} 중` : `${t.prepName || '준비'} 전`}</span>
+                      <span className="ml-1.5 text-xs">{prepPositive(p, t) ? '검사 취소' : prepOf(p, t)?.startedAt ? `${t.prepName || '준비'} 중` : `${t.prepName || '준비'} 전`}</span>
                     </div>
                   ) : isVfTest(t) && !p.done?.[t.id] ? (
                     runningVf === t.id ? (
@@ -2953,7 +2997,9 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 ))}
                 {isVision && firstVisitChip(p)}
                 {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
-                <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                {/* VF처럼 산동 전에 해야 하는 검사가 남아 있으면 작게만 알려줌 (산동 여부는 직원 판단) */}
+                <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients}
+                  note={sortedTests(settings).some(t => isVfTest(t) && p.assigned?.[t.id] && !p.done?.[t.id]) ? 'VF 남음' : ''} />
                 {otherRooms.length > 0 && (
                   <span className="text-xs text-slate-500">
                     다른 검사실 남음: {otherRooms.map(r => `${r.name} (${remainingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
@@ -3100,7 +3146,7 @@ function SimpleCard({ p, tone = 'slate', badges, children }) {
         <span className="t-name text-slate-900">{p.name}</span>
         <span className="text-xs text-slate-400">{p.id}</span>
         {badges}
-        {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 준비 양성 · 보류</span>}
+        {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 검사 취소</span>}
         {p.doctor && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.doctor}</span>}
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
         {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
@@ -3624,7 +3670,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
   const triage = patients.filter(needsTriageAssign).sort(order);
   const procs = patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)).sort(order);
   const recent = [
-    ...patients.filter(p => (p.firstVisit || p.extraTriage) && p.triageDone).map(p => ({ p, kind: 'triage', at: p.triageAt || 0 })),
+    ...patients.filter(p => (assignAtTreat(p) || p.extraTriage) && p.triageDone).map(p => ({ p, kind: 'triage', at: p.triageAt || 0 })),
     ...patients
       .filter(p => (p.procedures || []).some(i => i.performer === 'resident' && i.done))
       .map(p => ({ p, kind: 'proc', at: Math.max(0, ...(p.procedures || []).filter(i => i.performer === 'resident' && i.done).map(i => i.doneAt || 0)) })),
@@ -3647,11 +3693,11 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
         else if (detail?.[t.id]) nd[t.id] = detail[t.id];
         else delete nd[t.id];
       });
-      return { assigned, done, detail: nd, triageAssigned: true, triageAssignedAt: at, triageRequired: x.firstVisit ? triageRequired : false };
+      return { assigned, done, detail: nd, triageAssigned: true, triageAssignedAt: at, triageRequired: assignAtTreat(x) ? triageRequired : false };
     });
     const pending = chosen.filter(t => !p.done?.[t.id]);
-    const withTriage = p.firstVisit && triageRequired;
-    showToast(`${p.name} ${p.firstVisit ? '검사 지정' : '추가 검사 확인'} 완료, ${pending.length ? (withTriage ? '검사 후 처치실 예진으로' : '검사 후 진료 대기로') : (withTriage ? '처치 대기에서 예진' : '진료 대기로')}`, () => patchPatient(mutatePatients, pk, x => (!activeVf(x) && !x.triageDone ? { triageAssigned: false, triageAssignedAt: null, triageRequired: p.triageRequired } : {})));
+    const withTriage = assignAtTreat(p) && triageRequired;
+    showToast(`${p.name} ${assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'} 완료, ${pending.length ? (withTriage ? '검사 후 처치실 예진으로' : '검사 후 진료 대기로') : (withTriage ? '처치 대기에서 예진' : '진료 대기로')}`, () => patchPatient(mutatePatients, pk, x => (!activeVf(x) && !x.triageDone ? { triageAssigned: false, triageAssignedAt: null, triageRequired: p.triageRequired } : {})));
   };
 
   const finishTriage = (p) => {
@@ -3667,6 +3713,17 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
     const before = p.prep?.[t.id] || null;
     patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: value } }));
     if (msg) showToast(msg, () => patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: before } })));
+  };
+  // [확인]: 검사실에서 검사할 수 있게 열어 줌. '확인하면 검사 완료'(예: Schirmer, MMP)면 검사도 완료로
+  const confirmPrep = (p, t, st) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
+    patchPatient(mutatePatients, pk, x => ({
+      prep: { ...(x.prep || {}), [t.id]: { ...st, result: 'neg', at } },
+      ...(t.prepCompletes ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
+    }));
+    showToast(`${p.name} ${t.short || t.name} ${t.prepCompletes ? '완료' : '확인, 검사실로'}`, () => patchPatient(mutatePatients, pk, () => before));
   };
   // 진료 전 처치 (예: PRP, YAG): 처치 완료 후 검사가 있으면 검사실, 없으면 진료 대기로
   const preProcList = patients.filter(p => !p.consultDone && pastVision(p) && preProcPending(p)).sort(order);
@@ -3723,7 +3780,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
       )}
       {prepList.length > 0 && (
         <div className="mb-8">
-          <SectionTitle hint="검사 전에 처치실에서 준비할 환자입니다 (예: FAG 동의서 · skin test). 시간이 지나면 결과를 눌러주세요.">검사 준비 · {prepList.length}명</SectionTitle>
+          <SectionTitle hint="처치실에서 시간을 재는 검사·준비입니다 (예: FAG 동의서 · skin test, Schirmer, MMP). 시간이 지나면 [확인] 또는 [검사 취소]를 눌러주세요.">검사 준비 · {prepList.length}명</SectionTitle>
           {prepList.map(p => (
             <SimpleCard key={patientKey(p)} p={p} tone="violet">
               {prepPendingTests(p, settings).map(t => {
@@ -3742,10 +3799,10 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
                       <span className={`text-sm px-2.5 py-1 rounded-lg font-semibold ${ready ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
                         {fmtClock(st.startedAt)} 시작 · {ready ? `${mins}분 · 결과 확인` : `${mins}분 / ${wait}분`}
                       </span>
-                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'neg', at: Date.now() }, `${p.name} ${t.short || t.name} 준비 음성, 검사실로`)}
-                        className={`text-sm px-3 py-2 rounded-lg font-medium ${ready ? 'bg-green-600 text-white' : 'border border-green-300 text-green-700'}`}>음성 · 검사 진행</button>
-                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 준비 양성, 검사 보류`)}
-                        className="text-sm px-3 py-2 rounded-lg border border-red-300 text-red-700 font-medium">양성 · 보류</button>
+                      <button type="button" onClick={() => confirmPrep(p, t, st)} title={t.prepCompletes ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
+                        className={`text-sm px-4 py-2 rounded-lg font-medium ${ready ? 'bg-green-600 text-white' : 'border border-green-300 text-green-700'}`}>확인</button>
+                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`)} title="이 검사를 오늘 하지 않음 (진료실에 표시)"
+                        className="text-sm px-3 py-2 rounded-lg border border-red-300 text-red-700 font-medium">검사 취소</button>
                       <button type="button" onClick={() => setPrep(p, t, null)} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={12} />시작 취소</button>
                     </>}
                   </div>
@@ -3779,7 +3836,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
       )}
       <div className={triage.length ? 'mb-8' : 'mb-4'}>
         <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
-          검사 지정 대기 (초진 · 2차 진료) · {triage.length}명
+          검사 지정 대기 (초진 · History · 2차 진료) · {triage.length}명
         </SectionTitle>
         {triage.map(p => {
           const doneTests = allTests.filter(t => p.done?.[t.id]);
@@ -3791,7 +3848,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
             {p.addOnCheck && doneTests.length > 0 && <div className="w-full text-xs text-slate-500">오늘 이미 한 검사: {doneTests.map(t => t.short || t.name).join(', ')}</div>}
             <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
-              {p.firstVisit ? '검사 지정' : '추가 검사 확인'}
+              {assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'}
             </button>
           </SimpleCard>
           );
@@ -3847,16 +3904,16 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
       {triageFor && (
         <TestCheckModal
           key={`triage-${patientKey(triageFor)}`}
-          title={triageFor.firstVisit ? `${triageFor.name}님 검사 지정` : `${triageFor.name}님 2차 진료 추가 검사 (${triageFor.doctor})`}
-          subtitle={triageFor.firstVisit
+          title={assignAtTreat(triageFor) ? `${triageFor.name}님 검사 지정` : `${triageFor.name}님 2차 진료 추가 검사 (${triageFor.doctor})`}
+          subtitle={assignAtTreat(triageFor)
             ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'
             : `${triageFor.primaryDoctor || '1차'} 진료를 마쳤습니다. ${triageFor.doctor} 진료 전에 할 검사를 체크하세요. 이미 한 검사는 다시 하지 않습니다. 없으면 바로 진료 대기로 이동합니다.${allTests.some(t => triageFor.done?.[t.id]) ? ` (오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')})` : ''}`}
           tests={allTests}
           settings={settings}
           initial={triageFor.assigned}
           initialDetail={triageFor.detail}
-          triageChoice={triageFor.firstVisit ? defaultTriageRequired(triageFor, doctorPrefs) : undefined}
-          confirmLabel={triageFor.firstVisit ? '검사 지정 완료' : '확인 완료'}
+          triageChoice={assignAtTreat(triageFor) ? defaultTriageRequired(triageFor, doctorPrefs) : undefined}
+          confirmLabel={assignAtTreat(triageFor) ? '검사 지정 완료' : '확인 완료'}
           onConfirm={confirmTriage}
           onCancel={() => setTriageFor(null)}
         />
@@ -4651,7 +4708,7 @@ function BoardShell({ title, onBack, wide, extra, children }) {
             <span className="text-2xl text-slate-500 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
             <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-500">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
             <TextSizeControl />
-            <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-400">화면 전환</button>
+            <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-400">메인 화면</button>
           </div>
         </div>
       </div>
@@ -4940,7 +4997,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
     ...d,
     tests: [...d.tests, { id: newId('t'), name: '새 검사', short: '새 검사', roomId, order: maxOrder(d, roomId) + 1, options: [], optionsText: '', popupOnClick: false }],
   }));
-  const deleteTest = (id) => updateDraft(d => ({ ...d, tests: d.tests.filter(t => t.id !== id) }));
+  const deleteTest = (id) => updateDraft(d => ({ ...d, tests: d.tests.filter(t => t.id !== id), ...(id === 'ark' ? { arkRemoved: true } : {}) }));
   const changeTestRoom = (id, roomId) => updateDraft(d => ({ ...d, tests: d.tests.map(t => (t.id === id ? { ...t, roomId, order: maxOrder(d, roomId) + 1 } : t)) }));
   const moveTest = (id, dir) => updateDraft(d => {
     const target = d.tests.find(x => x.id === id);
@@ -4975,6 +5032,8 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         prepName: String(t.prepName || '').trim() || (t.prepOn ? '검사 준비' : ''),
         prepWaitMin: Math.max(0, Math.round(Number(t.prepWaitMin ?? 20) || 0)),
         withExams: !!t.withExams,
+        noOrder: !!t.noOrder,
+        prepCompletes: !!t.prepCompletes,
       })),
       procedures: (draft.procedures || [])
         .map(x => ({ ...x, name: (x.name || '').trim() }))
@@ -4985,6 +5044,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
       },
       dilationWaitMin: Math.max(1, Math.round(Number(draft.dilationWaitMin) || 15)),
       lateGraceMin: Math.max(0, Math.round(Number(draft.lateGraceMin) || 0)),
+      hxFields: hxFieldsOf(draft).map(x => ({ ...x, label: String(x.label || '').trim(), short: String(x.short || '').trim() })).filter(x => x.label),
     };
     setDraft(toDraft(cleaned));
     setDirty(false);
@@ -5021,6 +5081,124 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
     [next[i], next[j]] = [next[j], next[i]];
     return next;
   });
+
+  // 검사 목록 편집 (시력방·검사실·처치실 공통)
+  const renderTestList = (roomKey, tests, c, isTreat = false) => (
+    <>
+      <div className="space-y-2">
+        {tests.length === 0 && <div className="text-sm text-slate-400">아직 검사가 없습니다</div>}
+        {tests.map((t, ti) => (
+          <div key={t.id} className="bg-slate-50 rounded-lg p-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`w-7 h-7 rounded-full ${c.solid} text-white text-sm flex items-center justify-center shrink-0`}>{ti + 1}</span>
+              <label className="flex-1 min-w-0 text-xs text-slate-500">환자용 검사 이름
+                <input value={t.name} placeholder="예: 시야검사" onChange={e => updateTest(t.id, { name: e.target.value })} className={INPUT} />
+              </label>
+              <label className="w-28 text-xs text-slate-500">직원용 이름
+                <input value={t.short} placeholder="예: VF" onChange={e => updateTest(t.id, { short: e.target.value })} className={INPUT} />
+              </label>
+            </div>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <select value={t.roomId} onChange={e => changeTestRoom(t.id, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+                <option value="vision">{visionNames(draft).name}에서 진행</option>
+                {draft.rooms.map(rr => <option key={rr.id} value={rr.id}>{rr.name}에서 진행</option>)}
+              </select>
+              <button type="button" aria-label="우선순위 올리기" onClick={() => moveTest(t.id, 'up')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronUp size={14} /></button>
+              <button type="button" aria-label="우선순위 내리기" onClick={() => moveTest(t.id, 'down')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>
+              {t.builtin === 'gat' ? (
+                <span className="ml-auto text-xs text-slate-400">GAT 값을 이 검사실에서 입력해요. 기본 항목이라 삭제할 수 없어요.</span>
+              ) : (
+                <ConfirmButton label="검사 삭제" onConfirm={() => deleteTest(t.id)} className="ml-auto" />
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 items-end">
+              <Field label="장비 / 상단 분류 (OCT 계열은 이 값과 관계없이 OCT로 집계)">
+                <input
+                  value={t.machine || ''}
+                  placeholder="비워두면 자동"
+                  onChange={e => updateTest(t.id, { machine: e.target.value })}
+                  className={INPUT}
+                />
+              </Field>
+              <Field label="세부 종류 (쉼표로 구분, 이름 변경 시 기존 순서 유지)">
+                <input
+                  value={t.optionsText ?? ''}
+                  placeholder="예: Macular, Disc, Angio"
+                  onChange={e => updateTest(t.id, { optionsText: e.target.value })}
+                  className={INPUT}
+                />
+              </Field>
+              {parseOptions(t.optionsText || '').length > 0 && <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-white p-3">
+                <div className="text-xs text-slate-600 mb-2">눈 위치 그룹 · 검사 이름과 별도로 저장됩니다. 항목을 추가하거나 순서를 바꾸면 그룹을 확인해주세요.</div>
+                <div className="flex flex-wrap gap-2">{parseOptions(t.optionsText || '').map(o => {
+                  const normalized = renameTestOptions(t, parseOptions(t.optionsText || ''));
+                  return <label key={o} className="text-xs text-slate-600">{o} <select aria-label={`${o} 눈 위치 그룹`} value={normalized.optionEyeGroups[o] || 'default'} onChange={e => updateTest(t.id, { optionEyeGroups: { ...t.optionEyeGroups, [o]: e.target.value } })} className="border border-slate-300 rounded px-2 py-1">
+                    <option value="default">공통</option><option value="md">M,D OCT</option><option value="angio">OCTA</option>
+                  </select></label>;
+                })}</div>
+              </div>}
+              <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
+                <input type="checkbox" checked={!!t.noOrder} onChange={e => updateTest(t.id, { noOrder: e.target.checked })} className="w-4 h-4 mt-0.5" />
+                <span>
+                  처방이 필요 없는 검사
+                  <span className="block text-xs text-slate-400">예: OSDI 설문. 켜면 검사실 카드에 '처방 전' 표시가 나오지 않아요</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
+                <input type="checkbox" checked={!!t.popupOnClick} onChange={e => updateTest(t.id, { popupOnClick: e.target.checked })} className="w-4 h-4 mt-0.5" />
+                <span>
+                  누를 때마다 세부 창 띄우기
+                  <span className="block text-xs text-slate-400">끄면 평소엔 바로 체크되고, 필요할 때만 오른쪽 클릭으로 창을 열어요</span>
+                </span>
+              </label>
+              <div className="flex items-start gap-2 text-sm text-slate-700 py-2 flex-wrap">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" checked={!!t.prepOn} onChange={e => updateTest(t.id, { prepOn: e.target.checked, prepWaitMin: t.prepWaitMin ?? 20 })} className="w-4 h-4 mt-0.5" />
+                  <span>
+                    처치실 준비 단계
+                    <span className="block text-xs text-slate-400">처치실에서 시작 → 정한 시간이 지나면 [확인] / [검사 취소]. 예: FAG(동의서 · skin test 20분), Schirmer(5분), MMP(10분)</span>
+                  </span>
+                </label>
+                {t.prepOn && <>
+                  <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} placeholder="예: 동의서 · skin test" onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-44" />
+                  <label className="flex items-center gap-1 text-xs text-slate-600">
+                    <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16" />분 뒤 확인
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer" title="끄면 확인 후 검사실에서 검사합니다 (예: FAG)">
+                    <input type="checkbox" checked={!!t.prepCompletes} onChange={e => updateTest(t.id, { prepCompletes: e.target.checked })} className="w-4 h-4" />확인하면 검사 완료 (예: Schirmer, MMP)
+                  </label>
+                </>}
+              </div>
+              {isTreat && (
+                <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
+                  <input type="checkbox" checked={!!t.withExams} onChange={e => updateTest(t.id, { withExams: e.target.checked })} className="w-4 h-4 mt-0.5" />
+                  <span>
+                    검사실 대기 중에도 바로 하기
+                    <span className="block text-xs text-slate-400">예: OSDI 설문. 켜면 다른 검사실 검사를 기다리는 동안에도 처치실 목록에 뜹니다. 끄면 다른 검사 뒤에 (예: Syringing)</span>
+                  </span>
+                </label>
+              )}
+              {/* 검사실 화면 위쪽 장비 버튼은 장비(분류)가 2개 이상일 때만 나오므로 그때만 보여줌 */}
+              {machineGroups(tests).length >= 2 && (
+                <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
+                  <input type="checkbox" checked={t.showWhenEmpty !== false} onChange={e => updateTest(t.id, { showWhenEmpty: e.target.checked })} className="w-4 h-4 mt-0.5" />
+                  <span>
+                    대기 0명이어도 위쪽 목록에 보이기
+                    <span className="block text-xs text-slate-400">검사실 화면 위쪽 장비 버튼. 끄면 기다리는 환자가 있을 때만 보여요 (같은 분류로 묶인 검사는 하나만 켜도 보임)</span>
+                  </span>
+                </label>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 mt-3 flex-wrap">
+        <button type="button" onClick={() => addTest(roomKey)} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 flex items-center gap-1 bg-white">
+          <Plus size={14} /> 검사 추가
+        </button>
+      </div>
+    </>
+  );
 
   const TABS = [
     { key: 'rooms', label: '검사실 · 검사' },
@@ -5059,7 +5237,8 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                 <input value={draft.vision?.patientName ?? ''} onChange={e => updateDraft(d => ({ ...d, vision: { ...visionNames(d), patientName: e.target.value } }))} className={INPUT} />
               </Field>
             </div>
-            <div className="text-xs text-slate-500">모든 환자가 가장 먼저 거치는 곳이라 순서·검사는 바꿀 수 없어요. 나안·교정 시력과 NCT를 여기서 입력합니다.</div>
+            <div className="text-xs text-slate-500 mb-3">모든 환자가 가장 먼저 거치는 곳이라 순서는 바꿀 수 없어요. 나안·교정 시력과 NCT는 기본이고, 아래에 시력방에서 함께 할 검사(예: ARK)를 추가·수정할 수 있어요.</div>
+            {renderTestList('vision', draft.tests.filter(t => t.roomId === 'vision').sort((a, b) => a.order - b.order), COLOR_MAP.blue)}
           </div>
 
           {draft.rooms.map((r, ri) => {
@@ -5096,107 +5275,9 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                   </span>
                 </label>
 
-                <div className="space-y-2">
-                  {tests.length === 0 && <div className="text-sm text-slate-400">아직 검사가 없습니다</div>}
-                  {tests.map((t, ti) => (
-                    <div key={t.id} className="bg-slate-50 rounded-lg p-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`w-7 h-7 rounded-full ${c.solid} text-white text-sm flex items-center justify-center shrink-0`}>{ti + 1}</span>
-                        <label className="flex-1 min-w-0 text-xs text-slate-500">환자용 검사 이름
-                          <input value={t.name} placeholder="예: 시야검사" onChange={e => updateTest(t.id, { name: e.target.value })} className={INPUT} />
-                        </label>
-                        <label className="w-28 text-xs text-slate-500">직원용 이름
-                          <input value={t.short} placeholder="예: VF" onChange={e => updateTest(t.id, { short: e.target.value })} className={INPUT} />
-                        </label>
-                      </div>
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <select value={t.roomId} onChange={e => changeTestRoom(t.id, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
-                          {draft.rooms.map(rr => <option key={rr.id} value={rr.id}>{rr.name}에서 진행</option>)}
-                        </select>
-                        <button type="button" aria-label="우선순위 올리기" onClick={() => moveTest(t.id, 'up')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronUp size={14} /></button>
-                        <button type="button" aria-label="우선순위 내리기" onClick={() => moveTest(t.id, 'down')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>
-                        {t.builtin === 'gat' ? (
-                          <span className="ml-auto text-xs text-slate-400">GAT 값을 이 검사실에서 입력해요. 기본 항목이라 삭제할 수 없어요.</span>
-                        ) : (
-                          <ConfirmButton label="검사 삭제" onConfirm={() => deleteTest(t.id)} className="ml-auto" />
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 items-end">
-                        <Field label="장비 / 상단 분류 (OCT 계열은 이 값과 관계없이 OCT로 집계)">
-                          <input
-                            value={t.machine || ''}
-                            placeholder="비워두면 자동"
-                            onChange={e => updateTest(t.id, { machine: e.target.value })}
-                            className={INPUT}
-                          />
-                        </Field>
-                        <Field label="세부 종류 (쉼표로 구분, 이름 변경 시 기존 순서 유지)">
-                          <input
-                            value={t.optionsText ?? ''}
-                            placeholder="예: Macular, Disc, Angio"
-                            onChange={e => updateTest(t.id, { optionsText: e.target.value })}
-                            className={INPUT}
-                          />
-                        </Field>
-                        {parseOptions(t.optionsText || '').length > 0 && <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600 mb-2">눈 위치 그룹 · 검사 이름과 별도로 저장됩니다. 항목을 추가하거나 순서를 바꾸면 그룹을 확인해주세요.</div>
-                          <div className="flex flex-wrap gap-2">{parseOptions(t.optionsText || '').map(o => {
-                            const normalized = renameTestOptions(t, parseOptions(t.optionsText || ''));
-                            return <label key={o} className="text-xs text-slate-600">{o} <select aria-label={`${o} 눈 위치 그룹`} value={normalized.optionEyeGroups[o] || 'default'} onChange={e => updateTest(t.id, { optionEyeGroups: { ...t.optionEyeGroups, [o]: e.target.value } })} className="border border-slate-300 rounded px-2 py-1">
-                              <option value="default">공통</option><option value="md">M,D OCT</option><option value="angio">OCTA</option>
-                            </select></label>;
-                          })}</div>
-                        </div>}
-                        <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
-                          <input type="checkbox" checked={!!t.popupOnClick} onChange={e => updateTest(t.id, { popupOnClick: e.target.checked })} className="w-4 h-4 mt-0.5" />
-                          <span>
-                            누를 때마다 세부 창 띄우기
-                            <span className="block text-xs text-slate-400">끄면 평소엔 바로 체크되고, 필요할 때만 오른쪽 클릭으로 창을 열어요</span>
-                          </span>
-                        </label>
-                        <div className="flex items-start gap-2 text-sm text-slate-700 py-2 flex-wrap">
-                          <label className="flex items-start gap-2 cursor-pointer">
-                            <input type="checkbox" checked={!!t.prepOn} onChange={e => updateTest(t.id, { prepOn: e.target.checked, prepName: t.prepName || '동의서 · skin test', prepWaitMin: t.prepWaitMin ?? 20 })} className="w-4 h-4 mt-0.5" />
-                            <span>
-                              처치실 준비 단계
-                              <span className="block text-xs text-slate-400">예: FAG. 처치실에서 준비(동의서 · skin test)를 하고 시간이 지나 음성이면 검사실로</span>
-                            </span>
-                          </label>
-                          {t.prepOn && <>
-                            <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-40" />
-                            <label className="flex items-center gap-1 text-xs text-slate-600">
-                              <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16" />분 뒤 결과 확인
-                            </label>
-                          </>}
-                        </div>
-                        {r.builtin === 'treat' && (
-                          <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
-                            <input type="checkbox" checked={!!t.withExams} onChange={e => updateTest(t.id, { withExams: e.target.checked })} className="w-4 h-4 mt-0.5" />
-                            <span>
-                              검사실 대기 중에도 바로 하기
-                              <span className="block text-xs text-slate-400">예: OSDI 설문. 켜면 다른 검사실 검사를 기다리는 동안에도 처치실 목록에 뜹니다. 끄면 다른 검사 뒤에 (예: Syringing)</span>
-                            </span>
-                          </label>
-                        )}
-                        {/* 검사실 화면 위쪽 장비 버튼은 장비(분류)가 2개 이상일 때만 나오므로 그때만 보여줌 */}
-                        {machineGroups(tests).length >= 2 && (
-                          <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
-                            <input type="checkbox" checked={t.showWhenEmpty !== false} onChange={e => updateTest(t.id, { showWhenEmpty: e.target.checked })} className="w-4 h-4 mt-0.5" />
-                            <span>
-                              대기 0명이어도 위쪽 목록에 보이기
-                              <span className="block text-xs text-slate-400">검사실 화면 위쪽 장비 버튼. 끄면 기다리는 환자가 있을 때만 보여요 (같은 분류로 묶인 검사는 하나만 켜도 보임)</span>
-                            </span>
-                          </label>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {renderTestList(r.id, tests, c, r.builtin === 'treat')}
 
-                <div className="flex items-center gap-2 mt-3 flex-wrap">
-                  <button type="button" onClick={() => addTest(r.id)} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 flex items-center gap-1 bg-white">
-                    <Plus size={14} /> 검사 추가
-                  </button>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <div className="ml-auto flex items-center gap-2">
                     {r.builtin !== 'treat' && tests.length > 0 && <span className="text-xs text-slate-400">검사가 남아 있으면 삭제할 수 없어요</span>}
                     {r.builtin !== 'treat' && <ConfirmButton label="검사실 삭제" disabled={tests.length > 0} onConfirm={() => deleteRoom(r.id)} />}
@@ -5257,6 +5338,10 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                   <option value="prof">교수님이 직접</option>
                   <option value="resident">전공의</option>
                 </select>
+                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="진료 전 처치로 지정되면 접수하자마자 '산동 함'이 됩니다">
+                  <input type="checkbox" checked={!!x.dilate} onChange={e => updateProc(x.id, { dilate: e.target.checked })} className="w-4 h-4" />
+                  산동 필요
+                </label>
                 <button type="button" aria-label="위로" onClick={() => moveProc(x.id, 'up')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronUp size={14} /></button>
                 <button type="button" aria-label="아래로" onClick={() => moveProc(x.id, 'down')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>
                 <ConfirmButton label="삭제" onConfirm={() => deleteProc(x.id)} />
@@ -5323,6 +5408,39 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
       {tab === 'etc' && (
         <div className="space-y-4">
           <SettingsPasswordCard />
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="font-medium text-slate-900 mb-1">History 양식</div>
+            <p className="text-sm text-slate-500 mb-3">시력방 History 창에 나오는 항목입니다. '요약 이름'은 진료실 카드 한 줄 요약에 쓰입니다 (예: 고혈압 → HTN). '다음에 미리 채움'을 켠 항목은 다음 내원 때 지난 내용이 채워져 있습니다.</p>
+            <div className="space-y-2">
+              {hxFieldsOf(draft).map((x, i, list) => {
+                const upd = (patch) => updateDraft(d => ({ ...d, hxFields: hxFieldsOf(d).map((y, j) => (j === i ? { ...y, ...patch } : y)) }));
+                const move = (dir) => updateDraft(d => {
+                  const arr = [...hxFieldsOf(d)];
+                  const j = i + dir;
+                  if (j < 0 || j >= arr.length) return d;
+                  [arr[i], arr[j]] = [arr[j], arr[i]];
+                  return { ...d, hxFields: arr };
+                });
+                return (
+                  <div key={x.id} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2 flex-wrap">
+                    <input aria-label="History 항목 이름" value={x.label} onChange={e => upd({ label: e.target.value })} placeholder="항목 이름" className="flex-1 min-w-[8rem] border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                    <input aria-label="History 요약 이름" value={x.short || ''} onChange={e => upd({ short: e.target.value })} placeholder="요약 이름" className="w-24 border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                    <select aria-label="History 항목 형식" value={x.type} onChange={e => upd({ type: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white">
+                      {HX_TYPES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+                    </select>
+                    <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer"><input type="checkbox" checked={!!x.keep} onChange={e => upd({ keep: e.target.checked })} className="w-4 h-4" />다음에 미리 채움</label>
+                    <button type="button" aria-label="위로" disabled={i === 0} onClick={() => move(-1)} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white disabled:opacity-30"><ChevronUp size={14} /></button>
+                    <button type="button" aria-label="아래로" disabled={i === list.length - 1} onClick={() => move(1)} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white disabled:opacity-30"><ChevronDown size={14} /></button>
+                    <button type="button" onClick={() => updateDraft(d => ({ ...d, hxFields: hxFieldsOf(d).filter((_, j) => j !== i) }))} className="text-xs px-2 py-1 text-slate-400 hover:text-red-600">삭제</button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <button type="button" onClick={() => updateDraft(d => ({ ...d, hxFields: [...hxFieldsOf(d), { id: newId('hx'), label: '새 항목', short: '', type: 'text', keep: true }] }))} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 flex items-center gap-1 bg-white"><Plus size={14} /> 항목 추가</button>
+              <button type="button" onClick={() => updateDraft(d => ({ ...d, hxFields: DEFAULT_HX_FIELDS }))} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-500 bg-white">처음 양식으로</button>
+            </div>
+          </div>
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="font-medium text-slate-900 mb-1">산동 대기 시간</div>
             <p className="text-sm text-slate-500 mb-3">점안 후 이 시간이 지나면 '산동 완료'로 표시돼요. CR은 4번째 점안부터 계산합니다.</p>
@@ -5395,7 +5513,7 @@ function patientQueueLabels(p, settings) {
   if (needsTriageAssign(p)) labels.push(`${treatRoomOf(settings).name} · 초진 검사 지정 대기`);
   if (pastVision(p) && preProcPending(p)) labels.push(`${treatRoomOf(settings).name} · 진료 전 처치 (${(p.preProcs || []).filter(x => !x.done).map(x => x.name).join(', ')})`);
   prepPendingTests(p, settings).filter(() => pastVision(p)).forEach(t => labels.push(`${treatRoomOf(settings).name} · ${t.short || t.name} ${t.prepName || '준비'}${prepOf(p, t)?.startedAt ? ` 중 (${fmtClock(prepOf(p, t).startedAt)} 시작)` : ' 대기'}`));
-  if (prepPositiveNames(p).length) labels.push(`${prepPositiveNames(p).join(', ')} 준비 양성 · 보류`);
+  if (prepPositiveNames(p).length) labels.push(`${prepPositiveNames(p).join(', ')} 검사 취소`);
   pendingRooms(p, settings).forEach(r => {
     const tests = pendingTests(p, settings, r.id).map(t => testLabelWithOptions(t, p.detail?.[t.id])).join(', ');
     labels.push(`${r.name} · ${tests}${activeVf(p) ? ' (VF 진행 중 · 다른 장비 호출 금지)' : ' 대기'}`);
@@ -5528,6 +5646,7 @@ export default function App() {
   const [boardNotices, mutateBoardNotices, syncBoardNotices, markBoardNotices] = useSharedStore('board-notices', loadNotices, { notices: {}, presets: NOTICE_PRESETS });
   const [hxStore, mutateHxStore, syncHxStore, markHxStore] = useSharedStore('patient-history', loadHx, {});
   const [lastSync, setLastSync] = useState(null);
+  VISION_TEST_IDS = settings.tests.filter(t => t.roomId === 'vision').map(t => t.id);
   // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
   forcedToday = todayOverride?.date && todayOverride.setOn === realTodayISO() ? todayOverride.date : null;
   const setToday = (date) => mutateTodayOverride(() => (date && date !== realTodayISO() ? { date, setOn: realTodayISO() } : null));
@@ -5668,7 +5787,7 @@ export default function App() {
   };
   return <PatientMemoContext.Provider value={mutatePatients}>
     <NoticeContext.Provider value={boardNotices || { notices: {} }}>
-      <HxContext.Provider value={{ store: hxStore || {}, mutate: mutateHxStore, fuMap, measure: history }}>
+      <HxContext.Provider value={{ store: hxStore || {}, mutate: mutateHxStore, fuMap, measure: history, fields: hxFieldsOf(settings) }}>
         <div inert={directoryOpen ? true : undefined}>{renderView()}</div>
       </HxContext.Provider>
     </NoticeContext.Provider>
