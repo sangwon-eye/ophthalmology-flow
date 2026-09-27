@@ -182,26 +182,8 @@ function archiveOldPatients() {
   console.log(`지난 명단 ${old.length}명을 보관 파일로 옮겼습니다.`);
 }
 
-// History 미리 채우기(patient-history)는 더 쓰지 않습니다. History는 그날 환자 기록에만 남습니다.
-// 사용 시작 전 테스트로 쌓인 파일은 실시간 데이터와 백업에서 모두 지웁니다.
-function removeRetiredKeys() {
-  for (const key of ['patient-history']) {
-    try {
-      const file = keyFile(key);
-      if (fs.existsSync(file)) { fs.rmSync(file, { force: true }); console.log(`더 쓰지 않는 ${key} 데이터를 지웠습니다.`); }
-      if (fs.existsSync(BACKUP_DIR)) {
-        for (const d of fs.readdirSync(BACKUP_DIR)) {
-          const f = path.join(BACKUP_DIR, d, `${key}.json`);
-          if (fs.existsSync(f)) fs.rmSync(f, { force: true });
-        }
-      }
-    } catch (e) { console.error(`[경고] ${key} 정리 실패: ${e.message}`); }
-  }
-}
-
 fs.mkdirSync(KEYS_DIR, { recursive: true });
 migrateOldStore();
-removeRetiredKeys();
 archiveOldPatients();
 setInterval(() => {
   try { archiveOldPatients(); } catch (e) { console.error(`[경고] 지난 명단 보관 실패: ${e.message}`); }

@@ -1,6 +1,4 @@
-import { chromium, SP, BASE, DATA, getKey, editKey, tester } from '../lib.mjs';
-import fs from 'node:fs';
-import path from 'node:path';
+import { chromium, SP, BASE, getKey, editKey, tester } from '../lib.mjs';
 // 이전 시력: 한 환자 칸만 저장 (오늘 + 지난 1회), 서버 칸 저장 충돌 처리
 const api = (k) => `${BASE}/api/storage-entries/${k}`;
 const post = (k, entries) => fetch(api(k), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entries }) });
@@ -29,7 +27,5 @@ await W(1500);
 h = (await getKey('measure-history')).value;
 ok(Array.isArray(h[pid]) && h[pid].length === 2 && h[pid][1].date === '2025-05-01', `오늘 + 지난 1회만 남음 (${JSON.stringify(h[pid]?.map(x => x.date))})`);
 ok(Array.isArray(h.other), '다른 환자 칸은 그대로');
-// 예전 patient-history 파일은 서버 시작 때 지워짐
-ok(!fs.existsSync(path.join(DATA, 'keys', 'patient-history.json')), 'patient-history 파일 없음');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();
