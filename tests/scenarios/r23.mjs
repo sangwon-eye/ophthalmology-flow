@@ -1,0 +1,26 @@
+import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const { errors, ok, W, pick, back, cardOf } = tester(page);
+await page.goto(`${BASE}/`); await W(1000);
+await pick('31번방');
+let c = cardOf('조현우');
+await c.getByRole('button', { name: '검사 변경' }).click(); await W(200);
+ok(await c.getByRole('button', { name: '산동 안 함', exact: true }).count() === 1, '꺼진 상태: [산동 안 함]');
+await c.getByRole('button', { name: '산동 안 함', exact: true }).click(); await W();
+ok(await c.getByRole('button', { name: '산동', exact: true }).count() >= 1, '켜면 [산동]');
+await c.getByRole('button', { name: '접기' }).click(); await W(200);
+ok(await c.getByText('점안 필요').count() === 0, '"점안 필요" 문구 없음');
+ok(await c.getByRole('button', { name: '산동', exact: true }).count() === 1 && await c.getByRole('button', { name: /점안/ }).count() === 0, '카드에는 [산동] 하나 (점안 버튼 없음)');
+await c.screenshot({ path: `${SP}/r23-before-drop.png` });
+await c.getByRole('button', { name: '산동', exact: true }).click(); await W();
+ok(await c.getByRole('button', { name: /^산동 \d\d:\d\d$/ }).count() === 1, '누르면 "산동 시각"');
+ok(await c.getByText(/분 남음/).count() === 0, '남은 시간 표시 없음');
+await c.screenshot({ path: `${SP}/r23-after-drop.png` });
+ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
+// 다시 누르면 기록 취소, 산동 예정은 그대로
+const c2 = cardOf('조현우');
+await c2.getByRole('button', { name: /^산동 \d/ }).click(); await W();
+ok(await c2.getByRole('button', { name: '산동', exact: true }).count() === 1, '다시 누르면 점안 기록만 취소');
+await browser.close();
+

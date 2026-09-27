@@ -1,0 +1,10 @@
+import { execSync } from 'child_process';
+import { chromium, SP, DATA, BASE, FIXTURES } from '../lib.mjs';
+const api = `${BASE}/api/storage/today-override`;
+const cur = await fetch(api); const version = cur.status === 200 ? (await cur.json()).version : undefined;
+const y = new Date(Date.now() - 86400000).toLocaleDateString('sv-SE'), t = new Date(Date.now() + 86400000).toLocaleDateString('sv-SE');
+await fetch(api, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: JSON.stringify({ date: t, setOn: y }), version }) });
+const b = await chromium.launch(); const p = await b.newPage();
+await p.goto(`${BASE}/`); await p.waitForTimeout(1500);
+console.log((await p.getByLabel('오늘 날짜').inputValue()) === new Date().toLocaleDateString('sv-SE') && await p.getByText('직접 정함').count() === 0 ? 'OK   어제 정한 날짜는 오늘 적용 안 됨' : 'FAIL 만료');
+await b.close();

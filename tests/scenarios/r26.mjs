@@ -1,0 +1,17 @@
+import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const { errors, ok, W, pick, back, cardOf } = tester(page);
+await page.goto(`${BASE}/`); await W(1000);
+await pick('관리자');
+await page.getByRole('button', { name: '명단 관리', exact: true }).click(); await W();
+ok(await page.getByRole('button', { name: 'History 필요', exact: true }).count() === 0, '관리자 명단 관리: History 필요 버튼 없음');
+await back();
+await pick('시력');
+ok(await cardOf('최민지').getByRole('button', { name: /History/ }).count() === 0, '재진: History 버튼 없음');
+await cardOf('최민지').getByRole('button', { name: '재진', exact: true }).click(); await W();
+ok(await cardOf('최민지').getByRole('button', { name: 'History 필요', exact: true }).count() === 1, '초진으로 바꾸면 [History 필요]');
+await cardOf('최민지').getByRole('button', { name: '초진', exact: true }).click(); await W();
+ok(await cardOf('최민지').getByRole('button', { name: /History/ }).count() === 0, '다시 재진으로 바꾸면 버튼 없음');
+ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
+await browser.close();

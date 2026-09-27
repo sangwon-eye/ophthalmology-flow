@@ -32,6 +32,7 @@ async function request(url, options) {
 
 // 마지막으로 받은 값. 서버 값이 그대로면(304) 다시 내려받지 않고 이것을 씁니다.
 const lastSeen = new Map();
+const lastSubset = new Map();
 
 window.storage = {
   // 없는 값이면 null, 서버에 연결되지 않으면 오류를 던집니다 (빈 데이터로 덮어쓰지 않도록).
@@ -43,6 +44,29 @@ window.storage = {
     if (!res.ok) throw new Error(`불러오기 실패 (${res.status})`);
     const item = await res.json();
     lastSeen.set(key, item);
+    return item;
+  },
+  // 환자별 기록 중 ids 에 해당하는 것만 받습니다. 같은 환자 목록이고 서버 값이 그대로면(304) 다시 받지 않습니다.
+  async getSubset(key, ids) {
+    const idsKey = ids.join(',');
+    const known = lastSubset.get(key);
+    const same = known && known.idsKey === idsKey;
+    const res = await request(`/api/storage-subset/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, have: same ? known.item.version : null }),
+    });
+    if (res.status === 304 && same) return known.item;
+    if (res.status === 404) {
+      // 서버를 다시 켜기 전(예전 server.js)이면 이 주소가 없음 → 예전처럼 전체를 받도록 알림
+      const body = await res.json().catch(() => ({}));
+      if (body?.error === 'not found') { const e = new Error('부분 조회 미지원 서버'); e.unsupported = true; throw e; }
+      lastSubset.delete(key);
+      return null;
+    }
+    if (!res.ok) throw new Error(`불러오기 실패 (${res.status})`);
+    const item = await res.json();
+    lastSubset.set(key, { idsKey, item });
     return item;
   },
   // version 을 주면, 그 사이에 다른 컴퓨터가 먼저 저장했을 때 conflict 오류가 납니다.

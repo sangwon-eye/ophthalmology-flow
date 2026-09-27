@@ -978,6 +978,19 @@ const loadDaily = (meta) => loadKey('daily-patients', [], meta);
 const loadFu = (meta) => loadKey('fu-designations', {}, meta);
 const loadDoctors = (meta) => loadKey('doctors', [], meta);
 const loadHistory = (meta) => loadKey('measure-history', {}, meta);
+// 명단(오늘 + 앞으로 올린 날짜)에 있는 환자 것만 받기. 저장할 때는 전체를 받아 합쳐서 저장합니다(loadHistory).
+async function loadKeySubset(key, ids) {
+  if (!window.storage.getSubset) return loadKey(key, {});
+  let r;
+  try {
+    r = await window.storage.getSubset(key, ids);
+  } catch (e) {
+    if (e?.unsupported) return loadKey(key, {});
+    throw e;
+  }
+  if (!r) return {};
+  try { return JSON.parse(r.value) || {}; } catch { return {}; }
+}
 const loadDoctorPrefs = (meta) => loadKey('doctor-prefs', {}, meta);
 const loadTodayOverride = (meta) => loadKey('today-override', null, meta);
 
@@ -5497,7 +5510,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
             ['showWhenEmpty', '0명도 표시', t.showWhenEmpty !== false, machineGroups(tests).length >= 2],
           ].filter(o => o[3]);
           return (
-            <div key={t.id} className={`rounded-lg ${open ? 'bg-white border border-slate-300' : 'bg-slate-50'}`}>
+            <div key={t.id} data-test-row={t.short || t.name} className={`rounded-lg ${open ? 'bg-white border border-slate-300' : 'bg-slate-50'}`}>
               {/* 한 줄 요약: 이름 · 옵션 칩(바로 켜고 끔) · 순서 · 자세히 */}
               <div className="flex items-center gap-2 flex-wrap px-3 py-2">
                 <span className={`w-6 h-6 rounded-full ${c.solid} text-white text-xs flex items-center justify-center shrink-0`}>{ti + 1}</span>
@@ -6034,7 +6047,10 @@ export default function App() {
     const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride(), markBoardNotices(), markHxStore()];
     let p, f, d, s, h, dp, to, bn, hx;
     try {
-      [p, f, d, s, h, dp, to, bn, hx] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadHistory(), loadDoctorPrefs(), loadTodayOverride(), loadNotices(), loadHx()]);
+      [p, f, d, s, dp, to, bn] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadDoctorPrefs(), loadTodayOverride(), loadNotices()]);
+      // 이전 시력·History는 명단에 있는 환자(다음 주 차트리뷰 환자 포함) 것만
+      const ids = [...new Set((Array.isArray(p) ? p : []).map(x => x.id).filter(Boolean))].sort();
+      [h, hx] = await Promise.all([loadKeySubset('measure-history', ids), loadKeySubset('patient-history', ids)]);
     } catch {
       return; // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다.
     }

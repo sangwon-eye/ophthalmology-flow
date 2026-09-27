@@ -27,7 +27,8 @@ export function loadConfig() {
 }
 
 export function configuredPort() {
-  return Number(loadConfig().PORT) || Number(process.env.PORT) || 3000;
+  // OPH_PORT: 자동 테스트용 (평소에는 서버설정.txt 의 PORT, 없으면 3000)
+  return Number(process.env.OPH_PORT) || Number(loadConfig().PORT) || Number(process.env.PORT) || 3000;
 }
 
 // 다른 컴퓨터가 접속할 주소. WSL·Hyper-V·가상머신이 만든 가상 네트워크 주소는 뒤로 뺍니다.

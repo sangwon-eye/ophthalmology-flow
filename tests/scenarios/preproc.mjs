@@ -1,0 +1,56 @@
+import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
+await editKey('settings', s => ({ ...s, procedures: [...s.procedures, { id: 'prp', name: 'PRP', performer: 'prof' }, { id: 'yag', name: 'YAG', performer: 'resident' }] }));
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const { errors, ok, W, pick, back, cardOf } = tester(page);
+await page.goto(`${BASE}/`); await W();
+// 관리자: 원성옥(접수 전)에 PRP, 신종희에 YAG + OCT
+await pick('관리자');
+await page.getByRole('button', { name: '명단 관리', exact: true }).click(); await W();
+await page.getByLabel('원성옥 진료 전 처치 추가').selectOption('prp'); await W();
+await page.getByLabel('신종희 진료 전 처치 추가').selectOption('yag'); await W();
+let list = (await getKey('daily-patients')).value;
+ok(list.find(p => p.name === '원성옥').preProcs?.[0]?.name === 'PRP' && list.find(p => p.name === '원성옥').skipVision, '명단 관리: PRP 지정 + 시력 건너뛰기');
+if (await cardOf('신종희').getByRole('button', { name: '접기' }).count() === 0) { await cardOf('신종희').getByRole('button', { name: '검사 변경' }).click(); await W(200); }
+await cardOf('신종희').getByRole('button', { name: /OCT/ }).last().click(); await W(400);
+await page.screenshot({ path: `${SP}/r17-admin.png`, fullPage: true });
+await back();
+// QR 접수
+await pick('QR 접수');
+await page.keyboard.type('6100000'); await page.keyboard.press('Enter'); await W(900);
+ok(await page.getByText('시력검사 없이 바로 처치실로 오세요').count() === 1, 'QR: 진료 전 처치 환자에게 처치실 안내');
+await page.getByRole('button', { name: '관리' }).click(); await W();
+await pick('시력');
+await cardOf('신종희').getByRole('button', { name: '접수', exact: true }).click(); await W();
+ok(await page.getByText('원성옥', { exact: true }).count() === 0 && await page.getByText('신종희', { exact: true }).count() === 0, '시력실 대기에 없음 (건너뜀)');
+await back();
+await pick('31번방');
+ok(await page.getByText('신종희', { exact: true }).count() === 0, 'YAG 끝나기 전엔 31번방에 없음');
+await back();
+await pick('처치실');
+ok(await page.getByText(/^진료 전 처치 · 2명/).count() === 1, '처치실 진료 전 처치 2명');
+await page.screenshot({ path: `${SP}/r17-treat.png`, fullPage: true });
+await cardOf('신종희').getByRole('button', { name: '처치 완료', exact: true }).first().click(); await W();
+await cardOf('원성옥').getByRole('button', { name: '처치 완료', exact: true }).first().click(); await W();
+await back();
+await pick('31번방');
+ok(await page.getByText('신종희', { exact: true }).count() === 1, 'YAG 완료 → OCT 하러 31번방');
+await back();
+await pick('진료실');
+await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W();
+ok(await page.getByText('원성옥', { exact: true }).count() === 1, 'PRP 완료(검사 없음) → 진료 대기');
+// 설명 완료에서 다음 내원 진료 전 처치 지정
+const song = cardOf('송하린');
+await song.getByRole('button', { name: '설명 완료', exact: true }).click(); await W(300);
+const m = page.locator('.fixed.inset-0').last();
+await m.getByRole('button', { name: 'PRP' }).click();
+await m.screenshot({ path: `${SP}/r17-explain.png` });
+await m.getByRole('button', { name: '설명 완료', exact: true }).click(); await W(800);
+const fu = (await getKey('fu-designations')).value;
+ok(JSON.stringify(fu[song ? '6100555' : '']).includes('"preProcs":["prp"]'), '설명 완료: 다음 내원 PRP 저장');
+await back();
+await pick('관리자');
+await page.getByRole('button', { name: 'FU 지정 관리', exact: true }).click(); await W();
+ok(await page.getByText(/진료 전 처치: PRP/).count() >= 1, 'FU 지정 관리에 진료 전 처치 표시');
+ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
+await browser.close();

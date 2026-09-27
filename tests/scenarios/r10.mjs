@@ -1,0 +1,63 @@
+import { execSync } from 'child_process';
+import fs from 'fs';
+import { chromium, SP, DATA, BASE, FIXTURES } from '../lib.mjs';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const errors = []; page.on('pageerror', e => errors.push(e.message));
+const ok = (c, m) => { console.log(`${c ? 'OK  ' : 'FAIL'} ${m}`); if (!c) process.exitCode = 1; };
+const wait = (ms = 500) => page.waitForTimeout(ms);
+const pick = async (n) => { await page.getByRole('button', { name: new RegExp(`^${n}`) }).first().click(); await wait(); };
+const back = async () => { await page.getByRole('button', { name: '메인 화면' }).click(); await wait(300); };
+const cardOf = (name) => page.locator('div.bg-white').filter({ has: page.getByText(name, { exact: true }) }).last();
+await page.goto(`${BASE}/`); await wait();
+ok(await page.getByRole('button', { name: /^처치실/ }).count() === 1, '메인: 처치실 칸 하나 (처치실 검사 칸 따로 없음)');
+// 설정: 이름 바꾸고 처치실에 Syringing 추가
+await pick('설정');
+await page.getByLabel('시력방 이름 (직원 화면)').fill('1번 시력방');
+await page.locator('label:has-text("환자에게 보이는 이름") input').first().fill('1번 시력검사실');
+const treatCard = page.locator('div.border-2').filter({ hasText: '처치실 (고정)' });
+ok(await treatCard.count() === 1 && await treatCard.getByText('검사실 삭제').count() === 0, '설정: 처치실 고정 칸 (삭제 없음)');
+await treatCard.locator('label:has-text("검사실 이름 (직원 화면)") input').fill('32번 처치실');
+await treatCard.locator('label:has-text("환자에게 보이는 이름") input').fill('32번 처치실');
+await treatCard.getByRole('button', { name: '검사 추가' }).click(); await wait(200);
+await treatCard.locator('input[placeholder="예: 시야검사"]').fill('Syringing');
+await treatCard.locator('input[placeholder="예: VF"]').fill('Syringing');
+await page.screenshot({ path: `${SP}/r10-settings.png`, fullPage: true });
+await page.getByRole('button', { name: '저장', exact: true }).click(); await wait(800);
+await back();
+ok(await page.getByRole('button', { name: /^1번 시력방/ }).count() === 1 && await page.getByRole('button', { name: /^32번 처치실/ }).count() === 1, '메인 칸 이름이 바뀜');
+// 환자 배정: 조현우(OCT+WFP 남음) + Syringing, 서준호(검사 끝, 진료 대기) + Syringing
+const api = `${BASE}/api/storage/`;
+const cur = await (await fetch(api + 'daily-patients')).json();
+const list = JSON.parse(cur.value);
+const st = await (await fetch(api + 'settings')).json();
+const sid = JSON.parse(st.value).tests.find(t => t.short === 'Syringing').id;
+for (const p of list) if (['조현우', '서준호'].includes(p.name)) { p.assigned = { ...p.assigned, [sid]: true }; p.done = { ...p.done, [sid]: false }; }
+const put = await fetch(api + 'daily-patients', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: JSON.stringify(list), version: cur.version }) });
+ok(put.ok, '테스트 배정 저장');
+await page.reload(); await wait(1200);
+await pick('32번 처치실');
+await page.screenshot({ path: `${SP}/r10-treat.png`, fullPage: true });
+ok(await page.getByText(/^진료 전 검사 · 1명/).count() === 1, '처치실 맨 위 진료 전 검사 1명');
+ok(await cardOf('서준호').getByRole('button', { name: /Syringing/ }).count() >= 1, '검사 끝난 서준호는 처치실에서 Syringing');
+ok(await page.getByText('조현우', { exact: true }).count() === 0, '조현우는 31번방 검사가 남아 아직 처치실에 없음');
+await back();
+await pick('31번방');
+ok(await cardOf('조현우').getByText(/다른 검사실 남음: 32번 처치실 \(Syringing\)/).count() === 1, '31번방 카드: 다른 검사실 남음 표시');
+await back();
+// 서준호 Syringing 완료 → 진료 대기
+await pick('32번 처치실');
+await cardOf('서준호').getByRole('button', { name: /^Syringing/ }).first().click(); await wait(700);
+ok(await page.getByText(/^진료 전 검사 · 0명/).count() === 1, 'Syringing 완료 → 처치실 목록에서 빠짐');
+await back();
+await pick('진료실');
+await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await wait();
+ok(await page.getByText('서준호', { exact: true }).count() === 1, '서준호 진료 대기로');
+await back();
+// 환자용 화면 이름
+await pick('환자용 화면');
+await page.getByRole('button', { name: /^1번 시력검사실 \+ 검사실/ }).click(); await wait(600);
+ok(await page.getByText('1번 시력검사실', { exact: true }).count() >= 1, '환자용 화면: 시력방 이름');
+await page.screenshot({ path: `${SP}/r10-board.png` });
+ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
+await browser.close();

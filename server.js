@@ -11,11 +11,13 @@ import { ROOT, loadConfig, configuredPort, lanAddresses } from './scripts/common
 const CONFIG = loadConfig();
 const PORT = configuredPort();
 const DIST_DIR = path.join(ROOT, 'dist');
-const DATA_DIR = path.join(ROOT, 'data');
+// OPH_DATA_DIR: 자동 테스트가 실제 데이터와 따로 쓰는 폴더 (평소에는 쓰지 않음)
+const DATA_DIR = process.env.OPH_DATA_DIR || path.join(ROOT, 'data');
 const KEYS_DIR = path.join(DATA_DIR, 'keys');
 const OLD_STORE_FILE = path.join(DATA_DIR, 'store.json');
 // 백업 폴더. 공유폴더에 백업하려면 서버설정.txt 에서 BACKUP_DIR 을 지정하세요.
-const BACKUP_DIR = CONFIG.BACKUP_DIR || process.env.BACKUP_DIR || path.join(DATA_DIR, 'backups');
+// 테스트(OPH_DATA_DIR)일 때는 실제 백업 폴더를 절대 건드리지 않도록 테스트 폴더 안에만
+const BACKUP_DIR = process.env.OPH_DATA_DIR ? path.join(DATA_DIR, 'backups') : (CONFIG.BACKUP_DIR || process.env.BACKUP_DIR || path.join(DATA_DIR, 'backups'));
 // 종료 코드: 0 = 정상 종료(서버끄기), 2 = 데이터 파일 손상, 3 = 이미 켜져 있음. 그 외에는 자동으로 다시 켭니다.
 const EXIT_DATA_ERROR = 2;
 const EXIT_PORT_IN_USE = 3;
@@ -58,6 +60,7 @@ const cache = new Map();
 
 function keyFile(key) { return path.join(KEYS_DIR, `${key}.json`); }
 
+const parsed = new Map(); // 부분 조회용: 항목별로 마지막으로 풀어 둔 값
 function readItem(key) {
   if (cache.has(key)) return cache.get(key);
   const file = keyFile(key);
@@ -260,6 +263,33 @@ async function handleApi(req, res, pathname) {
     console.log('서버끄기 요청으로 서버를 끕니다.');
     setTimeout(() => process.exit(0), 200);
     return;
+  }
+
+  // 환자별 기록(이전 시력·History)은 명단에 있는 환자 것만 보냅니다.
+  // 모든 컴퓨터가 4초마다 확인하므로, 몇 년 치 기록 전체를 매번 보내지 않도록 합니다. 저장된 기록은 그대로 남습니다.
+  const sub = pathname.match(/^\/api\/storage-subset\/([^/]+)$/);
+  if (sub && req.method === 'POST') {
+    const key = decodeURIComponent(sub[1]);
+    if (!KEY_RE.test(key)) return sendJson(res, 400, { error: 'bad key' });
+    let body;
+    try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
+    const item = readItem(key);
+    if (!item) return sendJson(res, 404, { version: 0 });
+    if (body?.have !== undefined && body.have !== null && Number(body.have) === item.version) {
+      res.writeHead(304, { 'Cache-Control': 'no-store' });
+      res.end();
+      return;
+    }
+    let all = parsed.get(key);
+    if (!all || all.version !== item.version) {
+      let obj = {};
+      try { obj = JSON.parse(item.value) || {}; } catch { obj = {}; }
+      all = { version: item.version, obj };
+      parsed.set(key, all);
+    }
+    const out = {};
+    (Array.isArray(body?.ids) ? body.ids : []).forEach(id => { if (Object.prototype.hasOwnProperty.call(all.obj, id)) out[id] = all.obj[id]; });
+    return sendJson(res, 200, { key, value: JSON.stringify(out), version: item.version });
   }
 
   const m = pathname.match(/^\/api\/storage\/([^/]+)$/);
