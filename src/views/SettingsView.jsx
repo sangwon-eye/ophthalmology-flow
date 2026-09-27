@@ -100,6 +100,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
       },
       dilationWaitMin: Math.max(1, Math.round(Number(draft.dilationWaitMin) || 15)),
       lateGraceMin: Math.max(0, Math.round(Number(draft.lateGraceMin) || 0)),
+      treatStaleMin: Math.max(0, Math.round(Number(draft.treatStaleMin ?? 20) || 0)),
       hxFields: hxFieldsOf(draft).map(x => ({ ...x, label: String(x.label || '').trim(), short: String(x.short || '').trim() })).filter(x => x.label),
     };
     setDraft(toDraft(cleaned));
@@ -510,6 +511,14 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             <p className="text-sm text-slate-500 mb-3">점안 후 이 시간이 지나면 '산동 완료'로 표시돼요. CR은 4번째 점안부터 계산합니다.</p>
             <div className="flex items-center gap-2">
               <input type="number" min="1" value={draft.dilationWaitMin} onChange={e => updateDraft(d => ({ ...d, dilationWaitMin: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              <span className="text-sm text-slate-600">분</span>
+            </div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="font-medium text-slate-900 mb-1">처치실 오래 기다린 환자 강조</div>
+            <p className="text-sm text-slate-500 mb-3">처치실 화면에서 마지막 진행(접수·검사 완료·산동·처치 등) 뒤 이 시간이 지나도록 그대로인 환자는 카드가 주황색으로 강조되고, 위쪽 요약 줄에도 표시됩니다. 0분이면 강조하지 않습니다.</p>
+            <div className="flex items-center gap-2">
+              <input type="number" min="0" aria-label="처치실 강조 시간" value={draft.treatStaleMin ?? 20} onChange={e => updateDraft(d => ({ ...d, treatStaleMin: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
               <span className="text-sm text-slate-600">분</span>
             </div>
           </div>

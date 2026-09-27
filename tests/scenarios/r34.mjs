@@ -25,6 +25,6 @@ const mmp = page.locator('div.bg-white').filter({ has: page.getByText('장민호
 await mmp.getByRole('button', { name: 'MMP', exact: true }).click(); await W();
 await page.getByRole('button', { name: '지금 확인' }).click(); await W();
 { const l = (await getKey('daily-patients')).value; ok(!!l.find(p => p.name === '장민호').prep.mmp.checked, 'MMP: 시간 전 [지금 확인] → 확인 기록'); }
-ok(await page.getByText(/^확인할 검사/).count() === 0 && await page.getByText(/^검사 준비/).count() === 0, '둘 다 목록에서 빠짐');
+ok(await page.locator('#treat-check').count() === 0 && await page.locator('#treat-prep').count() === 0, '둘 다 목록에서 빠짐');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

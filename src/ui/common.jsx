@@ -64,7 +64,7 @@ export function TextSizeControl({ className = '' }) {
 
 // 직원 화면 폭: 넓은 모니터에서 카드가 한 줄에 들어가도록 넓게 (좁은 화면·태블릿은 화면 폭에 맞춤)
 export const SHELL_WIDTH = 'max-w-6xl';
-export function ScreenShell({ title, color, onBack, lastSync, count, extra, children }) {
+export function ScreenShell({ title, color, onBack, lastSync, count, extra, sub, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
     <div className="min-h-screen bg-slate-50">
@@ -85,6 +85,7 @@ export function ScreenShell({ title, color, onBack, lastSync, count, extra, chil
             </button>
           </div>
         </div>
+        {sub && <div className={`${SHELL_WIDTH} mx-auto px-5 pb-2`}>{sub}</div>}
       </div>
       <div className={`${SHELL_WIDTH} mx-auto px-5 py-5`}>{children}</div>
       {lastSync && <div className="t-hint text-center text-xs text-slate-400 pb-6 print:hidden">마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')}</div>}
@@ -954,13 +955,18 @@ export function DoctorChip({ p }) {
   return <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{p.doctor}</span>;
 }
 // 넓은 화면에서는 이름 줄 오른쪽 끝에 (좁으면 다음 줄로)
+// 처치실: 마지막 진행 뒤 오래 그대로인 환자 (설정 > 기타의 강조 시간)
+export function StaleChip({ min }) {
+  if (!min) return null;
+  return <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500 text-white font-semibold" title="마지막 진행 뒤 이만큼 지났어요">{min}분째 그대로</span>;
+}
 export function VisitTimes({ p }) {
   return <span className="ml-auto pl-2 text-xs text-slate-400 whitespace-nowrap">예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</span>;
 }
-export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirst, children }) {
+export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirst, stale = 0, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
-    <div className={`flex items-start gap-3 bg-white border ${c.border} rounded-xl px-4 py-3`}>
+    <div className={`flex items-start gap-3 bg-white border ${stale ? 'border-orange-400 ring-2 ring-orange-200' : c.border} rounded-xl px-4 py-3`}>
       {handle && <div className="pt-2 shrink-0">{handle}</div>}
       <div className={`t-num w-10 h-10 rounded-full ${c.solid} text-white flex items-center justify-center font-semibold shrink-0`}>{index + 1}</div>
       <div className="flex-1 min-w-0">
@@ -973,6 +979,7 @@ export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirs
             : p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
           {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
           <LateChip p={p} />
+          <StaleChip min={stale} />
           {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 검사 취소</span>}
           {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
           {p.consultHold && !p.consultDone && (

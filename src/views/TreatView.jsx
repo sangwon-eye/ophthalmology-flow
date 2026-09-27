@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning } from '../core/flow.jsx';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, pendingTests, staleMinutes, staleMinOf } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -185,10 +185,50 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     }
   };
 
+  // 위쪽 요약 줄: 묶음마다 인원 · 시간 된 환자(초록) · 오래 그대로인 환자(주황). 누르면 그 묶음으로 이동
+  const now = Date.now();
+  const treatId = treatRoomOf(settings).id;
+  const treatTests = roomTests(settings, treatId);
+  const examList = patients.filter(p => !p.consultDone && roomPending(p, settings, treatId));
+  const timedRunning = (p) => treatTests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t));
+  const prepStarted = (p) => prepPendingTests(p, settings).some(t => prepOf(p, t)?.startedAt);
+  const staleOf = (p) => staleMinutes(p, settings, now);
+  const summary = [
+    { id: 'treat-check', label: '확인할 검사', list: checkList, due: checkList.filter(p => prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length },
+    { id: 'treat-preproc', label: '진료 전 처치', list: preProcList, stale: preProcList.filter(staleOf).length },
+    { id: 'treat-prep', label: '검사 준비', list: prepList,
+      due: prepList.filter(p => prepPendingTests(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length,
+      stale: prepList.filter(p => !prepStarted(p) && staleOf(p)).length },
+    ...(treatTests.length ? [{ id: 'treat-exams', label: '진료 전 검사', list: examList,
+      due: examList.filter(p => treatTests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t) && prepDue(prepOf(p, t), t, now))).length,
+      stale: examList.filter(p => !activeVf(p) && !timedRunning(p) && staleOf(p)).length,
+      tests: treatTests.map(t => ({ t, n: examList.filter(p => pendingTests(p, settings, treatId).some(x => x.id === t.id)).length })) }] : []),
+    { id: 'treat-request', label: '진료실 요청', list: requests, stale: requests.filter(staleOf).length },
+    { id: 'treat-triage', label: '검사 지정', list: triage, stale: triage.filter(staleOf).length },
+    { id: 'treat-procs', label: '처치 대기', list: procs, stale: procs.filter(staleOf).length },
+  ];
+  const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const summaryBar = (
+    <div className="flex flex-wrap gap-1.5" aria-label="처치실 할 일 요약">
+      {summary.map(x => {
+        const n = x.list.length;
+        return (
+          <button key={x.id} type="button" disabled={!n} onClick={() => jump(x.id)} data-summary={x.id}
+            className={`text-sm px-3 py-1 rounded-full border bg-white flex items-center gap-1.5 ${n ? (x.due ? 'border-green-500' : x.stale ? 'border-orange-400' : 'border-indigo-200') + ' text-slate-800 hover:bg-indigo-50' : 'border-slate-200 text-slate-400 opacity-50 cursor-default'}`}>
+            <span>{x.label} <b className="font-semibold">{n}</b></span>
+            {x.tests && n > 0 && <span className="text-xs text-slate-500">({x.tests.filter(y => y.n).map(y => `${y.t.short || y.t.name} ${y.n}`).join(' · ')})</span>}
+            {x.due > 0 && <span className="text-xs px-1.5 rounded-full bg-green-600 text-white font-semibold">● {x.due} 시간 됨</span>}
+            {x.stale > 0 && <span className="text-xs px-1.5 rounded-full bg-orange-500 text-white font-semibold">{staleMinOf(settings)}분↑ {x.stale}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} count={requests.length + triage.length + procs.length + preProcList.length + prepList.length + checkList.length + patients.filter(p => !p.consultDone && roomPending(p, settings, treatRoomOf(settings).id)).length}>
+    <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} sub={summaryBar} count={requests.length + triage.length + procs.length + preProcList.length + prepList.length + checkList.length + examList.length}>
       {checkList.length > 0 && (
-        <div className="mb-8">
+        <div id="treat-check" className="mb-8 scroll-mt-36">
           <SectionTitle hint="시작하면 바로 다음으로 넘어가는 검사(예: MMP)입니다. 정한 시간이 되면 초록으로 바뀌니 결과를 보고 [확인]을 눌러주세요.">확인할 검사 · {checkList.length}명</SectionTitle>
           {checkList.map(p => (
             <SimpleCard key={patientKey(p)} p={p} tone="violet">
@@ -213,10 +253,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
         </div>
       )}
       {preProcList.length > 0 && (
-        <div className="mb-8">
+        <div id="treat-preproc" className="mb-8 scroll-mt-36">
           <SectionTitle hint="시력검사 없이 처치부터 하러 온 환자입니다 (예: PRP, YAG). 처치가 끝나면 검사가 있으면 검사실, 없으면 진료 대기로 갑니다.">진료 전 처치 · {preProcList.length}명</SectionTitle>
           {preProcList.map(p => (
-            <SimpleCard key={patientKey(p)} p={p} tone="rose">
+            <SimpleCard key={patientKey(p)} p={p} tone="rose" stale={staleOf(p)}>
               <div className="w-full flex items-center justify-between gap-3 flex-wrap">
                 <div className="text-sm text-slate-800">
                   {(p.preProcs || []).filter(x => !x.done).map(x => <span key={x.uid} className="font-semibold mr-3">{x.name}</span>)}
@@ -230,10 +270,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
         </div>
       )}
       {prepList.length > 0 && (
-        <div className="mb-8">
+        <div id="treat-prep" className="mb-8 scroll-mt-36">
           <SectionTitle hint="처치실에서 시간을 재는 검사·준비입니다 (예: FAG skin test, Schirmer, MMP). 버튼을 누르면 시작 시각이 적히고, 정한 시간이 되면 초록 [확인]으로 바뀝니다.">검사 준비 · {prepList.length}명</SectionTitle>
           {prepList.map(p => (
-            <SimpleCard key={patientKey(p)} p={p} tone="violet">
+            <SimpleCard key={patientKey(p)} p={p} tone="violet" stale={prepStarted(p) ? 0 : staleOf(p)}>
               {prepPendingTests(p, settings).map(t => {
                 const st = prepOf(p, t);
                 const label = prepLabel(t);
@@ -268,17 +308,17 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       )}
       {/* 진료 전 검사 (설정에서 처치실에 둔 검사, 예: Syringing) — 검사실 화면과 같은 카드 */}
       {roomTests(settings, treatRoomOf(settings).id).length > 0 && (
-        <StationView embedded mode={treatRoomOf(settings).id} settings={settings} doctorPrefs={doctorPrefs} patients={patients}
-          history={history} mutatePatients={mutatePatients} mutateHistory={mutateHistory} onBack={onBack} lastSync={lastSync} />
+        <div id="treat-exams" className="scroll-mt-36"><StationView embedded mode={treatRoomOf(settings).id} settings={settings} doctorPrefs={doctorPrefs} patients={patients}
+          history={history} mutatePatients={mutatePatients} mutateHistory={mutateHistory} onBack={onBack} lastSync={lastSync} /></div>
       )}
       <div className="flex justify-end mb-3">
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
       </div>
       {requests.length > 0 && (
-        <div className="mb-8">
+        <div id="treat-request" className="mb-8 scroll-mt-36">
           <SectionTitle hint="진료실에서 확인을 요청한 환자입니다. 메모를 확인하고, 추가할 검사가 있으면 지정하세요.">진료실 요청 확인 · {requests.length}명</SectionTitle>
           {requests.map(p => (
-            <SimpleCard key={patientKey(p)} p={p} tone="amber">
+            <SimpleCard key={patientKey(p)} p={p} tone="amber" stale={staleOf(p)}>
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
               <button type="button" onClick={() => setReqFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">검사 추가</button>
               <button type="button" onClick={() => finishRequest(p, [], {}, { vision: true })} className="text-sm px-4 py-2 rounded-lg border border-blue-300 text-blue-700 font-medium">시력/안압 다시</button>
@@ -288,13 +328,13 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           ))}
         </div>
       )}
-      <div className={triage.length ? 'mb-8' : 'mb-4'}>
+      <div id="treat-triage" className={`${triage.length ? 'mb-8' : 'mb-4'} scroll-mt-36`}>
         <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
           검사 지정 대기 (초진 · History · 2차 진료) · {triage.length}명
         </SectionTitle>
         {triage.map(p => {
           return (
-          <SimpleCard key={patientKey(p)} p={p} tone="sky">
+          <SimpleCard key={patientKey(p)} p={p} tone="sky" stale={staleOf(p)}>
             <div className="w-full">
               <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
             </div>
@@ -309,10 +349,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
         })}
       </div>
 
-      <div>
+      <div id="treat-procs" className="scroll-mt-36">
         <SectionTitle hint="검사를 마친 초진 환자의 예진과 전공의 처치를 진행합니다.">처치 대기 · {procs.length}명</SectionTitle>
         {procs.map(p => (
-          <SimpleCard key={patientKey(p)} p={p} tone="indigo"
+          <SimpleCard key={patientKey(p)} p={p} tone="indigo" stale={staleOf(p)}
             badges={p.explainedEarly && inResidentProcedure(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료 · 처치 후 귀가</span>}>
             {needsTriageExam(p, settings) && <>
               <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>

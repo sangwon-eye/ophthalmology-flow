@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
-import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -34,13 +34,14 @@ export function SectionTitle({ children, hint }) {
   );
 }
 
-export function SimpleCard({ p, tone = 'slate', badges, children }) {
+export function SimpleCard({ p, tone = 'slate', badges, stale = 0, children }) {
   const c = COLOR_MAP[tone] || COLOR_MAP.slate;
   return (
-    <div className={`bg-white border ${c.border} rounded-xl px-4 py-3 mb-3`}>
+    <div className={`bg-white border ${stale ? 'border-orange-400 ring-2 ring-orange-200' : c.border} rounded-xl px-4 py-3 mb-3`}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="t-name text-slate-900">{p.name}</span>
         <span className="text-xs text-slate-400">{p.id}</span>
+        <StaleChip min={stale} />
         {badges}
         {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 검사 취소</span>}
         <DoctorChip p={p} />

@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS = {
   // 시력방 이름 (직원 화면 / 환자용 화면)
   vision: { name: '시력 / 안압 검사실', patientName: '시력검사실' },
   dilationWaitMin: 15,
+  treatStaleMin: 20, // 처치실: 마지막 진행 후 이 시간(분)이 지나면 카드 강조 (0 = 끔)
   lateGraceMin: 0, // 바코드 접수에서만: 예약시간보다 이 시간 넘게 늦게 찍으면 지각
   // 같은 날 2차 진료(다른 교수님)로 넘어갈 때 처치실에서 추가 검사를 확인할지
   linkCheckAdded: true,    // 진료 중에 추가된 2차 진료
@@ -1050,4 +1051,31 @@ export const TREAT_ROOM = { id: 'treat', name: '처치실', patientName: '처치
 // 초진이면 무조건 History 필요. FU가 길어 초진으로 올라온 환자는 재진으로, 재진인데 필요하면 초진으로 고치면 됨
 export function hxNeeded(p) {
   return !!p.firstVisit;
+}
+
+// 처치실 '오래 기다린 환자': 마지막으로 무언가 진행된 뒤(접수·검사 완료·산동·처치 등) 몇 분 지났는지
+export function staleMinOf(settings) {
+  const n = Number(settings?.treatStaleMin);
+  return Number.isFinite(n) && n >= 0 ? n : 20;
+}
+export function lastActivityAt(p) {
+  const times = [];
+  if (p.checkin && p.date) times.push(new Date(`${p.date}T${String(p.checkin).padStart(5, '0')}:00`).getTime());
+  Object.values(p.doneAt || {}).forEach(v => times.push(v));
+  Object.values(p.prep || {}).forEach(s => { if (s) times.push(s.startedAt, s.at, s.checked); });
+  Object.values(p.orders || {}).forEach(o => times.push(o?.at));
+  (p.procedures || []).forEach(i => times.push(i.orderedAt, i.doneAt));
+  (p.preProcs || []).forEach(i => times.push(i.doneAt));
+  (p.drops || []).forEach(v => times.push(v));
+  times.push(p.triageAssignedAt, p.triageAt, p.seenAt, p.calledAt, p.consultDoneAt, p.vfStartedAt, p.treatRequest?.at);
+  const valid = times.filter(t => typeof t === 'number' && Number.isFinite(t) && t > 1e12);
+  return valid.length ? Math.max(...valid) : null;
+}
+// 기준(분)을 넘었으면 지난 분, 아니면 0 (기준 0 = 끔)
+export function staleMinutes(p, settings, now = Date.now()) {
+  const limit = staleMinOf(settings);
+  const last = lastActivityAt(p);
+  if (!limit || !last) return 0;
+  const m = Math.floor((now - last) / 60000);
+  return m >= limit ? m : 0;
 }

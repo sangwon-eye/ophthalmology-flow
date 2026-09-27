@@ -43,7 +43,7 @@ ok(await page.getByText(/장민호 MMP 확인할 시간/).count() >= 1, '알림 
 await page.screenshot({ path: `${SP}/r33-mmp-due.png` });
 await chk.click(); await W();
 { const l = (await getKey('daily-patients')).value; ok(!!l.find(p => p.name === '장민호').prep.mmp.checked, 'MMP 확인 기록'); }
-ok(await page.getByText(/^확인할 검사/).count() === 0, '확인 후 목록에서 빠짐');
+ok(await page.locator('#treat-check').count() === 0, '확인 후 목록에서 빠짐');
 const sch = page.locator('div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).filter({ has: page.getByRole('button', { name: /^Schirmer/ }) }).last();
 ok(await sch.getByRole('button', { name: 'Schirmer', exact: true }).count() >= 1, '시간 재기 검사: 칸 이름은 검사 이름');
 await sch.getByRole('button', { name: 'Schirmer', exact: true }).first().click(); await W();
