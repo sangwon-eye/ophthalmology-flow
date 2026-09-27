@@ -1900,20 +1900,16 @@ function HistoryModal({ p, onClose }) {
 // 시력방 카드: 히스토리 입력 버튼, 필요 표시(자동 추천 + 직원 판단)
 function HistoryControl({ p }) {
   const ctx = useContext(HxContext);
-  const mutatePatients = useContext(PatientMemoContext);
   const [open, setOpen] = useState(false);
   const need = hxNeeded(p, ctx);
-  const pk = patientKey(p);
   return (
     <>
-      {/* 재진은 버튼 없음 (관리자 명단 관리에서 'History 필요'로 지정한 환자만) */}
-      {!p.hx && (need || p.firstVisit) && (
-        <button type="button" onClick={() => setOpen(true)}
-          className={`text-sm px-3 py-1.5 rounded-lg font-medium ${need ? 'bg-amber-500 text-white' : 'border border-sky-300 text-sky-700 bg-white'}`}>
-          {need ? 'History 필요' : 'History 입력'}
+      {/* History가 필요한 환자만 버튼 (OCS 초진 + 지난 기록 없음, 또는 관리자 명단 관리에서 'History 필요'로 켠 환자). 끄기는 관리자에서 */}
+      {!p.hx && need && (
+        <button type="button" onClick={() => setOpen(true)} className="text-sm px-3 py-1.5 rounded-lg font-medium bg-amber-500 text-white">
+          History 필요
         </button>
       )}
-      {!p.hx && need && <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: false }))} className="text-xs text-slate-400 hover:text-slate-600 underline">필요 없음</button>}
       {p.hx && (
         <div className="order-last w-full flex items-stretch text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg overflow-hidden">
           <div className="flex-1 min-w-0 px-3 py-1.5"><span className="font-semibold mr-1">Hx</span>{hxSummary(p.hx, ctx.fields) || '특이사항 없음'}</div>
