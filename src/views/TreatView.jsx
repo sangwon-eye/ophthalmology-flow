@@ -1,0 +1,374 @@
+// 처치실 화면
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
+import {
+  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
+} from 'lucide-react';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf } from '../core/flow.jsx';
+import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { StationView } from './StationView.jsx';
+import { SectionTitle, SimpleCard } from './ConsultView.jsx';
+
+/* ------------------------------------------------------------------ */
+/* 처치실 화면 (초진 예진 + 전공의 처치)                                  */
+/* ------------------------------------------------------------------ */
+export function defaultTriageRequired(p, doctorPrefs) {
+  // 이미 지정한 환자별 선택을 우선하고, 신규 지정은 담당 교수 기본값을 사용한다.
+  if (typeof p.triageRequired === 'boolean') return p.triageRequired;
+  return doctorPrefs?.[p.doctor]?.triageRequired !== false;
+}
+
+export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePatients, mutateHistory, onBack, lastSync }) {
+  const [triageFor, setTriageFor] = useState(null);
+  const [sortMode, changeSort] = useSortMode('sort-procedure');
+  const order = sortMode === 'name' ? byName : byQueue;
+  const [toastNode, showToast] = useUndoToast();
+  const allTests = sortedTests(settings);
+  const waitMin = settings.dilationWaitMin;
+
+  const requests = patients.filter(treatRequested).sort(order);
+  const [reqFor, setReqFor] = useState(null);
+  // 진료실 요청: 확인 끝 → 진료 대기로 (필요하면 검사를 붙여서 검사실로)
+  // 진료실 요청 처리. 여러 가지를 함께 할 수 있습니다: 검사 추가, 시력/안압 다시, 예진 추가
+  const finishRequest = (p, testIds = [], detail = {}, { vision = false, triage = false } = {}) => {
+    const pk = patientKey(p);
+    const before = { treatRequest: p.treatRequest, assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, extraTriage: p.extraTriage, triageDone: p.triageDone, triageAt: p.triageAt, orders: p.orders };
+    patchPatient(mutatePatients, pk, x => {
+      const assigned = { ...x.assigned }, done = { ...x.done }, doneAt = { ...x.doneAt }, nd = { ...(x.detail || {}) };
+      testIds.forEach(id => { assigned[id] = true; done[id] = false; if (detail?.[id]) nd[id] = detail[id]; });
+      if (vision) { done[VISION_KEY] = false; doneAt[VISION_KEY] = null; }
+      return {
+        treatRequest: null, assigned, done, doneAt, detail: nd, orders: clearOrders(x, testIds),
+        ...(triage ? { extraTriage: true, triageDone: false, triageAt: null } : {}),
+      };
+    });
+    const steps = [vision && '시력/안압', testIds.length && '검사', triage && '예진'].filter(Boolean);
+    showToast(`${p.name} ${steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, () => before));
+  };
+  const triage = patients.filter(needsTriageAssign).sort(order);
+  const procs = patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)).sort(order);
+  const recent = [
+    ...patients.filter(p => (assignAtTreat(p) || p.extraTriage) && p.triageDone).map(p => ({ p, kind: 'triage', at: p.triageAt || 0 })),
+    ...patients
+      .filter(p => (p.procedures || []).some(i => i.performer === 'resident' && i.done))
+      .map(p => ({ p, kind: 'proc', at: Math.max(0, ...(p.procedures || []).filter(i => i.performer === 'resident' && i.done).map(i => i.doneAt || 0)) })),
+  ].sort((a, b) => b.at - a.at).slice(0, 10);
+
+  const confirmTriage = (sel, detail, _dilation, triageRequired = true) => {
+    const p = triageFor;
+    const pk = patientKey(p);
+    const at = Date.now();
+    setTriageFor(null);
+    const chosen = allTests.filter(t => sel[t.id]);
+    patchPatient(mutatePatients, pk, x => {
+      if (!needsTriageAssign(x)) return {};
+      const assigned = { ...x.assigned };
+      const done = { ...x.done };
+      const nd = { ...(x.detail || {}) };
+      allTests.forEach(t => {
+        assigned[t.id] = !!sel[t.id];
+        if (!sel[t.id]) { done[t.id] = false; delete nd[t.id]; }
+        else if (detail?.[t.id]) nd[t.id] = detail[t.id];
+        else delete nd[t.id];
+      });
+      return { assigned, done, detail: nd, triageAssigned: true, triageAssignedAt: at, triageRequired: assignAtTreat(x) ? triageRequired : false };
+    });
+    const pending = chosen.filter(t => !p.done?.[t.id]);
+    const withTriage = assignAtTreat(p) && triageRequired;
+    showToast(`${p.name} ${assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'} 완료, ${pending.length ? (withTriage ? '검사 후 처치실 예진으로' : '검사 후 진료 대기로') : (withTriage ? '처치 대기에서 예진' : '진료 대기로')}`, () => patchPatient(mutatePatients, pk, x => (!activeVf(x) && !x.triageDone ? { triageAssigned: false, triageAssignedAt: null, triageRequired: p.triageRequired } : {})));
+  };
+
+  const finishTriage = (p) => {
+    const at = Date.now();
+    patchPatient(mutatePatients, patientKey(p), x => needsTriageExam(x, settings) ? { triageDone: true, triageAt: at } : {});
+    showToast(p.name + ' 예진 완료, 진료 대기로', () => patchPatient(mutatePatients, patientKey(p), () => ({ triageDone: false, triageAt: null })));
+  };
+
+  // 검사 준비 (예: FAG 동의서 · skin test): 시작 → 대기 시간 → 음성이면 검사실로, 양성이면 보류
+  const prepList = patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).length > 0).sort(order);
+  const setPrep = (p, t, value, msg) => {
+    const pk = patientKey(p);
+    const before = p.prep?.[t.id] || null;
+    patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: value } }));
+    if (msg) showToast(msg, () => patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: before } })));
+  };
+  // [확인]: 검사실에서 검사할 수 있게 열어 줌. '확인하면 검사 완료'(예: Schirmer, MMP)면 검사도 완료로
+  const confirmPrep = (p, t, st) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
+    patchPatient(mutatePatients, pk, x => ({
+      prep: { ...(x.prep || {}), [t.id]: { ...st, result: 'neg', at } },
+      ...(t.prepCompletes ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
+    }));
+    showToast(`${p.name} ${t.short || t.name} ${t.prepCompletes ? '완료' : '확인, 검사실로'}`, () => patchPatient(mutatePatients, pk, () => before));
+  };
+  // 진료 전 처치 (예: PRP, YAG): 처치 완료 후 검사가 있으면 검사실, 없으면 진료 대기로
+  const preProcList = patients.filter(p => !p.consultDone && pastVision(p) && preProcPending(p)).sort(order);
+  const finishPreProcs = (p) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    patchPatient(mutatePatients, pk, x => ({ preProcs: (x.preProcs || []).map(i => (i.done ? i : { ...i, done: true, doneAt: at })) }));
+    const next = { ...p, preProcs: (p.preProcs || []).map(i => ({ ...i, done: true })) };
+    showToast(`${p.name} 진료 전 처치 완료, ${pendingRooms(next, settings).length ? '검사실로' : '진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
+      preProcs: (x.preProcs || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
+    })));
+  };
+
+  const finishResident = (p) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    patchPatient(mutatePatients, pk, x => ({
+      procedures: (x.procedures || []).map(i => (i.performer === 'resident' && !i.done ? { ...i, done: true, doneAt: at } : i)),
+    }));
+    showToast(`${p.name} 처치 완료, ${p.explainedEarly ? '진찰실에서 귀가 처리' : '설명 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
+      procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
+    })));
+  };
+
+  const undoRecent = ({ p, kind }) => {
+    const pk = patientKey(p);
+    if (kind === 'triage') {
+      patchPatient(mutatePatients, pk, () => ({ triageDone: false, triageAt: null }));
+    } else {
+      patchPatient(mutatePatients, pk, x => ({
+        procedures: (x.procedures || []).map(i => (i.performer === 'resident' ? { ...i, done: false, doneAt: null } : i)),
+      }));
+    }
+  };
+
+  return (
+    <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} count={requests.length + triage.length + procs.length + preProcList.length + prepList.length + patients.filter(p => !p.consultDone && roomPending(p, settings, treatRoomOf(settings).id)).length}>
+      {preProcList.length > 0 && (
+        <div className="mb-8">
+          <SectionTitle hint="시력검사 없이 처치부터 하러 온 환자입니다 (예: PRP, YAG). 처치가 끝나면 검사가 있으면 검사실, 없으면 진료 대기로 갑니다.">진료 전 처치 · {preProcList.length}명</SectionTitle>
+          {preProcList.map(p => (
+            <SimpleCard key={patientKey(p)} p={p} tone="rose">
+              <div className="w-full flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-sm text-slate-800">
+                  {(p.preProcs || []).filter(x => !x.done).map(x => <span key={x.uid} className="font-semibold mr-3">{x.name}</span>)}
+                  {sortedTests(settings).some(t => p.assigned?.[t.id] && !p.done?.[t.id]) && <span className="text-xs text-slate-500">처치 후 검사: {sortedTests(settings).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ')}</span>}
+                </div>
+                <button type="button" onClick={() => finishPreProcs(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium shrink-0">처치 완료</button>
+              </div>
+              <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+            </SimpleCard>
+          ))}
+        </div>
+      )}
+      {prepList.length > 0 && (
+        <div className="mb-8">
+          <SectionTitle hint="처치실에서 시간을 재는 검사·준비입니다 (예: FAG 동의서 · skin test, Schirmer, MMP). 시간이 지나면 [확인] 또는 [검사 취소]를 눌러주세요.">검사 준비 · {prepList.length}명</SectionTitle>
+          {prepList.map(p => (
+            <SimpleCard key={patientKey(p)} p={p} tone="violet">
+              {prepPendingTests(p, settings).map(t => {
+                const st = prepOf(p, t);
+                const wait = prepWaitMin(t);
+                const mins = st?.startedAt ? Math.floor((Date.now() - st.startedAt) / 60000) : 0;
+                const ready = !!st?.startedAt && mins >= wait;
+                return (
+                  <div key={t.id} className="w-full flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-slate-900">{t.short || t.name}</span>
+                    <span className="text-sm text-slate-600">{t.prepName || '검사 준비'}</span>
+                    {!st?.startedAt ? (
+                      <button type="button" onClick={() => setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${t.prepName || '준비'} 시작`)}
+                        className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium">{t.prepName || '준비'} 시작</button>
+                    ) : <>
+                      <span className={`text-sm px-2.5 py-1 rounded-lg font-semibold ${ready ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                        {fmtClock(st.startedAt)} 시작 · {ready ? `${mins}분 · 결과 확인` : `${mins}분 / ${wait}분`}
+                      </span>
+                      <button type="button" onClick={() => confirmPrep(p, t, st)} title={t.prepCompletes ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
+                        className={`text-sm px-4 py-2 rounded-lg font-medium ${ready ? 'bg-green-600 text-white' : 'border border-green-300 text-green-700'}`}>확인</button>
+                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`)} title="이 검사를 오늘 하지 않음 (진료실에 표시)"
+                        className="text-sm px-3 py-2 rounded-lg border border-red-300 text-red-700 font-medium">검사 취소</button>
+                      <button type="button" onClick={() => setPrep(p, t, null)} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={12} />시작 취소</button>
+                    </>}
+                  </div>
+                );
+              })}
+            </SimpleCard>
+          ))}
+        </div>
+      )}
+      {/* 진료 전 검사 (설정에서 처치실에 둔 검사, 예: Syringing) — 검사실 화면과 같은 카드 */}
+      {roomTests(settings, treatRoomOf(settings).id).length > 0 && (
+        <StationView embedded mode={treatRoomOf(settings).id} settings={settings} doctorPrefs={doctorPrefs} patients={patients}
+          history={history} mutatePatients={mutatePatients} mutateHistory={mutateHistory} onBack={onBack} lastSync={lastSync} />
+      )}
+      <div className="flex justify-end mb-3">
+        <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />
+      </div>
+      {requests.length > 0 && (
+        <div className="mb-8">
+          <SectionTitle hint="진료실에서 확인을 요청한 환자입니다. 메모를 확인하고, 추가할 검사가 있으면 지정하세요.">진료실 요청 확인 · {requests.length}명</SectionTitle>
+          {requests.map(p => (
+            <SimpleCard key={patientKey(p)} p={p} tone="amber">
+              <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
+              <button type="button" onClick={() => setReqFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">검사 추가</button>
+              <button type="button" onClick={() => finishRequest(p, [], {}, { vision: true })} className="text-sm px-4 py-2 rounded-lg border border-blue-300 text-blue-700 font-medium">시력/안압 다시</button>
+              <button type="button" onClick={() => finishRequest(p, [], {}, { triage: true })} className="text-sm px-4 py-2 rounded-lg border border-sky-300 text-sky-700 font-medium">예진 추가</button>
+              <button type="button" onClick={() => finishRequest(p)} className="text-sm px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 font-medium">확인 완료 · 진료 대기로</button>
+            </SimpleCard>
+          ))}
+        </div>
+      )}
+      <div className={triage.length ? 'mb-8' : 'mb-4'}>
+        <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
+          검사 지정 대기 (초진 · History · 2차 진료) · {triage.length}명
+        </SectionTitle>
+        {triage.map(p => {
+          return (
+          <SimpleCard key={patientKey(p)} p={p} tone="sky">
+            <div className="w-full">
+              <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
+            </div>
+            {(p.hx || p.hxMissing) && <HistoryDetail p={p} />}
+            <TodayTestsLine p={p} tests={allTests} />
+            <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+            <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
+              {assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'}
+            </button>
+          </SimpleCard>
+          );
+        })}
+      </div>
+
+      <div>
+        <SectionTitle hint="검사를 마친 초진 환자의 예진과 전공의 처치를 진행합니다.">처치 대기 · {procs.length}명</SectionTitle>
+        {procs.map(p => (
+          <SimpleCard key={patientKey(p)} p={p} tone="indigo"
+            badges={p.explainedEarly && inResidentProcedure(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료 · 처치 후 귀가</span>}>
+            {needsTriageExam(p, settings) && <>
+              <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>
+              <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
+              <TodayTestsLine p={p} tests={allTests} />
+              <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
+            </>}
+            {(p.procedures || []).some(x => x.performer === 'resident') && (
+              <div className="w-full flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex-1 min-w-0"><ProcedureList p={p} performer="resident" onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} /></div>
+                {inResidentProcedure(p) && <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium shrink-0">
+                  처치 완료
+                </button>}
+              </div>
+            )}
+            <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+          </SimpleCard>
+        ))}
+      </div>
+
+      <RecentDone count={recent.length}>
+        {recent.map(r => (
+          <RecentRow key={`${patientKey(r.p)}-${r.kind}`} p={r.p} time={fmtClock(r.at)}>
+            <UndoButton label={r.kind === 'triage' ? '예진 완료 취소' : '처치 완료 취소'} onClick={() => undoRecent(r)} />
+          </RecentRow>
+        ))}
+      </RecentDone>
+
+      {reqFor && (
+        <TestCheckModal
+          key={`req-${patientKey(reqFor)}`}
+          title={`${reqFor.name}님 추가 검사`}
+          subtitle={`${reqFor.sendNote?.text ? `진료실 메모: ${reqFor.sendNote.text} · ` : ''}추가할 검사를 체크하세요. 검사 후 예진이 필요하면 아래에서 '예진 함'을 고르세요.`}
+          tests={allTests}
+          settings={settings}
+          initial={{}}
+          initialDetail={{}}
+          triageChoice={false}
+          confirmLabel="검사 추가"
+          onConfirm={(sel, detail, _dil, triageRequired) => { const p = reqFor; setReqFor(null); finishRequest(p, allTests.filter(t => sel[t.id]).map(t => t.id), detail, { triage: !!triageRequired }); }}
+          onCancel={() => setReqFor(null)}
+        />
+      )}
+      {triageFor && (
+        <TestCheckModal
+          key={`triage-${patientKey(triageFor)}`}
+          title={assignAtTreat(triageFor) ? `${triageFor.name}님 검사 지정` : `${triageFor.name}님 2차 진료 추가 검사 (${triageFor.doctor})`}
+          subtitle={assignAtTreat(triageFor)
+            ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'
+            : `${triageFor.primaryDoctor || '1차'} 진료를 마쳤습니다. ${triageFor.doctor} 진료 전에 할 검사를 체크하세요. 이미 한 검사는 다시 하지 않습니다. 없으면 바로 진료 대기로 이동합니다.${allTests.some(t => triageFor.done?.[t.id]) ? ` (오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')})` : ''}`}
+          info={<div className="space-y-2"><TodayTestsLine p={triageFor} tests={allTests} />{(triageFor.hx || triageFor.hxMissing) && <HistoryDetail p={triageFor} />}</div>}
+          tests={allTests}
+          settings={settings}
+          initial={triageFor.assigned}
+          initialDetail={triageFor.detail}
+          triageChoice={assignAtTreat(triageFor) ? defaultTriageRequired(triageFor, doctorPrefs) : undefined}
+          confirmLabel={assignAtTreat(triageFor) ? '검사 지정 완료' : '확인 완료'}
+          onConfirm={confirmTriage}
+          onCancel={() => setTriageFor(null)}
+        />
+      )}
+      {toastNode}
+    </ScreenShell>
+  );
+}
+
+// 명단 관리: 이름·환자번호·예약시간 수정
+export function PatientInfoModal({ patient, onSave, onCancel }) {
+  const [v, setV] = useState({ id: patient.id || '', name: patient.name || '', reservation: patient.reservation || '' });
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+        <h3 className="text-lg font-medium text-slate-900 mb-1">{patient.name}님 정보 수정</h3>
+        <p className="text-sm text-slate-500 mb-4">이름·환자번호는 같은 날 이 환자의 모든 진료에 함께 바뀝니다. 이미 접수한 환자는 예약시간을 바꿔도 대기 순서는 그대로입니다.</p>
+        <div className="space-y-3">
+          <Field label="이름"><input value={v.name} onChange={e => setV({ ...v, name: e.target.value })} className={INPUT} /></Field>
+          <Field label="환자번호"><input value={v.id} onChange={e => setV({ ...v, id: e.target.value })} className={INPUT} /></Field>
+          <Field label="예약시간 (예: 09:30)"><input value={v.reservation} onChange={e => setV({ ...v, reservation: e.target.value })} className={INPUT} /></Field>
+        </div>
+        {v.id.trim() !== patient.id && <p className="text-xs text-amber-700 mt-3">환자번호를 바꾸면 새 번호의 이전 정보(FU)는 자동으로 붙지 않습니다. 필요하면 검사를 직접 지정해주세요.</p>}
+        <div className="flex gap-2 mt-6">
+          <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="button" onClick={() => onSave(v)} className="flex-1 py-3 rounded-xl bg-slate-800 text-white font-medium">저장</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 명단 올리기 결과 요약 + 파일에서 빠진 환자 삭제 버튼
+export function UploadResult({ result, patients, onRemove, onShowList }) {
+  const { date, doctors = [], perDoctor = [], total, stats, missing, rejected = [] } = result;
+  const byKey = new Map(patients.map(p => [patientKey(p), p]));
+  const stillMissing = missing.map(k => byKey.get(k)).filter(Boolean);
+  const withFu = stats ? stats.added.filter(hasFollowupApplied).length : 0;
+  const fv = stats ? stats.added.filter(p => p.firstVisit).length : 0;
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 space-y-2">
+      <div className="font-medium text-slate-900">{date} {doctors.join(', ')} 명단 · 등록 대상 {total}명{perDoctor.length > 1 ? ` (${perDoctor.join(' · ')})` : ''}</div>
+      {rejected.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-3">
+          <div className="font-medium text-red-800 mb-1">등록 안 함: 진료의 불일치 {rejected.length}명</div>
+          <p className="text-xs text-red-700 mb-2">엑셀의 진료의가 설정 &gt; 교수 관리에 등록된 이름({(result.allDoctors || []).join(', ') || '없음'})과 맞지 않습니다. 엑셀이나 교수 이름을 고친 뒤 다시 올려주세요.</p>
+          {rejected.slice(0, 30).map((r, i) => (
+            <div key={`${r.id}-${i}`} className="text-xs text-slate-700 py-0.5">{r.name || '-'} <span className="text-slate-500">{r.id} · 진료의 '{r.doctorText || '비어 있음'}'</span></div>
+          ))}
+          {rejected.length > 30 && <div className="text-xs text-slate-500">외 {rejected.length - 30}명</div>}
+        </div>
+      )}
+      {stats ? (
+        <ul className="space-y-1">
+          <li>새로 추가 <b>{stats.added.length}명</b>{stats.added.length > 0 && ` (이전 정보 적용 ${withFu}명 · 이전 정보 없음 ${stats.added.length - withFu}명${fv ? ` · 초진 ${fv}명` : ''})`}</li>
+          {stats.timeChanged.length > 0 && <li>이미 있어 <b>예약시간만 변경 {stats.timeChanged.length}명</b>: {stats.timeChanged.slice(0, 8).map(p => `${p.name} ${p.reservation || '-'}→${p.newReservation}`).join(', ')}{stats.timeChanged.length > 8 ? ` 외 ${stats.timeChanged.length - 8}명` : ''}</li>}
+          {stats.unchanged.length > 0 && <li>이미 있어 그대로 둠 {stats.unchanged.length}명</li>}
+          {stats.linked.length > 0 && <li className="text-fuchsia-800">같은 날 다른 교수님 명단에도 있어 <b>두 교수님 진료로 연결 {stats.linked.length}명</b>: {stats.linked.slice(0, 8).map(p => `${p.name}(${p.first ? `${p.doctor} 먼저 → ${p.others.join(', ')}` : `${p.others.join(', ')} → ${p.doctor}`})`).join(', ')}{stats.linked.length > 8 ? ` 외 ${stats.linked.length - 8}명` : ''} · 검사는 1차 진료 전에 함께 합니다. 순서는 명단 관리에서 바꿀 수 있어요.</li>}
+        </ul>
+      ) : <div className="text-red-600">저장하지 못했습니다. 서버 연결을 확인하고 다시 올려주세요.</div>}
+      {stillMissing.length > 0 && (
+        <div className="rounded-lg border border-orange-300 bg-orange-50 p-3">
+          <div className="font-medium text-orange-900 mb-1">이번 파일에 없는 환자 {stillMissing.length}명</div>
+          <p className="text-xs text-orange-800 mb-2">같은 날짜·같은 교수님 명단에 있었지만 이번 파일에는 없습니다. 예약이 취소된 환자인지 확인한 뒤 삭제하세요. (삭제 버튼은 두 번 눌러야 삭제됩니다)</p>
+          {stillMissing.map(p => (
+            <div key={patientKey(p)} className="flex items-center justify-between gap-2 py-1 border-t border-orange-200 first:border-t-0">
+              <span><span className="t-name text-slate-900">{p.name}</span> <span className="text-xs text-slate-500">{p.id} · 예약 {p.reservation || '-'}{p.checkin ? ` · 접수 ${p.checkin}` : ''}</span></span>
+              <ConfirmButton label="삭제" onConfirm={() => onRemove(patientKey(p))} />
+            </div>
+          ))}
+        </div>
+      )}
+      {stats && (
+        <button type="button" onClick={onShowList} className="text-xs underline text-slate-600">명단 관리에서 보기</button>
+      )}
+    </div>
+  );
+}
