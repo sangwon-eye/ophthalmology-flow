@@ -737,7 +737,7 @@ export function TodayDoneLine({ p, tests, prefs }) {
   const done = tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id] && p.done?.[t.id]).map(t => testLabelWithOptions(t, p.detail?.[t.id]));
   const drops = (p.drops || []).filter(Boolean);
   const eye = dilateEyeOf(p.dilateEye);
-  if (drops.length) done.push(crActive(p, prefs) ? `CR ${drops.length}회` : `산동${eye ? ` ${eye}` : ''} ${fmtClock(Math.min(...drops))}`);
+  if (drops.length) done.push(crActive(p, prefs) ? 'CR' : `산동${eye ? ` ${eye}` : ''}`);
   return (
     <div className="w-full text-sm text-slate-700">
       <span className="text-xs text-slate-400 mr-2">오늘 검사</span>{done.length ? done.join(', ') : '없음'}

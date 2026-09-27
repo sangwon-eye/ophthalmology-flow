@@ -4,9 +4,9 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
-import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -67,6 +67,9 @@ export function SendPatientModal({ patient, tests, settings, onConfirm, onCancel
   const [dest, setDest] = useState('treat');
   const [sel, setSel] = useState({});
   const [note, setNote] = useState('');
+  // 세부 창(예: OCT 종류·단안): [세부 창] 검사는 고르면 바로, 다른 검사는 오른쪽 클릭으로 펼침
+  const [detail, setDetail] = useState({});
+  const [extraOpen, setExtraOpen] = useState({});
   const ordered = orderForPicking(tests, settings);
   const ready = dest !== 'exam' || ordered.some(t => sel[t.id]);
   return (
@@ -89,11 +92,19 @@ export function SendPatientModal({ patient, tests, settings, onConfirm, onCancel
               const doneToday = patient.assigned?.[t.id] && patient.done?.[t.id];
               return (
                 <button key={t.id} type="button" onClick={() => setSel(x => ({ ...x, [t.id]: !x[t.id] }))}
+                  onContextMenu={e => { e.preventDefault(); setSel(x => ({ ...x, [t.id]: true })); setExtraOpen(x => ({ ...x, [t.id]: true })); }}
+                  title={t.popupOnClick ? undefined : '오른쪽 클릭: 단안·프로토콜 지정'}
                   className={`text-sm px-3 py-1.5 rounded-lg border flex items-center gap-1 ${on ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>
                   {on && <Check size={12} />}{t.short || t.name}{doneToday && <span className={`text-xs ${on ? 'text-violet-100' : 'text-slate-400'}`}>(오늘 함 · 다시)</span>}
                 </button>
               );
             })}
+            {ordered.filter(t => sel[t.id] && (t.popupOnClick || extraOpen[t.id])).map(t => (
+              <div key={`d-${t.id}`} className="w-full rounded-xl border border-violet-200 bg-violet-50/40 p-3">
+                <div className="text-sm font-medium text-slate-800 mb-2">{t.short || t.name}</div>
+                <TestDetailEditor test={t} value={detail[t.id]} onChange={v => setDetail(d => ({ ...d, [t.id]: v }))} />
+              </div>
+            ))}
           </div>
         )}
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
@@ -101,7 +112,7 @@ export function SendPatientModal({ patient, tests, settings, onConfirm, onCancel
           className={`${INPUT} mb-6`} />
         <div className="flex gap-2">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
-          <button type="button" disabled={!ready} onClick={() => onConfirm({ dest, sel, note: note.trim() })} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-medium disabled:opacity-40">보내기</button>
+          <button type="button" disabled={!ready} onClick={() => onConfirm({ dest, sel, note: note.trim(), detail: pickDetail(detail, sel, ordered) })} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-medium disabled:opacity-40">보내기</button>
         </div>
       </div>
     </div>
@@ -276,7 +287,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
 
   // 진료실에서 원하는 곳으로 환자 보내기 (누락 검사·재검·처치실 확인)
   const [sendFor, setSendFor] = useState(null);
-  const sendPatient = (p, { dest, sel, note }) => {
+  const sendPatient = (p, { dest, sel, note, detail }) => {
     const pk = patientKey(p);
     const at = Date.now();
     setSendFor(null);
@@ -285,8 +296,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const undo = () => patch(pk, () => before);
     if (dest === 'exam') {
       const ids = allTests.filter(t => sel[t.id]).map(t => t.id);
-      applyExtraTests(pk, ids, {}, sendNote);
-      showToast(`${p.name} 검사실로 보냈습니다 (${allTests.filter(t => sel[t.id]).map(t => t.short || t.name).join(', ')})`, undo);
+      applyExtraTests(pk, ids, detail || {}, sendNote);
+      showToast(`${p.name} 검사실로 보냈습니다 (${allTests.filter(t => sel[t.id]).map(t => testLabelWithOptions(t, detail?.[t.id])).join(', ')})`, undo);
       return;
     }
     patch(pk, x => (dest === 'vision'

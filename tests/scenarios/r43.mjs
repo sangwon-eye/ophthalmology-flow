@@ -1,4 +1,4 @@
-import { chromium, SP, editKey, tester, BASE } from '../lib.mjs';
+import { chromium, SP, editKey, getKey, tester, BASE } from '../lib.mjs';
 // 설명 대기 카드: 오늘 한 검사 + 산동 요약 · 설명 완료 창: 진료 전 처치는 [나머지 검사 보기] 안에
 const now = Date.now();
 await editKey('daily-patients', list => list.map(p => (p.name === '송하린' ? { ...p, assigned: { ...p.assigned, wfp: true }, done: { ...p.done, wfp: true }, drops: [now - 20 * 60000] } : p)));
@@ -11,7 +11,7 @@ await page.getByRole('button', { name: '김선웅', exact: true }).first().click
 const card = cardOf('송하린');
 const t = await card.innerText();
 ok(/오늘 검사/.test(t) && /OCT/.test(t) && /WFP|안저/.test(t), `설명 대기 카드에 오늘 검사 (${t.replace(/\n/g, ' ').slice(0, 120)})`);
-ok(/산동 \d\d:\d\d/.test(t), '산동 시각도 표시');
+ok(/산동/.test(t) && !/산동 \d\d:\d\d/.test(t), '산동은 표시하되 시각은 없음');
 await card.screenshot({ path: `${SP}/r43-card.png` });
 await card.getByRole('button', { name: '설명 완료', exact: true }).click(); await W();
 ok(await page.getByText('다음 내원 진료 전 처치').count() === 0, '설명 완료 창: 진료 전 처치는 처음에 숨김');
@@ -21,5 +21,18 @@ await page.getByRole('button', { name: '전공의 처치', exact: true }).click(
 await page.getByRole('button', { name: '나머지 검사 접기' }).click(); await W(200);
 ok(await page.getByRole('button', { name: /진료 전 처치 1개/ }).count() === 1, '접어도 버튼에 "진료 전 처치 1개" 표시');
 await page.screenshot({ path: `${SP}/r43-modal.png` });
+await page.locator('.fixed.inset-0').last().getByRole('button', { name: '취소', exact: true }).click(); await W(300);
+// 보내기 → 검사실: OCT를 고르면 세부 창(종류·단안)이 열리고 저장됨
+await page.getByRole('button', { name: '이종혁', exact: true }).first().click(); await W();
+await page.getByRole('button', { name: /^보내기/ }).first().click(); await W(300);
+const m = page.locator('.fixed.inset-0').last();
+await m.getByText('검사실', { exact: true }).click(); await W(200);
+await m.getByRole('button', { name: /^OCT/ }).first().click(); await W(200);
+ok(await m.getByRole('button', { name: 'Disc' }).count() === 1, '보내기: OCT를 누르면 세부 항목(Macular·Disc…)이 보임');
+await m.getByRole('button', { name: 'Disc' }).click(); await W(200);
+await m.screenshot({ path: `${SP}/r43-send.png` });
+await m.getByRole('button', { name: '보내기', exact: true }).click(); await W(1000);
+const ose = (await getKey('daily-patients')).value.find(p => p.name === '오세영');
+ok(ose.assigned.oct && (ose.detail?.oct?.options || []).includes('Disc'), `보내기: OCT 세부 항목 저장 (${JSON.stringify(ose.detail?.oct)})`);
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();
