@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
-import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -318,13 +318,18 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       lastSync={lastSync}
       count={waiting.length}
       extra={<DoctorPicker doctors={doctors} value={selectedDoctor} onChange={setSelectedDoctor} />}
+      sub={selectedDoctor ? <SummaryBar label="진료실 할 일 요약" items={[
+        { id: 'consult-explain', label: '설명 대기', n: explainList.length },
+        { id: 'consult-waiting', label: '진료 대기', n: waiting.length },
+        { id: 'consult-hold', label: '진료 보류', n: onHold.length },
+      ]} /> : null}
     >
       {!selectedDoctor ? (
         <EmptyState text="상단에서 교수님을 선택해주세요" />
       ) : (
         <>
           {explainList.length > 0 && (
-            <div className="mb-6">
+            <div id="consult-explain" className="mb-6 scroll-mt-36">
               <SectionTitle hint="안내가 끝나면 설명 완료를 누르고 다음 내원 검사를 지정하세요">설명 대기 · {explainList.length}명</SectionTitle>
               {explainList.map(p => {
                 const ps = procedureStatus(p);
@@ -403,6 +408,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
             </div>
           )}
 
+          <div id="consult-waiting" className="scroll-mt-36" />
           <SectionTitle>
             진료 대기 · {waiting.length}명
             {testing > 0 ? ` (검사 진행 중 ${testing}명)` : ''}
@@ -447,7 +453,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
           )}
 
           {onHold.length > 0 && (
-            <div className="mt-8">
+            <div id="consult-hold" className="mt-8 scroll-mt-36">
               <SectionTitle>진료 보류 (추가 검사 중) · {onHold.length}명</SectionTitle>
               {onHold.map(p => (
                 <div key={patientKey(p)} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-3 mb-2">

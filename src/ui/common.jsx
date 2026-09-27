@@ -955,6 +955,22 @@ export function DoctorChip({ p }) {
   return <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{p.doctor}</span>;
 }
 // 넓은 화면에서는 이름 줄 오른쪽 끝에 (좁으면 다음 줄로)
+// 화면 위쪽 요약 줄 (처치실·진료실): 묶음마다 인원 칩, 누르면 그 묶음으로 이동, 0명은 흐리게
+export function SummaryBar({ label, items, staleMin }) {
+  const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return (
+    <div className="flex flex-wrap gap-1.5" aria-label={label}>
+      {items.map(x => (
+        <button key={x.id} type="button" disabled={!x.n} onClick={() => jump(x.id)} data-summary={x.id}
+          className={`text-sm px-3 py-1 rounded-full border bg-white flex items-center gap-1.5 ${x.n ? `${x.due ? 'border-green-500' : x.stale ? 'border-orange-400' : 'border-slate-300'} text-slate-800 hover:bg-slate-50` : 'border-slate-200 text-slate-400 opacity-50 cursor-default'}`}>
+          <span>{x.label} <b className="font-semibold">{x.n}</b></span>
+          {x.due > 0 && <span className="text-xs px-1.5 rounded-full bg-green-600 text-white font-semibold">● {x.due} 시간 됨</span>}
+          {x.stale > 0 && <span className="text-xs px-1.5 rounded-full bg-orange-500 text-white font-semibold">{staleMin}분↑ {x.stale}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
 // 처치실: 마지막 진행 뒤 오래 그대로인 환자 (설정 > 기타의 강조 시간)
 export function StaleChip({ min }) {
   if (!min) return null;

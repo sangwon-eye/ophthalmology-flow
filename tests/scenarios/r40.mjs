@@ -21,7 +21,7 @@ await c().getByRole('button', { name: /MMP-9/ }).first().click(); await W(800);
 let x = await pt();
 ok(!x.done.mmp && !x.prep?.mmp, '다시 누르면 미시행 + 시작 시각 지워짐');
 ok(await c().getByRole('button', { name: 'MMP-9', exact: true }).count() >= 1 && await c().getByRole('button', { name: /^MMP-9 \d\d:\d\d/ }).count() === 0, '칸이 [MMP-9] 로 돌아옴');
-ok(await page.locator('#treat-check').count() === 0, '확인할 검사에서도 빠짐');
+ok(await page.locator('#treat-check').count() === 0, '결과 확인에서도 빠짐');
 // Schirmer: 시작 → 지금 확인 → 완료 → 다시 누르면 미시행으로 유지
 await c().getByRole('button', { name: 'Schirmer', exact: true }).first().click(); await W(600);
 await c().getByRole('button', { name: '지금 확인' }).click(); await W(800);

@@ -29,12 +29,12 @@ await back();
 await pick('처치실');
 ok(await page.getByText(/^검사 준비 · 2명/).count() === 1, '처치실: 검사 준비는 FAG만 2명 (Schirmer·MMP는 진료 전 검사 칸에서)');
 ok(await page.getByRole('button', { name: /^Schirmer \d+명/ }).count() === 1 && await page.getByRole('button', { name: /^MMP \d+명/ }).count() === 1, '진료 전 검사에 Schirmer·MMP');
-// MMP(바로 넘어감): 누르면 시작 시각 기록 + 검사는 완료로 넘어감 → 시간이 되면 '확인할 검사'에서 확인
+// MMP(바로 넘어감): 누르면 시작 시각 기록 + 검사는 완료로 넘어감 → 시간이 되면 '결과 확인'에서 확인
 const mmpCard = page.locator('div.bg-white').filter({ has: page.getByText('장민호', { exact: true }) }).filter({ has: page.getByRole('button', { name: 'MMP', exact: true }) }).first();
 await mmpCard.getByRole('button', { name: 'MMP', exact: true }).click(); await W();
 ok(await page.getByRole('button', { name: '지금 확인' }).count() >= 1, '시간 전에도 [지금 확인] 있음');
 { const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '장민호').done.mmp === true, 'MMP: 시작하면 바로 넘어감 (검사 완료)'); }
-ok(await page.getByText(/^확인할 검사 · 1명/).count() === 1, "처치실 맨 위 '확인할 검사'");
+ok(await page.getByText(/^결과 확인 · 1명/).count() === 1, "처치실 맨 위 '결과 확인'");
 await backdate('장민호', 'mmp', 11);
 await page.waitForTimeout(15000);
 const chk = page.getByRole('button', { name: /^MMP \d\d:\d\d · 확인$/ });

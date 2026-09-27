@@ -4,8 +4,8 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, pendingTests, staleMinutes, staleMinOf } from '../core/flow.jsx';
-import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker } from '../ui/common.jsx';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf } from '../core/flow.jsx';
+import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
 
@@ -194,42 +194,25 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   const prepStarted = (p) => prepPendingTests(p, settings).some(t => prepOf(p, t)?.startedAt);
   const staleOf = (p) => staleMinutes(p, settings, now);
   const summary = [
-    { id: 'treat-check', label: '확인할 검사', list: checkList, due: checkList.filter(p => prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length },
+    { id: 'treat-check', label: '결과 확인', list: checkList, due: checkList.filter(p => prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length },
     { id: 'treat-preproc', label: '진료 전 처치', list: preProcList, stale: preProcList.filter(staleOf).length },
     { id: 'treat-prep', label: '검사 준비', list: prepList,
       due: prepList.filter(p => prepPendingTests(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length,
       stale: prepList.filter(p => !prepStarted(p) && staleOf(p)).length },
     ...(treatTests.length ? [{ id: 'treat-exams', label: '진료 전 검사', list: examList,
       due: examList.filter(p => treatTests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t) && prepDue(prepOf(p, t), t, now))).length,
-      stale: examList.filter(p => !activeVf(p) && !timedRunning(p) && staleOf(p)).length,
-      tests: treatTests.map(t => ({ t, n: examList.filter(p => pendingTests(p, settings, treatId).some(x => x.id === t.id)).length })) }] : []),
+      stale: examList.filter(p => !activeVf(p) && !timedRunning(p) && staleOf(p)).length }] : []),
     { id: 'treat-request', label: '진료실 요청', list: requests, stale: requests.filter(staleOf).length },
     { id: 'treat-triage', label: '검사 지정', list: triage, stale: triage.filter(staleOf).length },
     { id: 'treat-procs', label: '처치 대기', list: procs, stale: procs.filter(staleOf).length },
   ];
-  const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  const summaryBar = (
-    <div className="flex flex-wrap gap-1.5" aria-label="처치실 할 일 요약">
-      {summary.map(x => {
-        const n = x.list.length;
-        return (
-          <button key={x.id} type="button" disabled={!n} onClick={() => jump(x.id)} data-summary={x.id}
-            className={`text-sm px-3 py-1 rounded-full border bg-white flex items-center gap-1.5 ${n ? (x.due ? 'border-green-500' : x.stale ? 'border-orange-400' : 'border-indigo-200') + ' text-slate-800 hover:bg-indigo-50' : 'border-slate-200 text-slate-400 opacity-50 cursor-default'}`}>
-            <span>{x.label} <b className="font-semibold">{n}</b></span>
-            {x.tests && n > 0 && <span className="text-xs text-slate-500">({x.tests.filter(y => y.n).map(y => `${y.t.short || y.t.name} ${y.n}`).join(' · ')})</span>}
-            {x.due > 0 && <span className="text-xs px-1.5 rounded-full bg-green-600 text-white font-semibold">● {x.due} 시간 됨</span>}
-            {x.stale > 0 && <span className="text-xs px-1.5 rounded-full bg-orange-500 text-white font-semibold">{staleMinOf(settings)}분↑ {x.stale}</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
+  const summaryBar = <SummaryBar label="처치실 할 일 요약" staleMin={staleMinOf(settings)} items={summary.map(x => ({ ...x, n: x.list.length }))} />;
 
   return (
     <ScreenShell title={treatRoomOf(settings).name} color="indigo" onBack={onBack} lastSync={lastSync} sub={summaryBar} count={requests.length + triage.length + procs.length + preProcList.length + prepList.length + checkList.length + examList.length}>
       {checkList.length > 0 && (
         <div id="treat-check" className="mb-8 scroll-mt-36">
-          <SectionTitle hint="시작하면 바로 다음으로 넘어가는 검사(예: MMP)입니다. 정한 시간이 되면 초록으로 바뀌니 결과를 보고 [확인]을 눌러주세요.">확인할 검사 · {checkList.length}명</SectionTitle>
+          <SectionTitle hint="시작하면 바로 다음으로 넘어가는 검사(예: MMP)입니다. 정한 시간이 되면 초록으로 바뀌니 결과를 보고 [확인]을 눌러주세요.">결과 확인 · {checkList.length}명</SectionTitle>
           {checkList.map(p => (
             <SimpleCard key={patientKey(p)} p={p} tone="violet">
               {prepChecks(p, settings).map(t => {
