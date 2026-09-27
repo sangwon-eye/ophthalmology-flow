@@ -10,6 +10,7 @@ import { loadFu, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
 import { NOTICE_PRESETS, consultRoomLabel } from './BoardView.jsx';
+import { WAIT_TEXT, WAIT_WINDOW_MIN, estimateWait, shownWait } from '../core/flow.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 관리자 화면                                                          */
@@ -236,7 +237,61 @@ export function RoleGuides({ settings }) {
     </div>
   );
 }
-export function BoardNoticeAdmin({ settings, doctors, doctorPrefs, value, mutate }) {
+// 대기 시간 안내: 접수→시력방 완료, 시력방 완료→첫 검사 완료 (최근 60분 기준 계산)
+function WaitAdmin({ patients, value, mutate, visionLabel }) {
+  const [, setTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => setTick(x => x + 1), 30000); return () => clearInterval(i); }, []);
+  const waits = value?.waits || {};
+  const autoMin = Number.isFinite(Number(waits.autoMin)) ? Number(waits.autoMin) : 20;
+  const [minDraft, setMinDraft] = useState(String(autoMin));
+  useEffect(() => { setMinDraft(String(autoMin)); }, [autoMin]);
+  const setWait = (kind, patch) => mutate(prev => ({ ...prev, waits: { ...(prev?.waits || {}), [kind]: { ...(prev?.waits?.[kind] || {}), ...patch } } }));
+  const saveMin = () => {
+    const n = Math.max(0, Math.round(Number(minDraft) || 0));
+    mutate(prev => ({ ...prev, waits: { ...(prev?.waits || {}), autoMin: n } }));
+  };
+  const rows = [
+    { kind: 'vision', label: visionLabel, sub: '접수 → 시력검사 완료' },
+    { kind: 'exams', label: '검사실', sub: '시력검사 완료 → 첫 검사 완료' },
+  ];
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="font-medium text-slate-900 mb-1">대기 시간 안내</div>
+      <p className="text-sm text-slate-500 mb-3">최근 {WAIT_WINDOW_MIN}분 동안 마친 환자와 지금 기다리는 환자로 대략 계산합니다 (5분 단위 올림). 지각·2차 진료·진료 전 처치 환자는 빠집니다.
+        반자동은 [띄우기]를 눌러야 환자 화면에 나오고(그 값 그대로, 오늘만), 자동은 계산값이 기준 이상일 때 저절로 나오고 줄면 사라집니다.</p>
+      <div className="space-y-2">
+        {rows.map(({ kind, label, sub }) => {
+          const w = waits[kind] || {};
+          const auto = w.mode === 'auto';
+          const est = estimateWait(patients, kind);
+          const shown = shownWait(waits, patients, kind);
+          return (
+            <div key={kind} data-wait={kind} className={`rounded-lg border px-3 py-2 flex gap-3 flex-wrap items-center ${shown ? 'border-yellow-400 bg-yellow-50' : 'border-slate-200'}`}>
+              <div className="w-44 shrink-0 text-sm font-medium text-slate-900">{label}<span className="block text-xs font-normal text-slate-500">{sub}</span></div>
+              <div className="text-sm text-slate-700 min-w-[14rem]">
+                {est.min ? <>지금 계산: <b>약 {est.min}분</b></> : '계산할 환자가 부족합니다'}
+                <span className="block text-xs text-slate-400">마친 환자 {est.done}명 · 기다리는 환자 {est.waiting}명</span>
+              </div>
+              <SegmentedToggle value={auto ? 'auto' : 'semi'} onChange={v => setWait(kind, { mode: v })} options={[['semi', '반자동'], ['auto', '자동']]} />
+              <div className="flex-1 flex items-center gap-2 flex-wrap justify-end">
+                <span className="text-sm text-slate-600">{shown ? <>환자 화면: <b>{WAIT_TEXT[kind].replace('{n}', shown)}</b></> : '환자 화면에 표시 안 함'}</span>
+                {!auto && <button type="button" disabled={!est.min} onClick={() => setWait(kind, { shown: est.min, shownDate: todayISO() })}
+                  className="text-sm px-3 py-2 rounded-lg bg-amber-600 text-white font-medium disabled:opacity-40">{shown ? '지금 값으로 다시 띄우기' : '띄우기'}</button>}
+                {!auto && shown && <button type="button" onClick={() => setWait(kind, { shown: null })} className="text-sm px-3 py-2 rounded-lg border border-slate-300 text-slate-600">내리기</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2 mt-3 text-sm text-slate-600">
+        자동일 때
+        <input type="number" min="0" aria-label="자동 표시 기준" value={minDraft} onChange={e => setMinDraft(e.target.value)} onBlur={saveMin} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+        분 이상이면 환자 화면에 표시
+      </div>
+    </div>
+  );
+}
+export function BoardNoticeAdmin({ patients = [], settings, doctors, doctorPrefs, value, mutate }) {
   const notices = value?.notices || {};
   const presets = Array.isArray(value?.presets) ? value.presets : NOTICE_PRESETS;
   const [newPreset, setNewPreset] = useState('');
@@ -250,6 +305,7 @@ export function BoardNoticeAdmin({ settings, doctors, doctorPrefs, value, mutate
   const vn = visionNames(settings);
   return (
     <div className="space-y-3">
+      <WaitAdmin patients={patients} value={value} mutate={mutate} visionLabel={vn.patientName} />
       <p className="text-sm text-slate-500">적은 문구는 환자용 대기 화면에 노란 띠로 바로 나타나고, 지울 때까지 계속 보입니다. 칸을 벗어나거나 Enter를 누르면 저장됩니다.</p>
       <NoticeInput label={vn.patientName} sub="시력방" value={notices.vision} presets={presets} onSave={t => setNotice('vision', t)} />
       <NoticeInput label="검사실 전체" sub="환자용 화면 검사실 칸 맨 위 (방 이름 없이)" value={notices.exams} presets={presets} onSave={t => setNotice('exams', t)} />
@@ -782,7 +838,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       )}
 
       {tab === 'notice' && (
-        <BoardNoticeAdmin settings={settings} doctors={doctors} doctorPrefs={doctorPrefs} value={boardNotices} mutate={mutateBoardNotices} />
+        <BoardNoticeAdmin patients={patients} settings={settings} doctors={doctors} doctorPrefs={doctorPrefs} value={boardNotices} mutate={mutateBoardNotices} />
       )}
 
       {tab === 'stats' && <DayStats patients={patients} settings={settings} doctors={doctors} />}

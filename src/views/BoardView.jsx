@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { COLOR_MAP, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { WAIT_TEXT, shownWait, COLOR_MAP, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
 
@@ -99,11 +99,22 @@ export function BoardNotice({ text, label, compact }) {
   );
 }
 
+// 대기 시간 안내 (관리자 > 대기 화면 안내에서 반자동/자동)
+export function WaitNotice({ patients, kind, compact }) {
+  const waits = useContext(NoticeContext)?.waits;
+  // 명단이 그대로여도 기다린 시간은 늘어나므로 가끔 다시 계산
+  const [, setTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => setTick(x => x + 1), 30000); return () => clearInterval(i); }, []);
+  const n = shownWait(waits, patients, kind);
+  return n ? <BoardNotice text={WAIT_TEXT[kind].replace('{n}', n)} compact={compact} /> : null;
+}
+
 export function VisionBoardList({ patients, compact }) {
   const notice = useNotice('vision');
   const list = patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p)).sort(byQueue);
   return (
     <div>
+      <WaitNotice patients={patients} kind="vision" compact={compact} />
       <BoardNotice text={notice} compact={compact} />
       {!list.length ? <BoardEmpty /> : (
         <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
@@ -134,6 +145,7 @@ export function ExamBoardList({ patients, settings, compact }) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
   return (
     <div>
+      <WaitNotice patients={patients} kind="exams" compact={compact} />
       <BoardNotice text={examsNotice} compact={compact} />
       <RoomNotices settings={settings} compact={compact} />
       {list.length === 0 ? <BoardEmpty /> : (

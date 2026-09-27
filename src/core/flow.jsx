@@ -1079,3 +1079,64 @@ export function staleMinutes(p, settings, now = Date.now()) {
   const m = Math.floor((now - last) / 60000);
   return m >= limit ? m : 0;
 }
+
+// 대기 시간 추정 (환자용 화면 "현재 … 대기 약 N분")
+//  시력: 접수 → 시력방 완료, 검사: 시력방 완료(차트가 검사실로) → 첫 검사 완료
+//  최근 60분 동안 마친 환자의 중간값과 지금 기다리는 환자의 경과 시간 중간값 중 큰 값, 5분 단위 올림
+export const WAIT_WINDOW_MIN = 60;
+function medianOf(list) {
+  if (!list.length) return 0;
+  const s = [...list].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function checkinMs(p) {
+  if (!p.checkin || !p.date) return null;
+  const t = new Date(`${p.date}T${String(p.checkin).padStart(5, '0')}:00`).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+function visionDoneMs(p) {
+  if (!visionComplete(p)) return null;
+  const ids = [VISION_KEY, ...VISION_TEST_IDS.filter(id => p.assigned?.[id])];
+  const ts = ids.map(id => p.doneAt?.[id]).filter(t => typeof t === 'number');
+  return ts.length ? Math.max(...ts) : null;
+}
+function waitExcluded(p) {
+  return !!(p.late || p.primaryKey || p.skipVision || p.visionSkipped || (p.preProcs || []).length);
+}
+export function estimateWait(patients, kind, now = Date.now()) {
+  const since = now - WAIT_WINDOW_MIN * 60000;
+  const done = [], waiting = [];
+  patients.filter(p => p.date === todayISO() && !waitExcluded(p)).forEach(p => {
+    const start = kind === 'vision' ? checkinMs(p) : visionDoneMs(p);
+    if (!start) return;
+    let end = null;
+    if (kind === 'vision') {
+      end = visionDoneMs(p);
+      if (!end && visionComplete(p)) return; // 끝났는데 시각이 없음 → 빼기
+    } else {
+      const ids = Object.keys(p.assigned || {}).filter(id => p.assigned[id] && id !== VISION_KEY && !VISION_TEST_IDS.includes(id));
+      if (!ids.length) return;
+      const doneIds = ids.filter(id => p.done?.[id]);
+      const ts = doneIds.map(id => p.doneAt?.[id]).filter(t => typeof t === 'number' && t >= start);
+      if (doneIds.length && !ts.length) return;
+      end = ts.length ? Math.min(...ts) : null;
+    }
+    if (end) { if (end >= since && end <= now) done.push((end - start) / 60000); }
+    else if (!p.consultDone && start <= now) waiting.push((now - start) / 60000);
+  });
+  if (done.length + waiting.length < 3) return { min: null, done: done.length, waiting: waiting.length };
+  const raw = Math.max(medianOf(done), medianOf(waiting));
+  return { min: Math.max(5, Math.ceil(raw / 5) * 5), done: done.length, waiting: waiting.length };
+}
+export const WAIT_TEXT = { vision: '현재 시력검사 대기 약 {n}분', exams: '현재 검사 대기 약 {n}분' };
+// 환자용 화면에 보일 대기 시간 (반자동: 관리자가 띄운 값 · 자동: 기준 이상일 때 지금 계산값)
+export function shownWait(waits, patients, kind, now = Date.now()) {
+  const w = waits?.[kind] || {};
+  if (w.mode === 'auto') {
+    const est = estimateWait(patients, kind, now);
+    const limit = Number.isFinite(Number(waits?.autoMin)) ? Number(waits.autoMin) : 20;
+    return est.min && est.min >= limit ? est.min : null;
+  }
+  return w.shown && w.shownDate === todayISO() ? w.shown : null;
+}
