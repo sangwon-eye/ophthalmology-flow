@@ -71,6 +71,57 @@ function parsedOf(key, item) {
   }
   return all;
 }
+
+// 환자별 기록 중 환자가 계속 쌓이는 것(이전 시력)은 파일 하나가 아니라 환자번호 끝 두 자리로 100개 파일에 나눠 둡니다.
+//   data\keys\measure-history\00.json ~ 99.json  (환자번호 …33 → 33.json)
+// 저장할 때 그 환자의 작은 파일 하나만 다시 쓰므로, 누적 환자가 수십만 명이어도 저장 속도가 그대로입니다.
+// 화면 쪽에서는 지금처럼 'measure-history' 하나로 보입니다 (전체 읽기·저장·부분 조회 모두 같은 주소).
+const SHARDED = new Set(['measure-history']);
+const SHARD_IDS = Array.from({ length: 100 }, (_, i) => String(i).padStart(2, '0'));
+function shardOf(id) {
+  const digits = String(id).replace(/\D/g, '');
+  if (digits) return digits.slice(-2).padStart(2, '0');
+  let h = 0;
+  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) % 100;
+  return String(h).padStart(2, '0');
+}
+const shardKey = (key, shard) => `${key}/${shard}`;
+function shardData(key, shard) {
+  const item = readItem(shardKey(key, shard));
+  return item ? parsedOf(shardKey(key, shard), item).obj : {};
+}
+// 전체 버전 = 100개 파일 버전의 합 (어느 파일이든 저장하면 늘어남)
+function shardedVersion(key) {
+  return SHARD_IDS.reduce((n, sh) => n + (readItem(shardKey(key, sh))?.version || 0), 0);
+}
+function writeShard(key, shard, obj) {
+  fs.mkdirSync(path.join(KEYS_DIR, key), { recursive: true });
+  const k = shardKey(key, shard);
+  const saved = writeItem(k, JSON.stringify(obj));
+  parsed.set(k, { version: saved.version, obj });
+}
+// 예전 한 파일(measure-history.json)은 서버를 켤 때 100개 파일로 나눠 옮깁니다 (원본은 백업 폴더에 남김).
+function splitOldShardedFiles() {
+  for (const key of SHARDED) {
+    const file = keyFile(key);
+    if (!fs.existsSync(file)) continue;
+    const item = readItem(key);
+    let obj;
+    try { obj = JSON.parse(item.value) || {}; } catch {
+      console.error(`\n[오류] ${file} 파일을 읽을 수 없어 나눠 옮기지 못했습니다. 서버를 멈춥니다.\n`);
+      process.exit(EXIT_DATA_ERROR);
+    }
+    const byShard = {};
+    for (const [id, v] of Object.entries(obj)) (byShard[shardOf(id)] ||= {})[id] = v;
+    for (const [sh, part] of Object.entries(byShard)) writeShard(key, sh, { ...shardData(key, sh), ...part });
+    const keep = path.join(BACKUP_DIR, localDate());
+    fs.mkdirSync(keep, { recursive: true });
+    if (!fs.existsSync(path.join(keep, `${key}.json`))) fs.copyFileSync(file, path.join(keep, `${key}.json`));
+    fs.rmSync(file, { force: true });
+    cache.delete(key);
+    console.log(`${key}: ${Object.keys(obj).length}명 기록을 100개 파일로 나눠 옮겼습니다.`);
+  }
+}
 function readItem(key) {
   if (cache.has(key)) return cache.get(key);
   const file = keyFile(key);
@@ -132,10 +183,11 @@ function backupOncePerDay() {
   try {
     const target = path.join(BACKUP_DIR, day);
     if (fs.existsSync(target)) return;
-    const files = fs.existsSync(KEYS_DIR) ? fs.readdirSync(KEYS_DIR).filter(f => f.endsWith('.json')) : [];
+    const files = fs.existsSync(KEYS_DIR) ? fs.readdirSync(KEYS_DIR).filter(f => f.endsWith('.json') || SHARDED.has(f)) : [];
     if (!files.length) return;
     fs.mkdirSync(target, { recursive: true });
-    for (const f of files) fs.copyFileSync(path.join(KEYS_DIR, f), path.join(target, f));
+    // 나눠 둔 기록(폴더)도 폴더째 복사합니다
+    for (const f of files) fs.cpSync(path.join(KEYS_DIR, f), path.join(target, f), { recursive: true });
     const days = fs.readdirSync(BACKUP_DIR).filter(f => /^\d{4}-\d{2}-\d{2}$/.test(f)).sort();
     for (const d of days.slice(0, Math.max(0, days.length - BACKUP_KEEP_DAYS))) {
       fs.rmSync(path.join(BACKUP_DIR, d), { recursive: true, force: true });
@@ -184,6 +236,7 @@ function archiveOldPatients() {
 
 fs.mkdirSync(KEYS_DIR, { recursive: true });
 migrateOldStore();
+splitOldShardedFiles();
 archiveOldPatients();
 setInterval(() => {
   try { archiveOldPatients(); } catch (e) { console.error(`[경고] 지난 명단 보관 실패: ${e.message}`); }
@@ -283,17 +336,22 @@ async function handleApi(req, res, pathname) {
     if (!KEY_RE.test(key)) return sendJson(res, 400, { error: 'bad key' });
     let body;
     try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
-    const item = readItem(key);
-    if (!item) return sendJson(res, 404, { version: 0 });
-    if (body?.have !== undefined && body.have !== null && Number(body.have) === item.version) {
+    const ids = Array.isArray(body?.ids) ? body.ids.map(String) : [];
+    const sharded = SHARDED.has(key);
+    const item = sharded ? null : readItem(key);
+    const version = sharded ? shardedVersion(key) : item?.version || 0;
+    if (!version) return sendJson(res, 404, { version: 0 });
+    if (body?.have !== undefined && body.have !== null && Number(body.have) === version) {
       res.writeHead(304, { 'Cache-Control': 'no-store' });
       res.end();
       return;
     }
-    const all = parsedOf(key, item);
     const out = {};
-    (Array.isArray(body?.ids) ? body.ids : []).forEach(id => { if (Object.prototype.hasOwnProperty.call(all.obj, id)) out[id] = all.obj[id]; });
-    return sendJson(res, 200, { key, value: JSON.stringify(out), version: item.version });
+    ids.forEach(id => {
+      const obj = sharded ? shardData(key, shardOf(id)) : parsedOf(key, item).obj;
+      if (Object.prototype.hasOwnProperty.call(obj, id)) out[id] = obj[id];
+    });
+    return sendJson(res, 200, { key, value: JSON.stringify(out), version });
   }
 
   // 환자별 기록을 환자 한 명 칸만 바꿔 저장합니다 (파일 전체를 주고받지 않도록).
@@ -306,28 +364,65 @@ async function handleApi(req, res, pathname) {
     try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
     const entries = Array.isArray(body?.entries) ? body.entries.filter(e => typeof e?.id === 'string' && e.id) : [];
     if (!entries.length) return sendJson(res, 400, { error: 'no entries' });
-    const item = readItem(key);
-    const obj = item ? parsedOf(key, item).obj : {};
+    const sharded = SHARDED.has(key);
+    const item = sharded ? null : readItem(key);
+    const current = (id) => (sharded ? shardData(key, shardOf(id)) : item ? parsedOf(key, item).obj : {})[id];
     const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-    const changed = entries.filter(e => !same(obj[e.id], e.prev));
-    if (changed.length) return sendJson(res, 409, { error: 'conflict', current: Object.fromEntries(changed.map(e => [e.id, obj[e.id] ?? null])) });
-    const next = { ...obj };
-    entries.forEach(e => { if (e.next === null || e.next === undefined) delete next[e.id]; else next[e.id] = e.next; });
-    let saved;
+    const changed = entries.filter(e => !same(current(e.id), e.prev));
+    if (changed.length) return sendJson(res, 409, { error: 'conflict', current: Object.fromEntries(changed.map(e => [e.id, current(e.id) ?? null])) });
+    const setEntry = (obj, e) => { if (e.next === null || e.next === undefined) delete obj[e.id]; else obj[e.id] = e.next; };
     try {
-      saved = writeItem(key, JSON.stringify(next));
+      if (sharded) {
+        const byShard = {};
+        entries.forEach(e => { const sh = shardOf(e.id); byShard[sh] ||= { ...shardData(key, sh) }; setEntry(byShard[sh], e); });
+        for (const [sh, obj] of Object.entries(byShard)) writeShard(key, sh, obj);
+        return sendJson(res, 200, { key, version: shardedVersion(key) });
+      }
+      const next = { ...(item ? parsedOf(key, item).obj : {}) };
+      entries.forEach(e => setEntry(next, e));
+      const saved = writeItem(key, JSON.stringify(next));
+      parsed.set(key, { version: saved.version, obj: next });
+      return sendJson(res, 200, { key, version: saved.version });
     } catch (e) {
       console.error(`[오류] 저장 실패: ${e.message}`);
       return sendJson(res, 500, { error: 'write failed' });
     }
-    parsed.set(key, { version: saved.version, obj: next });
-    return sendJson(res, 200, { key, version: saved.version });
   }
 
   const m = pathname.match(/^\/api\/storage\/([^/]+)$/);
   if (!m) return sendJson(res, 404, { error: 'not found' });
   const key = decodeURIComponent(m[1]);
   if (!KEY_RE.test(key)) return sendJson(res, 400, { error: 'bad key' });
+
+  // 나눠 둔 기록 전체 읽기·저장 (예전 방식 화면이나 점검용). 100개 파일을 합쳐서/나눠서 처리
+  if (SHARDED.has(key) && (req.method === 'GET' || req.method === 'PUT')) {
+    const version = shardedVersion(key);
+    if (req.method === 'GET') {
+      if (!version) return sendJson(res, 404, { version: 0 });
+      const have = new URL(req.url, 'http://localhost').searchParams.get('have');
+      if (have !== null && Number(have) === version) { res.writeHead(304, { 'Cache-Control': 'no-store' }); res.end(); return; }
+      const all = {};
+      SHARD_IDS.forEach(sh => Object.assign(all, shardData(key, sh)));
+      return sendJson(res, 200, { key, value: JSON.stringify(all), version });
+    }
+    let body;
+    try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
+    if (typeof body?.value !== 'string') return sendJson(res, 400, { error: 'value must be a string' });
+    if (body.version !== undefined && body.version !== null && Number(body.version) !== version) return sendJson(res, 409, { error: 'conflict', version });
+    let obj;
+    try { obj = JSON.parse(body.value) || {}; } catch { return sendJson(res, 400, { error: 'bad value' }); }
+    const byShard = Object.fromEntries(SHARD_IDS.map(sh => [sh, {}]));
+    for (const [id, v] of Object.entries(obj)) byShard[shardOf(id)][id] = v;
+    try {
+      for (const sh of SHARD_IDS) {
+        if (JSON.stringify(byShard[sh]) !== JSON.stringify(shardData(key, sh))) writeShard(key, sh, byShard[sh]);
+      }
+    } catch (e) {
+      console.error(`[오류] 저장 실패: ${e.message}`);
+      return sendJson(res, 500, { error: 'write failed' });
+    }
+    return sendJson(res, 200, { key, version: shardedVersion(key) });
+  }
 
   if (req.method === 'GET') {
     const item = readItem(key);
