@@ -1152,7 +1152,7 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className={`sticky top-0 z-10 ${c.bg} border-b ${c.border}`}>
+      <div className={`sticky top-0 z-10 ${c.bg} border-b ${c.border} print:hidden`}>
         <div className={`${SHELL_WIDTH} mx-auto px-5 py-2 flex items-center justify-between gap-3 flex-wrap`}>
           <div>
             <div className={`text-[11px] leading-none font-medium ${c.text} mb-1`}>Ophthalmology Flow{forcedToday && <span className="ml-2 px-1.5 rounded bg-amber-100 text-amber-800">날짜 {forcedToday} (직접 정함)</span>}</div>
@@ -1171,7 +1171,7 @@ function ScreenShell({ title, color, onBack, lastSync, count, extra, children })
         </div>
       </div>
       <div className={`${SHELL_WIDTH} mx-auto px-5 py-5`}>{children}</div>
-      {lastSync && <div className="t-hint text-center text-xs text-slate-400 pb-6">마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')}</div>}
+      {lastSync && <div className="t-hint text-center text-xs text-slate-400 pb-6 print:hidden">마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')}</div>}
     </div>
   );
 }
@@ -4320,6 +4320,83 @@ function DayStats({ patients, settings, doctors }) {
     </div>
   );
 }
+/* 역할별 1장 안내문: 자리마다 붙여 두는 요약. 방 이름은 지금 설정을 따라감. [인쇄]하면 역할마다 한 장씩 */
+function roleGuideSheets(settings) {
+  const vision = visionNames(settings).name;
+  const rooms = settings.rooms.filter(r => r.builtin !== 'treat').map(r => r.name).join(' · ') || '검사실';
+  const treat = treatRoomOf(settings).name;
+  return [
+    { key: 'vision', title: vision, steps: [
+      '접수: 아래 "접수 대기"에서 [접수] (QR로 찍은 환자는 자동 접수). 늦게 온 환자는 [지각].',
+      '카드 첫 줄의 할 일을 차례로 합니다. 끝난 일은 버튼이 사라집니다.',
+      '  · [측정값 입력] → 값 입력 → [확인] (안압을 비우면 한 번 더 묻습니다)',
+      '  · 초진: [History 필요] → 적고 [확인] (빈칸이어도 [확인]은 꼭)',
+      '  · ARK 같은 시력방 검사 칸 누르기',
+      '  · 산동 예정: [산동] 누르면 점안 시각 기록 (지금 못 하면 "점안 없이 넘기기")',
+      '할 일이 모두 끝나면 자동으로 다음 단계로 넘어갑니다. 잘못 넘어가면 알림의 [되돌리기].',
+      '고칠 때: "오늘" 값 옆 [수정], Hx 옆 [수정].',
+      '초진/재진이 틀리면 이름 옆 [초진]/[재진]을 눌러 바꿉니다 (재진이면 History 버튼이 없어짐).',
+      '검사 추가·빼기, 산동 넣기·빼기: 맨 아래 [+ 검사 변경].',
+    ] },
+    { key: 'exam', title: `검사실 (${rooms})`, steps: [
+      '위쪽 장비 버튼(VF · OCT …)을 누르면 내 장비 환자만 봅니다. [전체]는 모두.',
+      '[처방 전]: 전산 처방을 넣은 뒤 누르면 "처방 완료". 취소는 옆의 ↺.',
+      '검사 칸을 누르면 완료(초록 ✓), 다시 누르면 취소. 오른쪽 클릭(길게 누르기): 단안·프로토콜.',
+      '"우선" 표시가 붙은 검사를 먼저 합니다.',
+      'VF: [▶ 시작] → 끝나면 [종료]. 검사 중에는 다른 장비로 부르지 않습니다.',
+      '산동 예정: [산동] 누르면 점안 시각 기록. VF 전에는 "산동 · VF 끝난 뒤"로 잠겨 있습니다.',
+      '검사 추가·빼기: [+ 검사 변경]. 다른 검사실에 남은 검사는 카드 끝에 보입니다.',
+      '잘못 눌렀으면 알림의 [되돌리기] 또는 아래 "방금 완료한 환자".',
+    ] },
+    { key: 'treat', title: treat, steps: [
+      '진료 전 처치(PRP · YAG 등): 맨 위 카드에서 [처치 완료]. 산동 예정이면 [산동]으로 점안 기록.',
+      '검사 준비(FAG skin test 등): [시작] → 시간이 지나면 [확인] 또는 [검사 취소].',
+      '검사 지정 대기(초진 · 2차 진료): History와 오늘 검사를 보고 [검사 지정] → 검사·예진 여부 선택.',
+      '예진: 검사를 마친 환자 카드에서 [예진 완료].',
+      '전공의 처치: [처치 완료]. 잘못 눌렀으면 아래 "방금 완료한 환자"에서 취소.',
+    ] },
+    { key: 'consult', title: '진료실', steps: [
+      '위에서 교수님을 고릅니다.',
+      '진료 대기 명단에서 [진료 호출] → 진료 중 카드가 위에 크게 뜹니다.',
+      '진료 중: [진료 완료] · [추가 검사] · [처치] · [보내기 (시력·검사실·처치실)]. 잘못 부르면 [호출 취소].',
+      '설명 대기: [설명 완료] 창에서 다음 내원 검사·FU를 지정합니다.',
+      '너무 바쁘면 [설명 완료 · FU 나중에] → 관리자 "FU 나중에 지정할 환자"로 갑니다.',
+      '처치 중인 환자는 처치가 끝나면 귀가 처리할 수 있습니다.',
+    ] },
+    { key: 'admin', title: '관리자', steps: [
+      '아침: [명단 업로드]에서 엑셀 올리기 (제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의).',
+      '[명단 관리]: 주황 테두리 "확인 필요" 환자의 오늘 검사를 지정합니다. 이전 시력이 없으면 [이전 시력 입력].',
+      '다음 주 환자도 날짜를 바꿔 미리 볼 수 있습니다 (지난 시력 · 예정 검사 확인, 이전 시력 입력).',
+      '[접수 안내 일괄 적용]: 접수 때 보여줄 안내 · 진료 전 처치를 여러 명에게 한 번에.',
+      '[FU 지정 관리] · [대기 화면 안내](환자용 화면 노란 문구) · [오늘 통계].',
+      '날짜가 틀리면 메인 화면 "오늘 날짜"에서 그날만 바꿀 수 있습니다.',
+    ] },
+  ];
+}
+function RoleGuides({ settings }) {
+  const sheets = roleGuideSheets(settings);
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-4 print:hidden">
+        <p className="text-sm text-slate-500">자리마다 붙여 둘 1장 요약입니다. [인쇄]하면 역할마다 한 장씩 나옵니다 (방 이름은 설정을 따라갑니다).</p>
+        <button type="button" onClick={() => window.print()} className="text-sm px-4 py-2 rounded-lg bg-slate-800 text-white font-medium">인쇄</button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 print:block">
+        {sheets.map(sh => (
+          <section key={sh.key} className="bg-white border border-slate-200 rounded-xl p-5 print:border-0 print:rounded-none print:p-0 print:break-after-page">
+            <div className="text-xs text-slate-400">Ophthalmology Flow · 이 자리 사용법</div>
+            <h3 className="text-xl font-semibold text-slate-900 mt-1 mb-3 print:text-3xl">{sh.title}</h3>
+            <ol className="space-y-1.5 text-sm text-slate-700 print:text-lg print:space-y-3">
+              {sh.steps.map((t, i) => t.startsWith('  · ')
+                ? <li key={i} className="pl-6 text-slate-600">{t.trim()}</li>
+                : <li key={i} className="flex gap-2"><span className="text-slate-400 shrink-0">{sh.steps.slice(0, i + 1).filter(x => !x.startsWith('  · ')).length}.</span><span>{t}</span></li>)}
+            </ol>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
 function BoardNoticeAdmin({ settings, doctors, doctorPrefs, value, mutate }) {
   const notices = value?.notices || {};
   const presets = Array.isArray(value?.presets) ? value.presets : NOTICE_PRESETS;
@@ -4627,11 +4704,12 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
     { key: 'fu', label: 'FU 지정 관리' },
     { key: 'notice', label: '대기 화면 안내' },
     { key: 'stats', label: '오늘 통계' },
+    { key: 'guide', label: '역할별 안내문' },
   ];
 
   return (
     <ScreenShell title="관리자" color="slate" onBack={onBack} lastSync={lastSync}>
-      <div className="flex gap-2 mb-5 flex-wrap">
+      <div className="flex gap-2 mb-5 flex-wrap print:hidden">
         {TABS.map(t => (
           <button key={t.key} type="button" onClick={() => { setTab(t.key); setMessage(''); }} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.key ? 'bg-slate-800 text-white' : 'bg-white border border-slate-300 text-slate-600'}`}>
             {t.label}
@@ -4867,6 +4945,8 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
       )}
 
       {tab === 'stats' && <DayStats patients={patients} settings={settings} doctors={doctors} />}
+
+      {tab === 'guide' && <RoleGuides settings={settings} />}
 
       {tab === 'fu' && (
         <div>
