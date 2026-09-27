@@ -417,6 +417,10 @@ export function groupPending(p, g) {
 export function isVfTest(t) {
   return t.id === 'vf' || /\bVF\b/i.test(t.short || '') || /시야|\bVF\b/i.test(t.name || '');
 }
+// [▶ 시작]·[종료]로 하는 검사: VF, 또는 '진행 중 호출 금지'를 켠 일반 검사 (시간 재기 검사는 처치실 준비로 따로)
+export function startStopTest(t) {
+  return isVfTest(t) || (!!t.holdCall && !t.prepOn);
+}
 export function activeVf(p) {
   return p.vfInProgress && p.assigned?.[p.vfInProgress] && !p.done?.[p.vfInProgress] ? p.vfInProgress : null;
 }

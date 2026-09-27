@@ -250,7 +250,7 @@ export const TEST_OPTION_HELP = {
   noOrder: "처방이 필요 없는 검사 (예: OSDI). '처방 전' 표시를 하지 않음",
   noDilate: '이 검사가 끝나기 전에는 점안(산동)을 막음 (예: VF)',
   prepOn: '처치실에서 시작 시각 기록 → 정한 시간이 되면 [확인] (방식: 확인 후 넘어감 · 바로 넘어감, 자세히에서 선택)',
-  holdCall: '처치실에서 이 검사를 하는 동안(시작~확인) 검사실에서 부르지 않음 (예: Schirmer)',
+  holdCall: '이 검사를 하는 동안 다른 검사실에서 부르지 않음. 일반 검사는 VF처럼 [▶ 시작]·[종료]가 생기고, 시간 재기 검사는 시작~확인 동안 (예: Schirmer, OSDI)',
   withExams: '처치실 검사: 다른 검사실을 기다리는 동안에도 처치실 목록에 뜸 (예: OSDI). 끄면 다른 검사 뒤에 (예: Syringing)',
   showWhenEmpty: '검사실 화면 위쪽 장비 버튼을 대기 0명이어도 보임',
 };
@@ -1462,4 +1462,41 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
       </div>
     </div>
   );
+}
+
+// 카드의 [검사 변경]에서 검사 켜고 끄기 + 세부 창 (처치실 등에서 함께 씀)
+export function useTestEditing(patients, settings, mutatePatients) {
+  const [detailFor, setDetailFor] = useState(null);
+  const setAssigned = (pk, key, val, detail) =>
+    mutatePatients(prev => prev.map(x => {
+      if (patientKey(x) !== pk || activeVf(x)) return x;
+      const nextDetail = { ...(x.detail || {}) };
+      if (!val || detail === null) delete nextDetail[key];
+      else if (detail) nextDetail[key] = detail;
+      return { ...x, assigned: { ...x.assigned, [key]: val }, done: val ? x.done : { ...x.done, [key]: false }, detail: nextDetail };
+    }));
+  const pickTest = (p, t, on) => {
+    if (t.popupOnClick) { setDetailFor({ key: patientKey(p), testId: t.id }); return; }
+    setAssigned(patientKey(p), t.id, !on);
+  };
+  const openSpecial = (p, t) => setDetailFor({ key: patientKey(p), testId: t.id });
+  const dp = detailFor ? patients.find(x => patientKey(x) === detailFor.key) : null;
+  const dt = detailFor ? settings.tests.find(t => t.id === detailFor.testId) : null;
+  const modal = detailFor && dp && dt ? (
+    <TestDetailModal
+      key={`${detailFor.key}-${detailFor.testId}`}
+      test={dt}
+      patientName={dp.name}
+      on={!!dp.assigned?.[dt.id]}
+      value={dp.detail?.[dt.id]}
+      onApply={(d) => {
+        const kept = pickDetail({ [dt.id]: d }, { [dt.id]: true }, [dt])[dt.id] || null;
+        setAssigned(detailFor.key, dt.id, true, kept);
+        setDetailFor(null);
+      }}
+      onRemove={() => { setAssigned(detailFor.key, dt.id, false); setDetailFor(null); }}
+      onCancel={() => setDetailFor(null)}
+    />
+  ) : null;
+  return { pickTest, openSpecial, modal };
 }

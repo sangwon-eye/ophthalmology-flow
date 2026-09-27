@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, prepWaitMin, renameTestOptions, sortedTests, toDraft } from '../core/flow.jsx';
+import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, prepWaitMin, renameTestOptions, sortedTests, toDraft, isVfTest } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';
@@ -149,7 +149,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             ['noOrder', '처방 없음', !!t.noOrder, true],
             ['noDilate', '산동 금지', noDilateTest(t), true],
             ['prepOn', '시간 재기', !!t.prepOn, true],
-            ['holdCall', '진행 중 호출 금지', !!t.holdCall, !!t.prepOn && t.prepMode !== 'go'],
+            ['holdCall', '진행 중 호출 금지', !!t.holdCall, roomKey !== 'vision' && !isVfTest(t) && !(t.prepOn && t.prepMode === 'go')],
             ['withExams', '대기 중에도', !!t.withExams, isTreat],
             ['showWhenEmpty', '0명도 표시', t.showWhenEmpty !== false, machineGroups(tests).length >= 2],
           ].filter(o => o[3]);

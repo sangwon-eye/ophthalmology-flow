@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistory, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf } from '../core/flow.jsx';
+import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistory, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -321,6 +321,11 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
                   </button>
                 )}
                 {isVision && <HistoryControl p={p} />}
+                {runningVf && !tests.some(t => t.id === runningVf) && (() => {
+                  const rt = settings.tests.find(t => t.id === runningVf);
+                  const rr = rt?.roomId === 'vision' ? visionNames(settings).name : settings.rooms.find(r => r.id === rt?.roomId)?.name || '';
+                  return <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{rr} {rt?.short || rt?.name || '검사'} 중 · 호출 금지</span>;
+                })()}
                 {held && <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{treatRoomOf(settings).name} {held.short || held.name} 중 · 호출 금지</span>}
                 {tests.filter(t => p.assigned?.[t.id] && t.id !== VISION_KEY).map(t => (
                   !p.done?.[t.id] && prepBlocked(p, t) ? (
@@ -329,7 +334,7 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
                       <span className="font-semibold">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
                       <span className="ml-1.5 text-xs">{prepPositive(p, t) ? '검사 취소' : prepOf(p, t)?.startedAt ? `${t.prepName || '준비'} 중` : `${t.prepName || '준비'} 전`}</span>
                     </div>
-                  ) : isVfTest(t) && !p.done?.[t.id] ? (
+                  ) : startStopTest(t) && !p.done?.[t.id] ? (
                     runningVf === t.id ? (
                       <div key={t.id} className={`${TEST_TILE} overflow-hidden border-amber-500 bg-amber-50 text-sm`}>
                         <span className="px-3 font-semibold text-amber-900">{testLabelWithOptions(t, p.detail?.[t.id])} 검사 중</span>

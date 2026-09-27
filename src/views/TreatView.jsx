@@ -4,8 +4,8 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks } from '../core/flow.jsx';
-import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking } from '../core/flow.jsx';
+import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
 
@@ -23,6 +23,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   const [sortMode, changeSort] = useSortMode('sort-procedure');
   const order = sortMode === 'name' ? byName : byQueue;
   const [toastNode, showToast] = useUndoToast();
+  const testEdit = useTestEditing(patients, settings, mutatePatients);
   const allTests = sortedTests(settings);
   const waitMin = settings.dilationWaitMin;
 
@@ -256,6 +257,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                   </div>
                 );
               })}
+              {/* 처치실이 전체를 조율: 여기서도 오늘 검사 바꾸기 */}
+              <TestPicker p={p} tests={orderForPicking(allTests, settings)} mainIds={mainTestIds(doctorPrefs, p.doctor)} onPick={(t, on) => testEdit.pickTest(p, t, on)} onSpecial={(t) => testEdit.openSpecial(p, t)}>
+                <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+              </TestPicker>
             </SimpleCard>
           ))}
         </div>
@@ -370,6 +375,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           onCancel={() => setTriageFor(null)}
         />
       )}
+      {testEdit.modal}
       {toastNode}
     </ScreenShell>
   );
