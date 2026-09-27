@@ -225,6 +225,21 @@ function dilationBlockers(p) {
 function visionComplete(p) {
   return !!p.done?.[VISION_KEY] && VISION_TEST_IDS.every(id => !p.assigned?.[id] || !!p.done?.[id]);
 }
+// 시력방 할 일: 측정값 [확인], (초진) History [확인], 시력방 검사(ARK 등), (산동 예정) 첫 점안.
+// 모두 끝나면 시력/안압 완료로 자동으로 넘어감. 점안은 [점안 없이 넘기기](dilateSkip)나 산동 금지 검사(VF)가 남으면 제외
+function visionTasksLeft(p, prefs) {
+  const left = [];
+  if (!p.measureOk) left.push('measure');
+  if (hxNeeded(p) && !p.hx) left.push('hx');
+  if (VISION_TEST_IDS.some(id => p.assigned?.[id] && !p.done?.[id])) left.push('tests');
+  if (dropDue(p, prefs)) left.push('drop');
+  return left;
+}
+function dropDue(p, prefs) {
+  if (p.dilateSkip) return false;
+  const st = dilationState(p, prefs, 15);
+  return !!st.need && st.given === 0 && dilationBlockers(p).length === 0;
+}
 function pastVision(p) {
   return !!p.checkin && visionComplete(p) && (!(assignAtTreat(p) || p.addOnCheck) || !!p.triageAssigned || !!p.triageDone);
 }
@@ -1559,7 +1574,7 @@ function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSa
   const fields = mode === 'gat' ? ['gat'] : mode === 'vision' ? ['ucva', 'bcva', 'nct'] : ['ucva', 'bcva', 'nct', 'gat'];
   const noIop = mode === 'vision' && !gat && !m.nct.od.trim() && !m.nct.os.trim();
   const title = mode === 'prev' ? '이전 시력·안압' : mode === 'gat' ? 'GAT 안압' : '오늘 시력·안압';
-  const completeLabel = mode === 'gat' ? 'GAT 완료' : '저장하고 완료';
+  const completeLabel = mode === 'gat' ? 'GAT 완료' : '확인';
 
   const submit = (complete) => {
     if (complete && noIop && !warned) { setWarned(true); return; }
@@ -1635,13 +1650,13 @@ function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSa
 
         {warned && noIop && (
           <div className="mt-4 text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-3">
-            NCT 값이 비어 있어요. GAT로 잴 환자라면 위에서 체크해주세요. 그래도 완료하려면 한 번 더 누르세요.
+            NCT 값이 비어 있어요. GAT로 잴 환자라면 위에서 체크해주세요. 그래도 넘어가려면 [확인]을 한 번 더 누르세요.
           </div>
         )}
 
         <div className="flex gap-2 mt-6">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
-          {mode !== 'gat' && <button type="button" onClick={() => submit(false)} className={`flex-1 py-3 rounded-xl font-medium ${mode === 'prev' ? 'bg-slate-800 text-white' : 'border border-slate-300 text-slate-700'}`}>저장</button>}
+          {mode === 'prev' && <button type="button" onClick={() => submit(false)} className={`flex-1 py-3 rounded-xl font-medium ${mode === 'prev' ? 'bg-slate-800 text-white' : 'border border-slate-300 text-slate-700'}`}>저장</button>}
           {mode !== 'prev' && (
             <button type="button" onClick={() => submit(true)} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-medium">{completeLabel}</button>
           )}
@@ -2149,17 +2164,15 @@ function DraggableList({ items, getKey, onMove, renderItem, locked = false }) {
   );
 }
 
-function DilationBadge({ st, waitMin, large = false }) {
-  const w = Number(waitMin) || 15;
+function DilationBadge({ st, large = false }) {
   const sz = large ? 'text-sm px-2.5 py-1' : 'text-xs px-2 py-0.5';
   // 점안 전에는 빨간 [점안] 버튼만으로 충분해 따로 표시하지 않음 (점안 시각은 버튼에 표시)
   if (st.status === 'todo') return null;
   if (st.status === 'progress') {
     return <span className={`${sz} rounded-full bg-blue-100 text-blue-800`}>{st.mins}분 경과</span>;
   }
-  if (st.status === 'waiting') {
-    return <span className={`${sz} rounded-full bg-blue-100 text-blue-800`}>{Math.max(0, w - st.mins)}분 남음</span>;
-  }
+  // 기다리는 중에는 점안 시각(버튼)만 보여주고 남은 시간은 표시하지 않음
+  if (st.status === 'waiting') return null;
   return <span className={`${sz} rounded-full bg-green-100 text-green-800`}>산동 완료</span>;
 }
 
@@ -2206,12 +2219,16 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
   const blocked = blockers.length > 0 && st.given === 0;
   if (compact && !dil && !cr) return null;
   if (togglesOnly) showDrops = false;
+  // 카드 줄(compact): 켜고 끄기 칩 없이 [산동] 하나만. 누르면 점안 시각 기록(다시 누르면 취소).
+  // 산동 예정 자체를 빼는 것은 [검사 변경] 안에서 (다른 검사처럼)
+  const single = compact && showDrops;
+  const eyeText = eye ? ` · ${DILATE_EYE_LABEL[eye]}` : '';
   // large: 시력방처럼 산동을 해야 하는 곳에서 크게
   const sz = large ? 'text-sm px-3 py-1.5 font-medium' : 'text-xs px-2.5 py-1';
   const chip = (on) => `${sz} rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
   return (
     <div className={group ? 'inline-flex flex-wrap items-center gap-1.5' : inline ? 'contents' : 'w-full flex flex-wrap items-center gap-1.5'}>
-      {!cr && (
+      {!cr && !single && (
         <SpecialPressButton
           onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateOverride: !dil }))}
           onSpecial={() => setEyeModal(true)}
@@ -2231,14 +2248,14 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
           onCancel={() => setEyeModal(false)}
         />
       )}
-      {crAvail && (cr || !compact) && (
+      {crAvail && !single && (cr || !compact) && (
         <button type="button" onClick={() => patchPatient(mutatePatients, pk, x => ({ cr: !x.cr }))} className={chip(cr)}>
           {cr ? 'CR' : 'CR 안 함'}
         </button>
       )}
       {showDrops && st.need && blocked && (
         <span className={`${sz} rounded-lg border border-slate-300 bg-slate-100 text-slate-600`} title="산동 금지 검사가 끝나야 점안할 수 있어요">
-          {blockers.map(t => t.short).join(', ')} 끝난 뒤 점안
+          {single ? `${cr ? 'CR' : `산동${eyeText}`} · ${blockers.map(t => t.short).join(', ')} 끝난 뒤` : `${blockers.map(t => t.short).join(', ')} 끝난 뒤 점안`}
         </span>
       )}
       {showDrops && st.need && !blocked && st.drops.map((t, i) => (
@@ -2251,10 +2268,10 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
             ? 'bg-slate-100 border-slate-200 text-slate-500'
             : i === st.given ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-300 text-slate-500'}`}
         >
-          {cr ? `${i + 1}회 점안` : '점안'}{t ? ` ${fmtClock(t)}` : ''}
+          {single ? (cr ? `CR ${i + 1}회` : `산동${eyeText}`) : (cr ? `${i + 1}회 점안` : '점안')}{t ? ` ${fmtClock(t)}` : ''}
         </button>
       ))}
-      {st.need && !togglesOnly && !blocked && <DilationBadge st={st} waitMin={waitMin} large={large} />}
+      {st.need && !togglesOnly && !blocked && <DilationBadge st={st} large={large} />}
     </div>
   );
 }
@@ -2847,13 +2864,34 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
     patchPatient(mutatePatients, patientKey(p), x => updateVf(x, t.id, action, at));
   };
 
-  // History가 필요한 환자는 History 창에서 [확인](빈칸이어도)을 눌러야 시력/안압을 완료할 수 있음
-  const hxBlock = (p, key) => key === VISION_KEY && !p.hx && hxNeeded(p);
-  const HX_BLOCK_MSG = (p) => `${p.name} History를 먼저 확인해주세요 (빈칸이어도 [History 필요] → [확인])`;
+  // 시력방: 할 일(측정값·History·시력방 검사·점안)을 모두 마치면 자동으로 시력/안압 완료.
+  // 모든 시력방 컴퓨터에서 같은 결과를 쓰므로 여러 번 써도 괜찮고, 알림은 지금 누른 컴퓨터(포커스)에서만
+  const undoVision = (pk) => patchPatient(mutatePatients, pk, x => ({
+    done: { ...x.done, [VISION_KEY]: false }, doneAt: { ...(x.doneAt || {}), [VISION_KEY]: null }, measureOk: null, dilateSkip: false,
+  }));
+  const readyKeys = isVision ? roomList.filter(p => !p.done?.[VISION_KEY] && !activeVf(p) && visionTasksLeft(p, doctorPrefs).length === 0).map(patientKey).join(',') : '';
+  useEffect(() => {
+    if (!readyKeys) return;
+    const keys = new Set(readyKeys.split(','));
+    const at = Date.now();
+    mutatePatients(prev => prev.map(x => (keys.has(patientKey(x)) && !x.done?.[VISION_KEY] && visionTasksLeft(x, doctorPrefs).length === 0
+      ? { ...x, done: { ...x.done, [VISION_KEY]: true }, doneAt: { ...(x.doneAt || {}), [VISION_KEY]: at } }
+      : x)));
+    let focused = true;
+    try { focused = document.hasFocus(); } catch { /* 확인 못 하면 알림 표시 */ }
+    if (focused) {
+      const ps = patients.filter(x => keys.has(patientKey(x)));
+      if (ps.length === 1) {
+        const p = ps[0];
+        showToast(`${p.name} 시력방 완료${!hasIop(p) ? ' (안압 값 없음)' : ''}${assignAtTreat(p) ? ', 처치실로' : ''}`, () => undoVision(patientKey(p)));
+      } else if (ps.length > 1) showToast(`${ps.map(x => x.name).join(', ')} 시력방 완료`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyKeys]);
+
   const markDone = (p, key, val) => {
     if (activeVf(p)) return;
     const pk = patientKey(p);
-    if (val && hxBlock(p, key)) { showToast(HX_BLOCK_MSG(p)); return; }
     writeDone(pk, key, val, Date.now());
     if (val) {
       const noIop = key === VISION_KEY && !hasIop(p);
@@ -2891,8 +2929,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
       : x))));
   };
 
-  const handleMeasureSave = ({ measure, complete: wantComplete, gat, date }) => {
-    let complete = wantComplete;
+  const handleMeasureSave = ({ measure, complete, gat, date }) => {
     const { key: pk, mode: mmode } = measureFor;
     const p = patients.find(x => patientKey(x) === pk);
     setMeasureFor(null);
@@ -2908,9 +2945,6 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
       ? { gat: measure.gat }
       : { ucva: measure.ucva, bcva: measure.bcva, autoV: measure.autoV, nct: measure.nct };
     const doneKey = mmode === 'gat' ? GAT_ID : VISION_KEY;
-    // History 확인 전이면 측정값만 저장하고 완료는 막음
-    const blocked = complete && hxBlock(p, doneKey);
-    if (blocked) complete = false;
     const at = Date.now();
     mutatePatients(prev => prev.map(x => {
       if (patientKey(x) !== pk || activeVf(x)) return x;
@@ -2919,14 +2953,15 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
         nx = { ...nx, assigned: { ...nx.assigned, [GAT_ID]: gat } };
         if (!gat) nx = { ...nx, done: { ...nx.done, [GAT_ID]: false } };
       }
-      if (complete) {
+      // 시력방 [확인]은 측정 완료만 표시 (시력방 할 일이 다 끝나면 위의 자동 완료로 넘어감)
+      if (complete && mmode === 'vision') nx = { ...nx, measureOk: at };
+      else if (complete) {
         nx = { ...nx, done: { ...nx.done, [doneKey]: true }, doneAt: { ...(nx.doneAt || {}), [doneKey]: at } };
       }
       return nx;
     }));
     mutateHistory(prev => mergeHistory(prev, p.id, p.date, patch));
-    if (blocked) showToast(`측정값 저장됨 · ${HX_BLOCK_MSG(p)}`);
-    else if (complete) showToast(`${p.name} ${testLabel(doneKey)} 완료`, () => writeDone(pk, doneKey, false, null));
+    if (complete && mmode !== 'vision') showToast(`${p.name} ${testLabel(doneKey)} 완료`, () => writeDone(pk, doneKey, false, null));
   };
 
   // 되돌리기 목록
@@ -3004,10 +3039,15 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 onToggleFirst={isVision ? () => toggleFirstVisit(pk) : undefined}
               >
                 {/* 값이 있는 줄만 보여줌 (값 없음 줄은 생략) */}
-                {isVision && (hasAnyValue(prev) || hasAnyValue(p.measure)) && (
+                {isVision && (hasAnyValue(prev) || hasAnyValue(p.measure) || p.measureOk) && (
                   <div className="w-full space-y-1">
                     {hasAnyValue(prev) && <MeasureLine label="이전" m={prev} />}
-                    {hasAnyValue(p.measure) && <MeasureLine label="오늘" m={p.measure} fields={['ucva', 'bcva', 'nct']} />}
+                    {(hasAnyValue(p.measure) || p.measureOk) && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <MeasureLine label="오늘" m={p.measure} fields={['ucva', 'bcva', 'nct']} emptyText="측정값 없음" />
+                        {p.measureOk && <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision' })} aria-label="측정값 수정" className="text-xs px-2 py-0.5 rounded border border-blue-200 text-blue-700 hover:bg-blue-50">수정</button>}
+                      </div>
+                    )}
                   </div>
                 )}
                 {roomHasGat && p.assigned?.[GAT_ID] && (hasFieldValue(prev, ['nct', 'gat']) || hasFieldValue(p.measure, ['nct', 'gat'])) && (
@@ -3046,7 +3086,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     </span>
                   );
                 })()}
-                {isVision && (
+                {isVision && !p.measureOk && (
                   <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision' })} className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium">
                     측정값 입력
                   </button>
@@ -3092,6 +3132,10 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                   // 시력방: 첫 줄은 할 일(측정값·History·산동), 오늘 검사는 둘째 줄에 작게 (Hx 내용 아래)
                   if (isVision) return <>
                     {dilation}
+                    {dropDue(p, doctorPrefs) && (
+                      <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateSkip: true }))} title="점안은 다음 검사실·처치실에서 기록할 수 있어요"
+                        className="text-xs text-slate-500 hover:text-slate-800 underline">점안 없이 넘기기</button>
+                    )}
                     <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>
                     <div className="order-last w-full flex flex-wrap items-center gap-1.5">{picker}</div>
                   </>;
@@ -3159,7 +3203,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
           return (
             <RecentRow key={pk} p={p} time={fmtClock(at)}>
               {keys.map(k => (
-                <UndoButton key={k} label={`${testLabel(k)} 완료 취소`} onClick={() => writeDone(pk, k, false, null)} />
+                <UndoButton key={k} label={`${testLabel(k)} 완료 취소`} onClick={() => (k === VISION_KEY && isVision ? undoVision(pk) : writeDone(pk, k, false, null))} />
               ))}
             </RecentRow>
           );
