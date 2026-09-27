@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop } from '../core/flow.jsx';
+import { COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, loadKey, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -1473,7 +1473,7 @@ export function useTestEditing(patients, settings, mutatePatients) {
       const nextDetail = { ...(x.detail || {}) };
       if (!val || detail === null) delete nextDetail[key];
       else if (detail) nextDetail[key] = detail;
-      return { ...x, assigned: { ...x.assigned, [key]: val }, done: val ? x.done : { ...x.done, [key]: false }, detail: nextDetail };
+      return { ...x, assigned: { ...x.assigned, [key]: val }, done: val ? x.done : { ...x.done, [key]: false }, detail: nextDetail, ...(val ? {} : withoutPrep(x, key)) };
     }));
   const pickTest = (p, t, on) => {
     if (t.popupOnClick) { setDetailFor({ key: patientKey(p), testId: t.id }); return; }

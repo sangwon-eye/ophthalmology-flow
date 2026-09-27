@@ -251,6 +251,13 @@ export function prepCancelPatch(x, t) {
 }
 // 시간 재는 중이고(시작, 확인 전) 아직 완료 안 된 검사
 export function prepRunning(p, t) { const st = prepOf(p, t); return hasPrep(t) && !!st?.startedAt && !st.result && !st.go && !p.done?.[t.id]; }
+// 검사를 미시행으로 되돌리거나 뺄 때 시간 재기 기록(시작 시각·확인)도 지움 → 처음 상태([검사 이름])로
+export function withoutPrep(x, key) {
+  if (!x.prep?.[key]) return {};
+  const prep = { ...x.prep };
+  delete prep[key];
+  return { prep };
+}
 export function prepPositiveNames(p) {
   return Object.values(p.prep || {}).filter(x => x?.result === 'pos').map(x => x.name).filter(Boolean);
 }
