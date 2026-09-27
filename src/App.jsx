@@ -1906,14 +1906,14 @@ function HistoryControl({ p }) {
   const pk = patientKey(p);
   return (
     <>
-      {!p.hx && (
+      {/* 재진은 버튼 없음 (관리자 명단 관리에서 'History 필요'로 지정한 환자만) */}
+      {!p.hx && (need || p.firstVisit) && (
         <button type="button" onClick={() => setOpen(true)}
           className={`text-sm px-3 py-1.5 rounded-lg font-medium ${need ? 'bg-amber-500 text-white' : 'border border-sky-300 text-sky-700 bg-white'}`}>
           {need ? 'History 필요' : 'History 입력'}
         </button>
       )}
       {!p.hx && need && <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: false }))} className="text-xs text-slate-400 hover:text-slate-600 underline">필요 없음</button>}
-      {!p.hx && !need && p.firstVisit && <button type="button" aria-label="History 필요로 표시" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxNeeded: true }))} className="text-xs text-slate-400 hover:text-slate-600 underline">필요로 표시</button>}
       {p.hx && (
         <div className="order-last w-full flex items-stretch text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg overflow-hidden">
           <div className="flex-1 min-w-0 px-3 py-1.5"><span className="font-semibold mr-1">Hx</span>{hxSummary(p.hx, ctx.fields) || '특이사항 없음'}</div>
@@ -1922,6 +1922,21 @@ function HistoryControl({ p }) {
       )}
       {open && <HistoryModal p={p} onClose={() => setOpen(false)} />}
     </>
+  );
+}
+
+// 관리자 명단 관리: 이 환자를 'History 필요'로 지정/해제 (FU loss·중간 내원 등). 시력방에 [History 필요]가 뜸
+function HxNeedToggle({ p }) {
+  const ctx = useContext(HxContext);
+  const mutatePatients = useContext(PatientMemoContext);
+  if (p.hx || p.consultDone) return null;
+  const need = hxNeeded(p, ctx);
+  return (
+    <button type="button" aria-pressed={need} onClick={() => patchPatient(mutatePatients, patientKey(p), () => ({ hxNeeded: !need }))}
+      title={need ? '누르면 History 필요 해제' : '누르면 시력방에 History 필요 표시'}
+      className={`text-xs px-3 py-1.5 rounded-lg border ${need ? 'bg-amber-50 border-amber-400 text-amber-800 font-medium' : 'border-slate-300 text-slate-400'}`}>
+      History 필요
+    </button>
   );
 }
 
@@ -4597,6 +4612,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                   {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
                   {doctors.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
+                <HxNeedToggle p={p} />
                 <button type="button" onClick={() => toggleFirst(patientKey(p))} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
                 </button>
