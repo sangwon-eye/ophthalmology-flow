@@ -188,13 +188,15 @@ export function clearOrders(p, testIds) {
 export function hasPrep(t) { return !!t?.prepOn; }
 export function prepOf(p, t) { return p.prep?.[t.id] || null; }
 // 준비 결과가 음성이어야 검사실에서 검사할 수 있음
-export function prepBlocked(p, t) { return hasPrep(t) && prepOf(p, t)?.result !== 'neg'; }
+// 처치실 검사(예: Schirmer, MMP)의 시간 재기는 '진료 전 검사' 칸에서 바로 함 (검사 준비는 FAG처럼 검사실 검사의 준비만)
+export function isTreatPrep(t) { return hasPrep(t) && t.roomId === 'treat'; }
+export function prepBlocked(p, t) { return hasPrep(t) && !isTreatPrep(t) && prepOf(p, t)?.result !== 'neg'; }
 // 양성이면 그 검사는 보류 (검사실 대기에서 빠지고, 진료실에 표시)
 export function prepPositive(p, t) { return hasPrep(t) && prepOf(p, t)?.result === 'pos'; }
 export function prepWaitMin(t) { return Math.max(0, Number(t?.prepWaitMin ?? 20) || 0); }
 // 처치실에서 준비할 검사 (지정됐고, 아직 안 했고, 결과 전)
 export function prepPendingTests(p, settings) {
-  return sortedTests(settings).filter(t => hasPrep(t) && p.assigned?.[t.id] && !p.done?.[t.id] && !prepOf(p, t)?.result);
+  return sortedTests(settings).filter(t => hasPrep(t) && !isTreatPrep(t) && p.assigned?.[t.id] && !p.done?.[t.id] && !prepOf(p, t)?.result);
 }
 // 시간 재기 방식: 'confirm'(기본, 시간이 되면 직원이 확인해야 넘어감 · FAG, Schirmer) / 'go'(시작하면 바로 넘어가고 시간이 되면 확인 알림 · MMP)
 export function prepGoMode(t) { return t?.prepMode === 'go'; }
@@ -207,6 +209,48 @@ export function prepChecks(p, settings) {
 export function prepHolding(p, settings) {
   return sortedTests(settings).find(t => hasPrep(t) && t.holdCall && !prepGoMode(t) && p.assigned?.[t.id] && !p.done?.[t.id] && prepOf(p, t)?.startedAt && !prepOf(p, t)?.result) || null;
 }
+// 시간 재기 버튼 이름: 따로 적은 이름(예: skin test)이 없으면 검사 이름 (예전 기본값 '검사 준비'도 검사 이름으로)
+export function prepLabel(t) {
+  const n = String(t?.prepName || '').trim();
+  return n && n !== '검사 준비' ? n : (t?.short || t?.name || '');
+}
+// 처치실 검사는 [확인]이 곧 검사 완료 (검사실 검사는 '확인하면 검사 완료'를 켠 경우만)
+export function prepCompletesTest(t, settings) {
+  return !!t?.prepCompletes || t?.roomId === treatRoomOf(settings).id;
+}
+// 예전에 확인만 되고 완료가 안 된 처치실 검사 고치기 (바뀐 게 없으면 그대로)
+export function fixTreatPreps(p, settings) {
+  let done = p.done, doneAt = p.doneAt, changed = false;
+  sortedTests(settings).forEach(t => {
+    const st = p.prep?.[t.id];
+    if (hasPrep(t) && t.roomId === treatRoomOf(settings).id && p.assigned?.[t.id] && st?.result === 'neg' && !done?.[t.id]) {
+      done = { ...done, [t.id]: true }; doneAt = { ...(doneAt || {}), [t.id]: st.at || Date.now() }; changed = true;
+    }
+  });
+  return changed ? { ...p, done, doneAt } : p;
+}
+// 시간 재기 시작·확인·취소 (검사 준비 카드와 진료 전 검사 칸이 함께 씀). 바로 넘어감은 시작하면 검사 완료
+export function prepStartPatch(x, t, at) {
+  const st = prepGoMode(t) ? { startedAt: at, go: true, name: t.short || t.name } : { startedAt: at, name: t.short || t.name };
+  return {
+    prep: { ...(x.prep || {}), [t.id]: st },
+    ...(prepGoMode(t) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
+  };
+}
+export function prepConfirmPatch(x, t, settings, at) {
+  return {
+    prep: { ...(x.prep || {}), [t.id]: { ...(x.prep?.[t.id] || {}), result: 'neg', at } },
+    ...(prepCompletesTest(t, settings) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
+  };
+}
+export function prepCancelPatch(x, t) {
+  return {
+    prep: { ...(x.prep || {}), [t.id]: null },
+    ...(x.prep?.[t.id]?.go ? { done: { ...x.done, [t.id]: false }, doneAt: { ...(x.doneAt || {}), [t.id]: null } } : {}),
+  };
+}
+// 시간 재는 중이고(시작, 확인 전) 아직 완료 안 된 검사
+export function prepRunning(p, t) { const st = prepOf(p, t); return hasPrep(t) && !!st?.startedAt && !st.result && !st.go && !p.done?.[t.id]; }
 export function prepPositiveNames(p) {
   return Object.values(p.prep || {}).filter(x => x?.result === 'pos').map(x => x.name).filter(Boolean);
 }

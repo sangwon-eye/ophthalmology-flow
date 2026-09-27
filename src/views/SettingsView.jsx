@@ -82,7 +82,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
         machine: String(t.machine || '').trim(),
         showWhenEmpty: t.showWhenEmpty !== false,
         prepOn: !!t.prepOn,
-        prepName: String(t.prepName || '').trim() || (t.prepOn ? '검사 준비' : ''),
+        prepName: String(t.prepName || '').trim() === '검사 준비' ? '' : String(t.prepName || '').trim(),
         prepWaitMin: Math.max(0, Math.round(Number(t.prepWaitMin ?? 20) || 0)),
         withExams: !!t.withExams,
         holdCall: !!t.holdCall,
@@ -103,19 +103,25 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
     };
     setDraft(toDraft(cleaned));
     setDirty(false);
-    await mutateSettings(() => cleaned);
+    const docs = [...docDraft], prefs = { ...prefDraft };
+    await Promise.all([mutateSettings(() => cleaned), mutateDoctors(() => docs), mutateDoctorPrefs(() => prefs)]);
     setNotice('저장했습니다. 다른 컴퓨터에도 몇 초 안에 반영됩니다.');
   };
-  const revert = () => { setDraft(toDraft(settings)); setDirty(false); setNotice(''); };
+  const revert = () => { setDraft(toDraft(settings)); setDocDraft([...(doctors || [])]); setPrefDraft({ ...(doctorPrefs || {}) }); setDirty(false); setNotice(''); };
 
+  // 교수 관리도 다른 탭처럼 고친 뒤 [저장] (그 전에는 초안)
+  const [docDraft, setDocDraft] = useState(() => [...(doctors || [])]);
+  const [prefDraft, setPrefDraft] = useState(() => ({ ...(doctorPrefs || {}) }));
+  const editDocs = (fn) => { setDocDraft(fn); setDirty(true); setNotice(''); };
+  const editPrefs = (fn) => { setPrefDraft(fn); setDirty(true); setNotice(''); };
   const addDoctor = () => {
     const name = newDoctor.trim();
-    if (!name || doctors.includes(name)) return;
-    mutateDoctors(prev => (prev.includes(name) ? prev : [...prev, name]));
+    if (!name || docDraft.includes(name)) return;
+    editDocs(prev => (prev.includes(name) ? prev : [...prev, name]));
     setNewDoctor('');
   };
-  const removeDoctor = (name) => mutateDoctors(prev => prev.filter(d => d !== name));
-  const setPref = (name, key, val) => mutateDoctorPrefs(prev => ({ ...prev, [name]: { ...(prev[name] || {}), [key]: val } }));
+  const removeDoctor = (name) => editDocs(prev => prev.filter(d => d !== name));
+  const setPref = (name, key, val) => editPrefs(prev => ({ ...prev, [name]: { ...(prev[name] || {}), [key]: val } }));
 
   const updateProc = (id, patch) => updateDraft(d => ({ ...d, procedures: (d.procedures || []).map(x => (x.id === id ? { ...x, ...patch } : x)) }));
   const addProc = () => updateDraft(d => ({ ...d, procedures: [...(d.procedures || []), { id: newId('p'), name: '', performer: 'prof' }] }));
@@ -128,7 +134,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
     [list[i], list[j]] = [list[j], list[i]];
     return { ...d, procedures: list };
   });
-  const moveDoctor = (name, dir) => mutateDoctors(prev => {
+  const moveDoctor = (name, dir) => editDocs(prev => {
     const i = prev.indexOf(name);
     const j = dir === 'up' ? i - 1 : i + 1;
     if (i < 0 || j < 0 || j >= prev.length) return prev;
@@ -219,13 +225,13 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                   {t.prepOn && (
                     <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
                       시간 재기:
-                      <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} placeholder="예: 동의서 · skin test" onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-44 bg-white" />
+                      <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} placeholder="버튼 이름 (비우면 검사 이름, 예: skin test)" onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-44 bg-white" />
                       <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16 bg-white" />분
                       <select aria-label={`${t.short || t.name} 시간 재기 방식`} value={t.prepMode === 'go' ? 'go' : 'confirm'} onChange={e => updateTest(t.id, { prepMode: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white">
                         <option value="confirm">시간이 되면 직원이 [확인]해야 넘어감 (예: FAG, Schirmer)</option>
                         <option value="go">시작하면 바로 넘어가고, 시간이 되면 확인 알림 (예: MMP)</option>
                       </select>
-                      {t.prepMode !== 'go' && <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={!!t.prepCompletes} onChange={e => updateTest(t.id, { prepCompletes: e.target.checked })} className="w-4 h-4" />확인하면 검사 완료</label>}
+                      {t.prepMode !== 'go' && !isTreat && <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={!!t.prepCompletes} onChange={e => updateTest(t.id, { prepCompletes: e.target.checked })} className="w-4 h-4" />확인하면 검사 완료</label>}
                     </div>
                   )}
                   <div className="flex items-center justify-end">
@@ -405,44 +411,45 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">교수 목록</div>
           <p className="text-sm text-slate-500 mb-3">
-            교수 목록과 아래 설정은 바로 저장됩니다. 초진 예진 기본값은 처치실에서 새로 검사 지정할 때 적용되며, 환자별로 변경할 수 있어요. 이미 지정한 환자의 예진 여부는 유지됩니다. 기본 산동과 CR 사용도 교수별로 설정할 수 있어요.
+            고친 뒤 아래 [저장]을 눌러야 적용됩니다. 초진 예진 기본값은 처치실에서 새로 검사 지정할 때 적용되고(환자별로 변경 가능), 기본 산동·CR 사용도 교수별로 정합니다.
+            <span className="block mt-1"><b className="text-slate-700">주요 검사</b> · 체크한 검사만 먼저 보이고 나머지는 [기타 검사]를 눌러야 보입니다 (설명 완료 창, [검사 변경], 검사 지정·추가 검사 창).</span>
           </p>
           <div className="flex gap-2 mb-4">
             <input placeholder="교수님 성함" value={newDoctor} onChange={e => setNewDoctor(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addDoctor(); }} className={INPUT} />
             <button type="button" onClick={addDoctor} className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium shrink-0">추가</button>
           </div>
-          {doctors.length === 0 && <div className="text-sm text-slate-400">등록된 교수가 없습니다</div>}
+          {docDraft.length === 0 && <div className="text-sm text-slate-400">등록된 교수가 없습니다</div>}
           <div className="space-y-2">
-            {doctors.map(name => (
+            {docDraft.map(name => (
               <div key={name} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 flex-wrap">
                   <span className="text-slate-700 flex-1">{name}</span>
-                  <DoctorRoomInput name={name} value={doctorPrefs?.[name]?.roomNo} onSave={v => setPref(name, 'roomNo', v)} />
+                  <DoctorRoomInput name={name} value={prefDraft?.[name]?.roomNo} onSave={v => setPref(name, 'roomNo', v)} />
                   <label className="flex items-center gap-1.5 text-xs text-slate-600">
                     초진 예진 기본값
-                    <select aria-label={`${name} 초진 예진 기본값`} value={doctorPrefs?.[name]?.triageRequired === false ? 'no' : 'yes'} onChange={e => setPref(name, 'triageRequired', e.target.value === 'yes')} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                    <select aria-label={`${name} 초진 예진 기본값`} value={prefDraft?.[name]?.triageRequired === false ? 'no' : 'yes'} onChange={e => setPref(name, 'triageRequired', e.target.value === 'yes')} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
                       <option value="yes">예진 함</option>
                       <option value="no">예진 안 함</option>
                     </select>
                   </label>
                 <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-                  <input type="checkbox" checked={!!doctorPrefs?.[name]?.dilate} onChange={e => setPref(name, 'dilate', e.target.checked)} className="w-4 h-4" />
+                  <input type="checkbox" checked={!!prefDraft?.[name]?.dilate} onChange={e => setPref(name, 'dilate', e.target.checked)} className="w-4 h-4" />
                   기본 산동
                 </label>
                 <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer mr-2">
-                  <input type="checkbox" checked={!!doctorPrefs?.[name]?.cr} onChange={e => setPref(name, 'cr', e.target.checked)} className="w-4 h-4" />
+                  <input type="checkbox" checked={!!prefDraft?.[name]?.cr} onChange={e => setPref(name, 'cr', e.target.checked)} className="w-4 h-4" />
                   CR 사용
                 </label>
                 <button type="button" aria-label="위로" onClick={() => moveDoctor(name, 'up')} className="p-1 rounded border border-slate-200 text-slate-500 bg-white"><ChevronUp size={14} /></button>
                 <button type="button" aria-label="아래로" onClick={() => moveDoctor(name, 'down')} className="p-1 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>
                 <ConfirmButton label="삭제" onConfirm={() => removeDoctor(name)} />
                 <div className="w-full border-t border-slate-200 pt-2">
-                  <div className="text-xs text-slate-500 mb-2">주요 검사 목록 · 체크한 검사를 먼저 보여주고, 나머지는 [기타 검사]를 눌러야 보입니다. 다음 내원 검사(설명 완료 창)와 오늘 검사 고르기([검사 변경]·검사 지정·추가 검사)에 함께 쓰입니다.</div>
-                  <div className="flex flex-wrap gap-2">{sortedTests(settings).map(t => {
-                    const selected = doctorPrefs?.[name]?.followupTests;
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="text-xs font-medium text-slate-500">주요 검사</span>{sortedTests(settings).map(t => {
+                    const selected = prefDraft?.[name]?.followupTests;
                     const checked = !Array.isArray(selected) || selected.includes(t.id);
                     return <label key={t.id} className="flex items-center gap-1 text-sm text-slate-700"><input type="checkbox" checked={checked} onChange={e => {
                       const on = e.target.checked;
-                      mutateDoctorPrefs(prev => { const current = prev[name]?.followupTests; const ids = Array.isArray(current) ? current : sortedTests(settings).map(x => x.id); return { ...prev, [name]: { ...prev[name], followupTests: on ? [...new Set([...ids, t.id])] : ids.filter(id => id !== t.id) } }; });
+                      editPrefs(prev => { const current = prev[name]?.followupTests; const ids = Array.isArray(current) ? current : sortedTests(settings).map(x => x.id); return { ...prev, [name]: { ...prev[name], followupTests: on ? [...new Set([...ids, t.id])] : ids.filter(id => id !== t.id) } }; });
                     }} />{t.short || t.name}</label>;
                   })}</div>
                 </div>

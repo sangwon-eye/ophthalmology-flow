@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistory, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest } from '../core/flow.jsx';
+import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistory, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, hasPrep, isTreatPrep, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -21,6 +21,9 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
   const [measureFor, setMeasureFor] = useState(null);
   const [detailFor, setDetailFor] = useState(null);
   const [toastNode, showToast] = useUndoToast();
+  // 시간 재는 칸(예: Schirmer)이 정한 시간이 되면 초록으로 바뀌도록 가끔 다시 그림
+  const [, setTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(i); }, []);
   const isVision = mode === 'vision';
   const room = isVision ? null : settings.rooms.find(r => r.id === mode);
 
@@ -146,6 +149,16 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
     setAssigned(patientKey(p), t.id, !on);
   };
   const openSpecial = (p, t) => setDetailFor({ key: patientKey(p), testId: t.id });
+  // 처치실 시간 재기 검사(예: Schirmer, MMP): 칸을 누르면 시작 시각, 시간이 되면 [끝 · 확인]
+  const prepAct = (p, t, kind) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
+    patchPatient(mutatePatients, pk, x => (kind === 'start' ? prepStartPatch(x, t, at) : kind === 'confirm' ? prepConfirmPatch(x, t, settings, at) : prepCancelPatch(x, t)));
+    const label = prepLabel(t);
+    const msg = kind === 'start' ? (prepGoMode(t) ? `${label} 시작 · 시간이 되면 처치실에 알림` : `${label} 시작`) : kind === 'confirm' ? `${t.short || t.name} 완료` : `${label} 시작 취소`;
+    showToast(`${p.name} ${msg}`, () => patchPatient(mutatePatients, pk, () => before));
+  };
 
   const checkIn = (p) => {
     const pk = patientKey(p);
@@ -332,9 +345,26 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
                     // 처치실 준비(예: skin test)가 끝나야 할 수 있는 검사: 잠긴 칸으로 상태만 보여줌
                     <div key={t.id} title="처치실 준비가 끝나면 할 수 있어요" className={`${TEST_TILE} px-3 text-sm ${prepPositive(p, t) ? 'border-red-300 bg-red-50 text-red-700' : 'border-dashed border-slate-300 bg-slate-50 text-slate-500'}`}>
                       <span className="font-semibold">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
-                      <span className="ml-1.5 text-xs">{prepPositive(p, t) ? '검사 취소' : prepOf(p, t)?.startedAt ? `${t.prepName || '준비'} 중` : `${t.prepName || '준비'} 전`}</span>
+                      <span className="ml-1.5 text-xs">{prepPositive(p, t) ? '검사 취소' : prepOf(p, t)?.startedAt ? `${prepLabel(t)} 중` : `${prepLabel(t)} 전`}</span>
                     </div>
-                  ) : startStopTest(t) && !p.done?.[t.id] ? (
+                  ) : isTreatPrep(t) && !p.done?.[t.id] ? (() => {
+                    const st = prepOf(p, t);
+                    const label = prepLabel(t);
+                    if (!st?.startedAt) return (
+                      <button key={t.id} type="button" disabled={locked} onClick={() => prepAct(p, t, 'start')} title={`누르면 시작 시각 기록 (${prepWaitMin(t)}분)`}
+                        className={`${TEST_TILE} px-3 text-sm font-semibold bg-white border-slate-300 text-slate-800 hover:border-slate-400 disabled:opacity-40`}>{label}</button>
+                    );
+                    if (prepDue(st, t)) return (
+                      <button key={t.id} type="button" onClick={() => prepAct(p, t, 'confirm')} className={`${TEST_TILE} px-3 text-sm font-semibold bg-green-600 border-green-600 text-white`}>{label} 끝 · 확인</button>
+                    );
+                    return (
+                      <span key={t.id} className="flex items-center gap-1.5">
+                        <button type="button" onClick={() => prepAct(p, t, 'cancel')} title={`${prepWaitMin(t)}분 뒤 [끝 · 확인] · 다시 누르면 시작 취소`}
+                          className={`${TEST_TILE} px-3 text-sm font-semibold bg-slate-100 border-slate-300 text-slate-700`}>{label} {fmtClock(st.startedAt)}</button>
+                        <button type="button" onClick={() => prepAct(p, t, 'confirm')} className="text-xs text-green-700 underline">지금 확인</button>
+                      </span>
+                    );
+                  })() : startStopTest(t) && !p.done?.[t.id] ? (
                     runningVf === t.id ? (
                       <div key={t.id} className={`${TEST_TILE} overflow-hidden border-amber-500 bg-amber-50 text-sm`}>
                         <span className="px-3 font-semibold text-amber-900">{testLabelWithOptions(t, p.detail?.[t.id])} 검사 중</span>

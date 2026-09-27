@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete } from './core/flow.jsx';
+import { DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, loadHx, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -186,6 +186,12 @@ export default function App() {
     const t = setInterval(refresh, 4000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  // 처치실 시간 재기 검사: 확인만 되고 완료가 안 된 예전 기록을 완료로 (Schirmer가 진료 전 검사에 남던 문제)
+  useEffect(() => {
+    if (role === 'board' || role === 'kiosk') return;
+    if (patients.some(p => fixTreatPreps(p, settings) !== p)) mutatePatients(prev => prev.map(p => fixTreatPreps(p, settings)));
+  }, [patients, settings, role, mutatePatients]);
 
 
   const renderView = () => {
