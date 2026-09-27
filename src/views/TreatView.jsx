@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf } from '../core/flow.jsx';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -85,7 +85,9 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   };
 
   // 검사 준비 (예: FAG 동의서 · skin test): 시작 → 대기 시간 → 음성이면 검사실로, 양성이면 보류
-  const prepList = patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).length > 0).sort(order);
+  // 방금(10분 안) 끝난 준비도 '완료'로 잠깐 보여줌
+  const recentPreps = (p) => sortedTests(settings).filter(t => hasPrep(t) && p.assigned?.[t.id] && prepOf(p, t)?.result === 'neg' && Date.now() - (prepOf(p, t).at || 0) < 10 * 60000);
+  const prepList = patients.filter(p => !p.consultDone && pastVision(p) && (prepPendingTests(p, settings).length > 0 || recentPreps(p).length > 0)).sort(order);
   const setPrep = (p, t, value, msg) => {
     const pk = patientKey(p);
     const before = p.prep?.[t.id] || null;
@@ -158,30 +160,26 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       )}
       {prepList.length > 0 && (
         <div className="mb-8">
-          <SectionTitle hint="처치실에서 시간을 재는 검사·준비입니다 (예: FAG 동의서 · skin test, Schirmer, MMP). 시간이 지나면 [확인] 또는 [검사 취소]를 눌러주세요.">검사 준비 · {prepList.length}명</SectionTitle>
+          <SectionTitle hint="처치실에서 시간을 재는 검사·준비입니다 (예: FAG skin test, Schirmer, MMP). 버튼을 누르면 시작 시각이 적히고, 정한 시간이 지나면 저절로 완료됩니다.">검사 준비 · {prepList.length}명</SectionTitle>
           {prepList.map(p => (
             <SimpleCard key={patientKey(p)} p={p} tone="violet">
-              {prepPendingTests(p, settings).map(t => {
+              {[...prepPendingTests(p, settings), ...recentPreps(p)].map(t => {
                 const st = prepOf(p, t);
-                const wait = prepWaitMin(t);
-                const mins = st?.startedAt ? Math.floor((Date.now() - st.startedAt) / 60000) : 0;
-                const ready = !!st?.startedAt && mins >= wait;
+                const label = t.prepName || '검사 준비';
+                // 산동처럼 버튼 하나: 누르면 시작 시각, 다시 누르면 시작 취소. 정한 시간이 지나면 저절로 완료
                 return (
-                  <div key={t.id} className="w-full flex items-center gap-2 flex-wrap">
+                  <div key={t.id} className="flex items-center gap-2 flex-wrap mr-4">
                     <span className="text-sm font-semibold text-slate-900">{t.short || t.name}</span>
-                    <span className="text-sm text-slate-600">{t.prepName || '검사 준비'}</span>
-                    {!st?.startedAt ? (
-                      <button type="button" onClick={() => setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${t.prepName || '준비'} 시작`)}
-                        className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium">{t.prepName || '준비'} 시작</button>
+                    {st?.result === 'neg' ? (
+                      <span className="text-sm px-3 py-1.5 rounded-lg bg-green-100 text-green-800 border border-green-300 font-medium flex items-center gap-1"><Check size={14} />{label} 완료 {fmtClock(st.at)}</span>
+                    ) : !st?.startedAt ? (
+                      <button type="button" onClick={() => setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`)}
+                        className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium">{label}</button>
                     ) : <>
-                      <span className={`text-sm px-2.5 py-1 rounded-lg font-semibold ${ready ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
-                        {fmtClock(st.startedAt)} 시작 · {ready ? `${mins}분 · 결과 확인` : `${mins}분 / ${wait}분`}
-                      </span>
-                      <button type="button" onClick={() => confirmPrep(p, t, st)} title={t.prepCompletes ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
-                        className={`text-sm px-4 py-2 rounded-lg font-medium ${ready ? 'bg-green-600 text-white' : 'border border-green-300 text-green-700'}`}>확인</button>
-                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`)} title="이 검사를 오늘 하지 않음 (진료실에 표시)"
-                        className="text-sm px-3 py-2 rounded-lg border border-red-300 text-red-700 font-medium">검사 취소</button>
-                      <button type="button" onClick={() => setPrep(p, t, null)} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={12} />시작 취소</button>
+                      <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`)} title={`${prepWaitMin(t)}분 뒤 자동 완료 · 다시 누르면 시작 취소`}
+                        className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-medium">{label} {fmtClock(st.startedAt)}</button>
+                      <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`)} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
+                        className="text-xs text-red-600 underline">검사 취소</button>
                     </>}
                   </div>
                 );
@@ -268,6 +266,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       {reqFor && (
         <TestCheckModal
           key={`req-${patientKey(reqFor)}`}
+          mainIds={mainTestIds(doctorPrefs, reqFor.doctor)}
           title={`${reqFor.name}님 추가 검사`}
           subtitle={`${reqFor.sendNote?.text ? `진료실 메모: ${reqFor.sendNote.text} · ` : ''}추가할 검사를 체크하세요. 검사 후 예진이 필요하면 아래에서 '예진 함'을 고르세요.`}
           tests={allTests}
@@ -283,6 +282,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       {triageFor && (
         <TestCheckModal
           key={`triage-${patientKey(triageFor)}`}
+          mainIds={mainTestIds(doctorPrefs, triageFor.doctor)}
           title={assignAtTreat(triageFor) ? `${triageFor.name}님 검사 지정` : `${triageFor.name}님 2차 진료 추가 검사 (${triageFor.doctor})`}
           subtitle={assignAtTreat(triageFor)
             ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'

@@ -160,6 +160,11 @@ export function orderForPicking(tests, settings) {
 /* 검사 처방: 처방은 모든 검사실 검사를 한 번에 넣으므로, 어느 검사실에서 [처방 전]을 눌러 처방 완료로 바꿔도
    그 환자의 모든 검사가 처방 완료로 표시됩니다 (직원 화면에만 표시).
    처방 완료 뒤 검사가 새로 추가되거나 다시 하게 되면 그 검사는 '처방 전'으로 돌아갑니다. */
+// 교수님별 주요 검사: 교수 관리의 '다음 내원 검사 목록'. 목록을 정하지 않은 교수님은 모든 검사가 주요 검사
+export function mainTestIds(prefs, doctor) {
+  const ids = prefs?.[doctor]?.followupTests;
+  return Array.isArray(ids) ? ids : null;
+}
 export function orderedTests(p) {
   return [...new Set(Object.values(p.orders || {}).flatMap(r => r?.tests || []))];
 }
@@ -190,6 +195,22 @@ export function prepWaitMin(t) { return Math.max(0, Number(t?.prepWaitMin ?? 20)
 // 처치실에서 준비할 검사 (지정됐고, 아직 안 했고, 결과 전)
 export function prepPendingTests(p, settings) {
   return sortedTests(settings).filter(t => hasPrep(t) && p.assigned?.[t.id] && !p.done?.[t.id] && !prepOf(p, t)?.result);
+}
+// 준비 시간이 다 된 검사를 '확인'(음성)으로 바꾼 환자 (자동 완료). 바뀐 게 없으면 그대로 돌려줌
+export function autoCompletePreps(p, settings, now = Date.now()) {
+  let changed = false;
+  const prep = { ...(p.prep || {}) };
+  let done = p.done, doneAt = p.doneAt;
+  sortedTests(settings).forEach(t => {
+    const st = prep[t.id];
+    if (!hasPrep(t) || !st?.startedAt || st.result || !p.assigned?.[t.id]) return;
+    const at = st.startedAt + prepWaitMin(t) * 60000;
+    if (now < at) return;
+    prep[t.id] = { ...st, result: 'neg', at, auto: true };
+    if (t.prepCompletes && !done?.[t.id]) { done = { ...done, [t.id]: true }; doneAt = { ...(doneAt || {}), [t.id]: at }; }
+    changed = true;
+  });
+  return changed ? { ...p, prep, done, doneAt } : p;
 }
 export function prepPositiveNames(p) {
   return Object.values(p.prep || {}).filter(x => x?.result === 'pos').map(x => x.name).filter(Boolean);

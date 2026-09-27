@@ -430,7 +430,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                 <button type="button" aria-label="아래로" onClick={() => moveDoctor(name, 'down')} className="p-1 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>
                 <ConfirmButton label="삭제" onConfirm={() => removeDoctor(name)} />
                 <div className="w-full border-t border-slate-200 pt-2">
-                  <div className="text-xs text-slate-500 mb-2">다음 내원 기본 검사 목록 · 체크한 검사를 먼저 표시합니다. 검사 시행 여부는 설명 완료 창에서 선택합니다.</div>
+                  <div className="text-xs text-slate-500 mb-2">주요 검사 목록 · 체크한 검사를 먼저 보여주고, 나머지는 [기타 검사]를 눌러야 보입니다. 다음 내원 검사(설명 완료 창)와 오늘 검사 고르기([검사 변경]·검사 지정·추가 검사)에 함께 쓰입니다.</div>
                   <div className="flex flex-wrap gap-2">{sortedTests(settings).map(t => {
                     const selected = doctorPrefs?.[name]?.followupTests;
                     const checked = !Array.isArray(selected) || selected.includes(t.id);

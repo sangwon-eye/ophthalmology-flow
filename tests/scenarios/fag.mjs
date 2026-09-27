@@ -25,24 +25,35 @@ await c.screenshot({ path: `${SP}/r16-fag-locked.png` });
 await back();
 await pick('처치실');
 ok(await page.getByText(/^검사 준비 · 3명/).count() === 1, '처치실: 검사 준비 3명 (FAG 2, Schirmer 1)');
+const backdate = async (name, id, min) => editKey('daily-patients', list => list.map(p => (p.name === name ? { ...p, prep: { ...p.prep, [id]: { ...p.prep[id], startedAt: Date.now() - min * 60000 } } } : p)));
 const sch = page.locator('div.bg-white').filter({ hasText: 'Schirmer strip' }).filter({ has: page.getByText('임수빈', { exact: true }) }).first();
-await sch.getByRole('button', { name: 'Schirmer strip 시작' }).click(); await W();
-await sch.getByRole('button', { name: '확인', exact: true }).click(); await W();
-{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '임수빈').done.sch === true, 'Schirmer: 확인하면 검사 완료'); }
+ok(await sch.getByText('Schirmer strip', { exact: true }).count() === 1, '준비 이름은 버튼에 한 번만');
+await sch.getByRole('button', { name: 'Schirmer strip', exact: true }).click(); await W();
+ok(await sch.getByRole('button', { name: /^Schirmer strip \d\d:\d\d$/ }).count() === 1, '누르면 "Schirmer strip 시작 시각"');
+await backdate('임수빈', 'sch', 6);
+await page.waitForTimeout(20000);
+{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '임수빈').done.sch === true, 'Schirmer: 정한 시간이 지나면 저절로 검사 완료'); }
+ok(await sch.getByText(/Schirmer strip 완료 \d\d:\d\d/).count() === 1, '완료로 바뀌어 보임');
 ok(await page.getByText(/^진료 전 검사 · 1명/).count() === 1, '처치실: 진료 전 검사에 OSDI 환자(조현우)');
-const emb = cardOf('조현우');
 ok(await page.locator('div.bg-white').filter({ has: page.getByText('조현우', { exact: true }) }).getByRole('button', { name: /^OSDI/ }).count() >= 1, 'OSDI는 검사실 대기 중에도 처치실에');
 await page.screenshot({ path: `${SP}/r16-treat.png`, fullPage: true });
-// 조현우 준비 시작 → 음성
+// 조현우 skin test 시작 → 다시 누르면 시작 취소 → 다시 시작 → 시간 지나 자동 완료
 const prepCard = page.locator('div.bg-white').filter({ hasText: '동의서 · skin test' }).filter({ has: page.getByText('조현우', { exact: true }) }).first();
-await prepCard.getByRole('button', { name: '동의서 · skin test 시작' }).click(); await W();
-ok(await prepCard.getByText(/시작 · 0분 \/ 20분/).count() === 1, 'skin test 타이머 표시');
-await prepCard.getByRole('button', { name: '확인', exact: true }).click(); await W();
-// 한지훈 시작 → 양성
+await prepCard.getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await W();
+await prepCard.getByRole('button', { name: /^동의서 · skin test \d/ }).click(); await W();
+ok(await prepCard.getByRole('button', { name: '동의서 · skin test', exact: true }).count() === 1, '다시 누르면 시작 취소');
+await prepCard.getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await W();
+await prepCard.screenshot({ path: `${SP}/r32-skin-started.png` });
+await backdate('조현우', 'fag', 21);
+// 한지훈 시작 → 반응 있음(검사 취소)
 const han = page.locator('div.bg-white').filter({ hasText: '동의서 · skin test' }).filter({ has: page.getByText('한지훈', { exact: true }) }).first();
-await han.getByRole('button', { name: '동의서 · skin test 시작' }).click(); await W();
+await han.getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await W();
 await han.getByRole('button', { name: '검사 취소' }).click(); await W();
-ok(await page.getByText(/^검사 준비 · /).count() === 0, '확인/취소 후 검사 준비 목록에서 빠짐');
+await page.waitForTimeout(20000);
+{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '조현우').prep.fag.result === 'neg', 'skin test: 20분 지나면 저절로 완료'); }
+ok(await prepCard.getByText(/동의서 · skin test 완료/).count() === 1, 'skin test 완료 표시');
+await prepCard.screenshot({ path: `${SP}/r32-skin-done.png` });
+ok(await page.getByRole('button', { name: '동의서 · skin test', exact: true }).count() === 0, '남은 준비 없음');
 await back();
 await pick('31번방');
 c = cardOf('조현우');

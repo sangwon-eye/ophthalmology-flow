@@ -282,10 +282,14 @@ export function TestToggle({ label, done, onToggle, emphasize, onSpecial, disabl
 
 // 오늘 검사: 평소에는 선택된 검사만 보여 주고, [검사 변경]을 누르면 모든 검사와 산동 설정(children)이 펼쳐집니다.
 // inline: 접힌 상태를 카드의 버튼 줄 안에 끼워 넣음 (chipsWhenClosed=false면 [검사 변경]만. 검사실은 위의 검사 칸과 겹치므로)
-export function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, inline = false, chipsWhenClosed = true, closedLabel = '', children }) {
+// mainIds: 교수님별 주요 검사. 펼쳤을 때 주요 검사(+이미 지정된 검사)만 먼저, 나머지는 [기타 검사]를 눌러야 보임
+export function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, inline = false, chipsWhenClosed = true, closedLabel = '', mainIds = null, children }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [showOthers, setShowOthers] = useState(false);
   if (!tests.length) return null;
-  const shown = open ? tests : tests.filter(t => p.assigned?.[t.id]);
+  const isMain = (t) => !mainIds || mainIds.includes(t.id) || !!p.assigned?.[t.id];
+  const others = tests.filter(t => !isMain(t));
+  const shown = open ? tests.filter(t => showOthers || isMain(t)) : tests.filter(t => p.assigned?.[t.id]);
   const openButton = (
     <button type="button" aria-expanded="false" onClick={() => setOpen(true)}
       className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 flex items-center gap-1">
@@ -316,6 +320,12 @@ export function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, i
       <span className="text-xs text-slate-400 mr-1">오늘 검사</span>
       {!open && shown.length === 0 && <span className="text-xs text-slate-400">없음</span>}
       {shown.map(chip)}
+      {open && others.length > 0 && (
+        <button type="button" aria-expanded={showOthers} onClick={() => setShowOthers(v => !v)}
+          className="text-xs px-2.5 py-1 rounded-full border border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 flex items-center gap-1">
+          {showOthers ? <>기타 검사 접기 <ChevronUp size={12} /></> : <>기타 검사 {others.length}개 <ChevronDown size={12} /></>}
+        </button>
+      )}
       {open && children && <>
         <span className="h-5 w-px bg-slate-300 mx-0.5" aria-hidden="true" />
         {children}
@@ -1273,7 +1283,7 @@ export function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onCancel }) {
+export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onCancel, mainIds = null }) {
   const [preSel, setPreSel] = useState(() => preProcChoice?.initial || []);
   const tests = orderForPicking(rawTests, settings);
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
@@ -1299,7 +1309,9 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
   });
   const roomName = (id) => id === 'vision' ? visionNames(settings).name : settings.rooms.find(r => r.id === id)?.name || '';
   const preferred = followup?.prefs?.[followupDoctor]?.followupTests;
-  const primary = !followup || !Array.isArray(preferred) ? tests : tests.filter(t => preferred.includes(t.id));
+  // 다음 내원 창은 담당 교수님 목록, 그 밖의 창은 mainIds(그 환자 교수님 목록). 이미 체크된 검사는 항상 보임
+  const mainList = followup ? (Array.isArray(preferred) ? preferred : null) : mainIds;
+  const primary = !mainList ? tests : tests.filter(t => mainList.includes(t.id) || initial?.[t.id]);
   const others = tests.filter(t => !primary.some(x => x.id === t.id));
   const visibleTests = showOthers ? [...primary, ...others] : primary;
   const openExtra = (id) => {
@@ -1351,6 +1363,11 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
             );
           })}
         </div>
+        {!followup && others.length > 0 && (
+          <button type="button" onClick={() => setShowOthers(v => !v)} className="w-full -mt-3 mb-5 rounded-lg border border-slate-300 py-2 text-sm text-slate-600">
+            {showOthers ? '기타 검사 접기' : `기타 검사 보기 (${others.length}개 · 선택 ${others.filter(t => sel[t.id]).length}개)`}
+          </button>
+        )}
         {followup && <div className="mb-5 space-y-2">
           <button type="button" onClick={() => setShowOthers(v => !v)} className="w-full rounded-lg border border-slate-300 py-2 text-sm">{showOthers ? '나머지 검사 접기' : `나머지 검사 보기 (${others.length}개 · 선택 ${others.filter(t => sel[t.id]).length}개)${linkDoctor ? ` · 오늘 ${linkDoctor} 진료 추가` : ''}`}</button>
           {showOthers && <>
