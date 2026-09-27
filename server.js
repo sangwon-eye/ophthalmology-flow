@@ -61,6 +61,16 @@ const cache = new Map();
 function keyFile(key) { return path.join(KEYS_DIR, `${key}.json`); }
 
 const parsed = new Map(); // 부분 조회용: 항목별로 마지막으로 풀어 둔 값
+function parsedOf(key, item) {
+  let all = parsed.get(key);
+  if (!all || all.version !== item.version) {
+    let obj = {};
+    try { obj = JSON.parse(item.value) || {}; } catch { obj = {}; }
+    all = { version: item.version, obj };
+    parsed.set(key, all);
+  }
+  return all;
+}
 function readItem(key) {
   if (cache.has(key)) return cache.get(key);
   const file = keyFile(key);
@@ -172,8 +182,26 @@ function archiveOldPatients() {
   console.log(`지난 명단 ${old.length}명을 보관 파일로 옮겼습니다.`);
 }
 
+// History 미리 채우기(patient-history)는 더 쓰지 않습니다. History는 그날 환자 기록에만 남습니다.
+// 사용 시작 전 테스트로 쌓인 파일은 실시간 데이터와 백업에서 모두 지웁니다.
+function removeRetiredKeys() {
+  for (const key of ['patient-history']) {
+    try {
+      const file = keyFile(key);
+      if (fs.existsSync(file)) { fs.rmSync(file, { force: true }); console.log(`더 쓰지 않는 ${key} 데이터를 지웠습니다.`); }
+      if (fs.existsSync(BACKUP_DIR)) {
+        for (const d of fs.readdirSync(BACKUP_DIR)) {
+          const f = path.join(BACKUP_DIR, d, `${key}.json`);
+          if (fs.existsSync(f)) fs.rmSync(f, { force: true });
+        }
+      }
+    } catch (e) { console.error(`[경고] ${key} 정리 실패: ${e.message}`); }
+  }
+}
+
 fs.mkdirSync(KEYS_DIR, { recursive: true });
 migrateOldStore();
+removeRetiredKeys();
 archiveOldPatients();
 setInterval(() => {
   try { archiveOldPatients(); } catch (e) { console.error(`[경고] 지난 명단 보관 실패: ${e.message}`); }
@@ -280,16 +308,38 @@ async function handleApi(req, res, pathname) {
       res.end();
       return;
     }
-    let all = parsed.get(key);
-    if (!all || all.version !== item.version) {
-      let obj = {};
-      try { obj = JSON.parse(item.value) || {}; } catch { obj = {}; }
-      all = { version: item.version, obj };
-      parsed.set(key, all);
-    }
+    const all = parsedOf(key, item);
     const out = {};
     (Array.isArray(body?.ids) ? body.ids : []).forEach(id => { if (Object.prototype.hasOwnProperty.call(all.obj, id)) out[id] = all.obj[id]; });
     return sendJson(res, 200, { key, value: JSON.stringify(out), version: item.version });
+  }
+
+  // 환자별 기록을 환자 한 명 칸만 바꿔 저장합니다 (파일 전체를 주고받지 않도록).
+  // prev 는 브라우저가 알던 그 칸의 값: 그 사이 다른 컴퓨터가 바꿨으면 거절하고 최신 값을 돌려줍니다.
+  const ent = pathname.match(/^\/api\/storage-entries\/([^/]+)$/);
+  if (ent && req.method === 'POST') {
+    const key = decodeURIComponent(ent[1]);
+    if (!KEY_RE.test(key)) return sendJson(res, 400, { error: 'bad key' });
+    let body;
+    try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
+    const entries = Array.isArray(body?.entries) ? body.entries.filter(e => typeof e?.id === 'string' && e.id) : [];
+    if (!entries.length) return sendJson(res, 400, { error: 'no entries' });
+    const item = readItem(key);
+    const obj = item ? parsedOf(key, item).obj : {};
+    const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const changed = entries.filter(e => !same(obj[e.id], e.prev));
+    if (changed.length) return sendJson(res, 409, { error: 'conflict', current: Object.fromEntries(changed.map(e => [e.id, obj[e.id] ?? null])) });
+    const next = { ...obj };
+    entries.forEach(e => { if (e.next === null || e.next === undefined) delete next[e.id]; else next[e.id] = e.next; });
+    let saved;
+    try {
+      saved = writeItem(key, JSON.stringify(next));
+    } catch (e) {
+      console.error(`[오류] 저장 실패: ${e.message}`);
+      return sendJson(res, 500, { error: 'write failed' });
+    }
+    parsed.set(key, { version: saved.version, obj: next });
+    return sendJson(res, 200, { key, version: saved.version });
   }
 
   const m = pathname.match(/^\/api\/storage\/([^/]+)$/);

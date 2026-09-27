@@ -139,23 +139,64 @@ export function useSharedStore(storageKey, loader, initial) {
     return run;
   }, [storageKey, loader]);
 
+  // 환자별 기록(예: 이전 시력)에서 한 환자 칸만 바꾸기: 서버와 그 칸만 주고받습니다.
+  // fn(지금 칸 값) → 새 칸 값 (null 이면 지움). 다른 컴퓨터가 그 사이 같은 칸을 바꿨으면 최신 값으로 다시 적용합니다.
+  const mutateEntry = useCallback((id, fn) => {
+    const apply = (obj) => { const n = fn(obj?.[id] ?? null); const out = { ...(obj || {}) }; if (n === null || n === undefined) delete out[id]; else out[id] = n; return out; };
+    setValue(prev => apply(prev));
+    pending.current += 1;
+    seq.current += 1;
+    const run = queue.current.then(async () => {
+      try {
+        for (let attempt = 0; ; attempt++) {
+          let base;
+          try {
+            base = await window.storage.getEntries(storageKey, [id]);
+          } catch (e) {
+            if (!e?.unsupported) throw e;
+            // 예전 서버: 전체를 받아 합쳐서 저장
+            const meta = {};
+            const latest = await loader(meta);
+            await saveKey(storageKey, apply(latest), meta.version);
+            return;
+          }
+          const prev = base[id] ?? null;
+          const next = fn(prev) ?? null;
+          if (JSON.stringify(prev) === JSON.stringify(next)) return;
+          try {
+            await window.storage.setEntries(storageKey, [{ id, prev, next }]);
+          } catch (e) {
+            if (e?.conflict && attempt < 5) continue;
+            throw e;
+          }
+          if (pending.current === 1) setValue(v => { const out = { ...(v || {}) }; if (next === null) delete out[id]; else out[id] = next; return out; });
+          return;
+        }
+      } finally {
+        pending.current -= 1;
+      }
+    });
+    queue.current = run.catch(() => undefined);
+    return run;
+  }, [storageKey, loader]);
+
   const mark = useCallback(() => seq.current, []);
   const sync = useCallback((incoming, startedAt) => {
     if (pending.current === 0 && !DRAG_ACTIVE && seq.current === startedAt) setValue(incoming);
   }, []);
 
-  return [value, mutate, sync, mark];
+  return [value, mutate, sync, mark, mutateEntry];
 }
 
 export function hxFieldsOf(settings) {
   return Array.isArray(settings?.hxFields) && settings.hxFields.length ? settings.hxFields : DEFAULT_HX_FIELDS;
 }
 // History 양식: 설정 > 기타에서 항목을 바꿀 수 있습니다.
-// type: yn(있음/없음), ynYears(있음/없음 + 기간), text(한 줄), long(여러 줄). keep: 다음 내원 때 미리 채움
+// type: yn(있음/없음), ynYears(있음/없음 + 기간), text(한 줄), long(여러 줄). History는 그날 기록에만 저장 (다음 내원 때 불러오지 않음)
 export const DEFAULT_HX_FIELDS = [
-  { id: 'htn', label: '고혈압', short: 'HTN', type: 'yn', keep: true },
-  { id: 'dm', label: '당뇨', short: 'DM', type: 'ynYears', keep: true },
-  { id: 'pmh', label: '기타 과거력', short: '과거력', type: 'text', keep: true },
-  { id: 'surgery', label: '이전 안과 수술력', short: '수술력', type: 'long', keep: true },
-  { id: 'cc', label: '주호소', short: '주호소', type: 'text', keep: false },
+  { id: 'htn', label: '고혈압', short: 'HTN', type: 'yn' },
+  { id: 'dm', label: '당뇨', short: 'DM', type: 'ynYears' },
+  { id: 'pmh', label: '기타 과거력', short: '과거력', type: 'text' },
+  { id: 'surgery', label: '이전 안과 수술력', short: '수술력', type: 'long' },
+  { id: 'cc', label: '주호소', short: '주호소', type: 'text' },
 ];

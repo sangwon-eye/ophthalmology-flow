@@ -18,7 +18,7 @@ export function defaultTriageRequired(p, doctorPrefs) {
   return doctorPrefs?.[p.doctor]?.triageRequired !== false;
 }
 
-export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePatients, mutateHistory, onBack, lastSync }) {
+export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePatients, mutateHistoryEntry, onBack, lastSync }) {
   const [triageFor, setTriageFor] = useState(null);
   const [sortMode, changeSort] = useSortMode('sort-procedure');
   const order = sortMode === 'name' ? byName : byQueue;
@@ -308,7 +308,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       {/* 진료 전 검사 (설정에서 처치실에 둔 검사, 예: Syringing) — 검사실 화면과 같은 카드 */}
       {roomTests(settings, treatRoomOf(settings).id).length > 0 && (
         <div id="treat-exams" className="scroll-mt-36"><StationView embedded mode={treatRoomOf(settings).id} settings={settings} doctorPrefs={doctorPrefs} patients={patients}
-          history={history} mutatePatients={mutatePatients} mutateHistory={mutateHistory} onBack={onBack} lastSync={lastSync} /></div>
+          history={history} mutatePatients={mutatePatients} mutateHistoryEntry={mutateHistoryEntry} onBack={onBack} lastSync={lastSync} /></div>
       )}
       <div className="flex justify-end mb-3">
         <SegmentedToggle value={sortMode} onChange={changeSort} options={SORT_OPTIONS} />

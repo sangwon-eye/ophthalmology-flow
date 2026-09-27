@@ -853,18 +853,18 @@ export function previousMeasure(p, history) {
   const list = Array.isArray(history?.[p.id]) ? history[p.id] : [];
   return list.find(r => r.date < p.date) || null;
 }
-// 환자번호별로 최근 3회 측정 기록만 보관. 같은 날짜는 필드 단위로 합침
-export function mergeHistory(prev, id, date, patch) {
-  const list = Array.isArray(prev[id]) ? prev[id] : [];
-  const existing = list.find(r => r.date === date);
+// 환자번호별로 오늘 + 지난 1회 측정 기록만 보관 (이전 시력·안압은 다음 내원 때 한 번 보면 됨).
+// 매 내원 측정값은 그날 명단 기록(월별 보관 파일)에 모두 남아 있어, 나중에 추이를 볼 때는 그것을 씁니다.
+export const HISTORY_KEEP = 2;
+export function mergeHistoryEntry(list, date, patch) {
+  const cur = Array.isArray(list) ? list : [];
+  const existing = cur.find(r => r.date === date);
   const merged = { ...normalizeMeasure(existing), ...patch, date };
-  const others = list.filter(r => r.date !== date);
-  const nextList = (hasAnyValue(merged) ? [merged, ...others] : others)
+  const others = cur.filter(r => r.date !== date);
+  const next = (hasAnyValue(merged) ? [merged, ...others] : others)
     .sort((a, b) => (a.date < b.date ? 1 : -1))
-    .slice(0, 3);
-  const next = { ...prev };
-  if (nextList.length) next[id] = nextList; else delete next[id];
-  return next;
+    .slice(0, HISTORY_KEEP);
+  return next.length ? next : null;
 }
 
 /* 검사 세부 종류·눈·프로토콜 */

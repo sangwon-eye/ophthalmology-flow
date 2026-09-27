@@ -689,9 +689,8 @@ export function KioskNoteEditor({ p, inline = false }) {
 }
 
 // 히스토리 (시력방에서 입력): 초진·FU loss·중간 내원 환자의 병력.
-// 환자 기록 p.hx = { htn, dm, dmYears, pmh, surgery, cc, at }. 기저질환·수술력은 환자별로 저장해 다음 내원 때 미리 채움.
-export const loadHx = (meta) => loadKey('patient-history', {}, meta);
-export const HxContext = createContext({ store: {}, mutate: null, fuMap: {}, measure: {}, fields: null });
+// 환자 기록 p.hx = { htn, dm, dmYears, pmh, surgery, cc, at }. 초진 때만 쓰므로 그날 기록에만 저장 (다음 내원 때 불러오지 않음).
+export const HxContext = createContext({ fuMap: {}, measure: {}, fields: null });
 export const HX_TYPES = [['yn', '있음/없음'], ['ynYears', '있음/없음 + 기간(년)'], ['text', '한 줄 글'], ['long', '여러 줄 글']];
 export function hxSummary(hx, fields = DEFAULT_HX_FIELDS) {
   if (!hx) return '';
@@ -790,12 +789,11 @@ export function HistoryModal({ p, onClose }) {
   const ctx = useContext(HxContext);
   const mutatePatients = useContext(PatientMemoContext);
   const fields = ctx.fields || DEFAULT_HX_FIELDS;
-  const stored = ctx.store?.[p.id] || {};
-  // 이번 기록이 있으면 그대로, 없으면 지난번에 저장한 항목(미리 채우기 켠 것)만
+  // 이번 기록이 있으면 그대로, 없으면 빈칸
   const [f, setF] = useState(() => {
     const out = {};
     fields.forEach(x => {
-      const src = p.hx || (x.keep ? stored : {});
+      const src = p.hx || {};
       out[x.id] = x.type === 'yn' || x.type === 'ynYears' ? (src[x.id] ?? null) : String(src[x.id] ?? '');
       if (x.type === 'ynYears') out[`${x.id}Years`] = String(src[`${x.id}Years`] ?? '');
     });
@@ -805,15 +803,12 @@ export function HistoryModal({ p, onClose }) {
   const save = () => {
     const at = Date.now();
     const hx = { at };
-    const keep = {};
     fields.forEach(x => {
       const v = typeof f[x.id] === 'string' ? f[x.id].trim() : f[x.id];
       hx[x.id] = v;
       if (x.type === 'ynYears') hx[`${x.id}Years`] = v ? String(f[`${x.id}Years`] || '').trim() : '';
-      if (x.keep) { keep[x.id] = hx[x.id]; if (x.type === 'ynYears') keep[`${x.id}Years`] = hx[`${x.id}Years`]; }
     });
     patchPatient(mutatePatients, patientKey(p), () => ({ hx, hxMissing: false }));
-    if (ctx.mutate) ctx.mutate(prev => ({ ...(prev || {}), [p.id]: { ...keep, date: p.date, updatedAt: at } }));
     onClose();
   };
   const yesNo = (x) => (
@@ -828,7 +823,6 @@ export function HistoryModal({ p, onClose }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-full overflow-y-auto">
         <h3 className="text-lg font-medium text-slate-900 mb-1">{p.name}님 History</h3>
-        {!p.hx && ctx.store?.[p.id] && <p className="text-xs text-slate-500 mb-3">지난번({ctx.store[p.id].date}) 입력한 내용을 미리 채웠습니다. 바뀐 것만 고치세요.</p>}
         <div className="space-y-3 mt-3">
           {fields.map(x => (
             x.type === 'yn' || x.type === 'ynYears' ? (

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
-import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, loadHx, noDilateTest, useApplyTextSize } from './ui/common.jsx';
+import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
 import { StationView } from './views/StationView.jsx';
 import { ConsultView } from './views/ConsultView.jsx';
@@ -146,11 +146,10 @@ export default function App() {
   const [fuMap, mutateFu, syncFu, markFu] = useSharedStore('fu-designations', loadFu, {});
   const [doctors, mutateDoctors, syncDoctors, markDoctors] = useSharedStore('doctors', loadDoctors, []);
   const [settings, mutateSettings, syncSettings, markSettings] = useSharedStore('settings', loadSettings, DEFAULT_SETTINGS);
-  const [history, mutateHistory, syncHistory, markHistory] = useSharedStore('measure-history', loadHistory, {});
+  const [history, , syncHistory, markHistory, mutateHistoryEntry] = useSharedStore('measure-history', loadHistory, {});
   const [doctorPrefs, mutateDoctorPrefs, syncDoctorPrefs, markDoctorPrefs] = useSharedStore('doctor-prefs', loadDoctorPrefs, {});
   const [todayOverride, mutateTodayOverride, syncTodayOverride, markTodayOverride] = useSharedStore('today-override', loadTodayOverride, null);
   const [boardNotices, mutateBoardNotices, syncBoardNotices, markBoardNotices] = useSharedStore('board-notices', loadNotices, { notices: {}, presets: NOTICE_PRESETS });
-  const [hxStore, mutateHxStore, syncHxStore, markHxStore] = useSharedStore('patient-history', loadHx, {});
   const [lastSync, setLastSync] = useState(null);
   setVisionTestIds(settings.tests.filter(t => t.roomId === 'vision').map(t => t.id));
   setNoDilateTests(settings.tests.filter(noDilateTest).map(t => ({ id: t.id, short: t.short || t.name })));
@@ -159,13 +158,13 @@ export default function App() {
   const setToday = (date) => mutateTodayOverride(() => (date && date !== realTodayISO() ? { date, setOn: realTodayISO() } : null));
 
   const refresh = useCallback(async () => {
-    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride(), markBoardNotices(), markHxStore()];
-    let p, f, d, s, h, dp, to, bn, hx;
+    const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride(), markBoardNotices()];
+    let p, f, d, s, h, dp, to, bn;
     try {
       [p, f, d, s, dp, to, bn] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadDoctorPrefs(), loadTodayOverride(), loadNotices()]);
-      // 이전 시력·History는 명단에 있는 환자(다음 주 차트리뷰 환자 포함) 것만
+      // 이전 시력은 명단에 있는 환자(다음 주 차트리뷰 환자 포함) 것만
       const ids = [...new Set((Array.isArray(p) ? p : []).map(x => x.id).filter(Boolean))].sort();
-      [h, hx] = await Promise.all([loadKeySubset('measure-history', ids), loadKeySubset('patient-history', ids)]);
+      h = await loadKeySubset('measure-history', ids);
     } catch {
       return; // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다.
     }
@@ -177,9 +176,8 @@ export default function App() {
     syncDoctorPrefs(dp, marks[5]);
     syncTodayOverride(to, marks[6]);
     syncBoardNotices(bn, marks[7]);
-    syncHxStore(hx, marks[8]);
     setLastSync(new Date());
-  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, markBoardNotices, markHxStore, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride, syncBoardNotices, syncHxStore]);
+  }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, markBoardNotices, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride, syncBoardNotices]);
 
   useEffect(() => {
     refresh();
@@ -212,7 +210,7 @@ export default function App() {
         patients={patientsToday}
         history={history}
         mutatePatients={mutatePatients}
-        mutateHistory={mutateHistory}
+        mutateHistoryEntry={mutateHistoryEntry}
         onBack={onBack}
         lastSync={lastSync}
       />
@@ -229,7 +227,7 @@ export default function App() {
         doctorPrefs={doctorPrefs}
         history={history}
         mutatePatients={mutatePatients}
-        mutateHistory={mutateHistory}
+        mutateHistoryEntry={mutateHistoryEntry}
         onBack={onBack}
         lastSync={lastSync}
       />
@@ -307,7 +305,7 @@ export default function App() {
   };
   return <PatientMemoContext.Provider value={mutatePatients}>
     <NoticeContext.Provider value={boardNotices || { notices: {} }}>
-      <HxContext.Provider value={{ store: hxStore || {}, mutate: mutateHxStore, fuMap, measure: history, fields: hxFieldsOf(settings) }}>
+      <HxContext.Provider value={{ fuMap, measure: history, fields: hxFieldsOf(settings) }}>
         {renderView()}
       </HxContext.Provider>
     </NoticeContext.Provider>

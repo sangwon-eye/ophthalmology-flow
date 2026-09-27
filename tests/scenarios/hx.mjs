@@ -47,9 +47,9 @@ list = (await getKey('daily-patients')).value;
 ok(list.find(p => p.name === '강서윤').done?.visionIop === true, 'History 확인 → 자동으로 시력방 완료');
 ok(await page.getByText(/강서윤 시력방 완료/).count() === 1, '완료 알림');
 await back();
-// 저장소: 다음 내원 때 미리 채움
-const store = (await getKey('patient-history')).value;
-const cid = list.find(p => p.name === '최민지').id;
-ok(store?.[cid]?.dm === true && store[cid].dmYears === '5' && !('cc' in store[cid]), '환자별 저장 (주호소 제외)');
+// History는 그날 기록에만 (다음 내원 미리 채우기용 저장소에는 쓰지 않음)
+ok((await getKey('patient-history')).value === null, '미리 채우기 저장소에 쓰지 않음');
+const c = list.find(p => p.name === '최민지');
+ok(c.hx?.dm === true && c.hx.dmYears === '5', '그날 환자 기록에 History 저장');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

@@ -86,6 +86,34 @@ window.storage = {
     lastSeen.set(key, { key, value, version: saved.version });
     return saved;
   },
+  // 환자별 기록에서 몇 칸만 바로 받기 (캐시 없이, 저장 직전 최신 값 확인용)
+  async getEntries(key, ids) {
+    const res = await request(`/api/storage-subset/${encodeURIComponent(key)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, have: null }),
+    });
+    if (res.status === 404) {
+      const body = await res.json().catch(() => ({}));
+      if (body?.error === 'not found') { const e = new Error('부분 조회 미지원 서버'); e.unsupported = true; throw e; }
+      return {};
+    }
+    if (!res.ok) throw new Error(`불러오기 실패 (${res.status})`);
+    const item = await res.json();
+    try { return JSON.parse(item.value) || {}; } catch { return {}; }
+  },
+  // 환자별 기록에서 몇 칸만 저장. entries: [{ id, prev, next }] (next 가 null 이면 그 칸을 지움)
+  async setEntries(key, entries) {
+    const res = await request(`/api/storage-entries/${encodeURIComponent(key)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entries }),
+    });
+    if (res.status === 409) {
+      const err = new Error('다른 컴퓨터가 먼저 저장했습니다');
+      err.conflict = true;
+      throw err;
+    }
+    if (res.status === 404) { const e = new Error('칸 저장 미지원 서버'); e.unsupported = true; throw e; }
+    if (!res.ok) throw new Error(`저장 실패 (${res.status})`);
+    return res.json();
+  },
 };
 
 /* 서버 연결 상태와 새 버전 알림 */

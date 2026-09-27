@@ -493,7 +493,6 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                     <select aria-label="History 항목 형식" value={x.type} onChange={e => upd({ type: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white">
                       {HX_TYPES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
                     </select>
-                    <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer"><input type="checkbox" checked={!!x.keep} onChange={e => upd({ keep: e.target.checked })} className="w-4 h-4" />다음에 미리 채움</label>
                     <button type="button" aria-label="위로" disabled={i === 0} onClick={() => move(-1)} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white disabled:opacity-30"><ChevronUp size={14} /></button>
                     <button type="button" aria-label="아래로" disabled={i === list.length - 1} onClick={() => move(1)} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white disabled:opacity-30"><ChevronDown size={14} /></button>
                     <button type="button" onClick={() => updateDraft(d => ({ ...d, hxFields: hxFieldsOf(d).filter((_, j) => j !== i) }))} className="text-xs px-2 py-1 text-slate-400 hover:text-red-600">삭제</button>
@@ -502,7 +501,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
               })}
             </div>
             <div className="flex gap-2 mt-3 flex-wrap">
-              <button type="button" onClick={() => updateDraft(d => ({ ...d, hxFields: [...hxFieldsOf(d), { id: newId('hx'), label: '새 항목', short: '', type: 'text', keep: true }] }))} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 flex items-center gap-1 bg-white"><Plus size={14} /> 항목 추가</button>
+              <button type="button" onClick={() => updateDraft(d => ({ ...d, hxFields: [...hxFieldsOf(d), { id: newId('hx'), label: '새 항목', short: '', type: 'text' }] }))} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 flex items-center gap-1 bg-white"><Plus size={14} /> 항목 추가</button>
               <button type="button" onClick={() => updateDraft(d => ({ ...d, hxFields: DEFAULT_HX_FIELDS }))} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-500 bg-white">처음 양식으로</button>
             </div>
           </div>

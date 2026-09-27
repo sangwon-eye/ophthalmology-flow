@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistory, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, hasPrep, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes } from '../core/flow.jsx';
+import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, hasPrep, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -12,7 +12,7 @@ import { SectionTitle } from './ConsultView.jsx';
 /* ------------------------------------------------------------------ */
 /* 검사실 화면 (시력/안압 + 설정된 검사실 공용)                           */
 /* ------------------------------------------------------------------ */
-export function StationView({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistory, onBack, lastSync, embedded = false }) {
+export function StationView({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistoryEntry, onBack, lastSync, embedded = false }) {
   const [filter, setFilter] = useState('all');
   const [sortMode, changeSort] = useSortMode(mode === 'vision' ? 'sort-vision' : `sort-room-${mode}`);
   const nameSort = sortMode === 'name';
@@ -200,7 +200,7 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
       }
       return nx;
     }));
-    mutateHistory(prev => mergeHistory(prev, p.id, p.date, patch));
+    mutateHistoryEntry(p.id, list => mergeHistoryEntry(list, p.date, patch));
     if (complete && mmode !== 'vision') showToast(`${p.name} ${testLabel(doneKey)} 완료`, () => writeDone(pk, doneKey, false, null));
   };
 
