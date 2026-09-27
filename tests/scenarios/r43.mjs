@@ -1,0 +1,25 @@
+import { chromium, SP, editKey, tester, BASE } from '../lib.mjs';
+// 설명 대기 카드: 오늘 한 검사 + 산동 요약 · 설명 완료 창: 진료 전 처치는 [나머지 검사 보기] 안에
+const now = Date.now();
+await editKey('daily-patients', list => list.map(p => (p.name === '송하린' ? { ...p, assigned: { ...p.assigned, wfp: true }, done: { ...p.done, wfp: true }, drops: [now - 20 * 60000] } : p)));
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const { errors, ok, W, pick, cardOf } = tester(page);
+await page.goto(`${BASE}/`); await W();
+await pick('진료실');
+await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W();
+const card = cardOf('송하린');
+const t = await card.innerText();
+ok(/오늘 검사/.test(t) && /OCT/.test(t) && /WFP|안저/.test(t), `설명 대기 카드에 오늘 검사 (${t.replace(/\n/g, ' ').slice(0, 120)})`);
+ok(/산동 \d\d:\d\d/.test(t), '산동 시각도 표시');
+await card.screenshot({ path: `${SP}/r43-card.png` });
+await card.getByRole('button', { name: '설명 완료', exact: true }).click(); await W();
+ok(await page.getByText('다음 내원 진료 전 처치').count() === 0, '설명 완료 창: 진료 전 처치는 처음에 숨김');
+await page.getByRole('button', { name: /^나머지 검사 보기/ }).click(); await W(300);
+ok(await page.getByText('다음 내원 진료 전 처치').count() === 1, '[나머지 검사 보기]를 누르면 진료 전 처치가 보임');
+await page.getByRole('button', { name: '전공의 처치', exact: true }).click(); await W(200);
+await page.getByRole('button', { name: '나머지 검사 접기' }).click(); await W(200);
+ok(await page.getByRole('button', { name: /진료 전 처치 1개/ }).count() === 1, '접어도 버튼에 "진료 전 처치 1개" 표시');
+await page.screenshot({ path: `${SP}/r43-modal.png` });
+ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
+await browser.close();

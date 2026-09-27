@@ -732,6 +732,18 @@ export function TodayTestsLine({ p, tests }) {
     </div>
   );
 }
+// 설명 대기용 간단 요약: 오늘 한 검사 + 산동
+export function TodayDoneLine({ p, tests, prefs }) {
+  const done = tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id] && p.done?.[t.id]).map(t => testLabelWithOptions(t, p.detail?.[t.id]));
+  const drops = (p.drops || []).filter(Boolean);
+  const eye = dilateEyeOf(p.dilateEye);
+  if (drops.length) done.push(crActive(p, prefs) ? `CR ${drops.length}회` : `산동${eye ? ` ${eye}` : ''} ${fmtClock(Math.min(...drops))}`);
+  return (
+    <div className="w-full text-sm text-slate-700">
+      <span className="text-xs text-slate-400 mr-2">오늘 검사</span>{done.length ? done.join(', ') : '없음'}
+    </div>
+  );
+}
 // 처치실 검사 지정용: 항목마다 한 줄씩 전부 (여러 줄 글은 줄바꿈 그대로)
 export function HistoryDetail({ p }) {
   const ctx = useContext(HxContext);
@@ -1343,6 +1355,23 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
     setSel(s => ({ ...s, [id]: true }));
     setExtraOpen(o => ({ ...o, [id]: true }));
   };
+  // 다음 내원 진료 전 처치 (FU 지정 창에서는 [나머지 검사 보기] 안에)
+  const preProcBlock = preProcChoice && (settings.procedures || []).length > 0 ? (
+    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 mb-6">
+      <div className="text-sm text-slate-700 mb-2">다음 내원 진료 전 처치 <span className="text-xs text-slate-500">(고르면 시력검사 없이 처치실부터)</span></div>
+      <div className="flex flex-wrap gap-1.5">
+        {(settings.procedures || []).map(x => {
+          const on = preSel.includes(x.id);
+          return (
+            <button key={x.id} type="button" aria-pressed={on} onClick={() => setPreSel(v => (on ? v.filter(i => i !== x.id) : [...v, x.id]))}
+              className={`text-sm px-3 py-1.5 rounded-full border ${on ? 'bg-rose-600 border-rose-600 text-white font-medium' : 'bg-white border-slate-300 text-slate-600'}`}>
+              {on ? '✓ ' : ''}{x.name}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  ) : null;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
@@ -1394,7 +1423,7 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
           </button>
         )}
         {followup && <div className="mb-5 space-y-2">
-          <button type="button" onClick={() => setShowOthers(v => !v)} className="w-full rounded-lg border border-slate-300 py-2 text-sm">{showOthers ? '나머지 검사 접기' : `나머지 검사 보기 (${others.length}개 · 선택 ${others.filter(t => sel[t.id]).length}개)${linkDoctor ? ` · 오늘 ${linkDoctor} 진료 추가` : ''}`}</button>
+          <button type="button" onClick={() => setShowOthers(v => !v)} className="w-full rounded-lg border border-slate-300 py-2 text-sm">{showOthers ? '나머지 검사 접기' : `나머지 검사 보기 (${others.length}개 · 선택 ${others.filter(t => sel[t.id]).length}개)${linkDoctor ? ` · 오늘 ${linkDoctor} 진료 추가` : ''}${preSel.length ? ` · 진료 전 처치 ${preSel.length}개` : ''}`}</button>
           {showOthers && <>
             {Array.isArray(linkDoctors) && (
               <label className="block text-sm text-fuchsia-800 rounded-lg border border-fuchsia-200 bg-fuchsia-50 p-3">오늘 다른 교수 진료 추가
@@ -1412,6 +1441,7 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
                 {[...new Set([followupDoctor, ...(followup.doctors || [])])].filter(Boolean).map(name => <option key={name} value={name}>{name}</option>)}
               </select><span className="text-xs">현재 선택한 검사는 유지되고, 오늘 진료 교수는 변경되지 않습니다.</span>
             </label>
+            {preProcBlock}
           </>}
         </div>}
         {typeof triageChoice === 'boolean' && (
@@ -1458,22 +1488,7 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
             )}
           </div>
         )}
-        {preProcChoice && (settings.procedures || []).length > 0 && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 mb-6">
-            <div className="text-sm text-slate-700 mb-2">다음 내원 진료 전 처치 <span className="text-xs text-slate-500">(고르면 시력검사 없이 처치실부터)</span></div>
-            <div className="flex flex-wrap gap-1.5">
-              {(settings.procedures || []).map(x => {
-                const on = preSel.includes(x.id);
-                return (
-                  <button key={x.id} type="button" aria-pressed={on} onClick={() => setPreSel(v => (on ? v.filter(i => i !== x.id) : [...v, x.id]))}
-                    className={`text-sm px-3 py-1.5 rounded-full border ${on ? 'bg-rose-600 border-rose-600 text-white font-medium' : 'bg-white border-slate-300 text-slate-600'}`}>
-                    {on ? '✓ ' : ''}{x.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {!followup && preProcBlock}
         <div className="flex gap-3">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
           <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor, preProcs: preSel }, triageRequired, linkDoctor)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>

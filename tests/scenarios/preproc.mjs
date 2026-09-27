@@ -43,6 +43,7 @@ ok(await page.getByText('원성옥', { exact: true }).count() === 1, 'PRP 완료
 const song = cardOf('송하린');
 await song.getByRole('button', { name: '설명 완료', exact: true }).click(); await W(300);
 const m = page.locator('.fixed.inset-0').last();
+await m.getByRole('button', { name: /^나머지 검사 보기/ }).click(); await W(200);
 await m.getByRole('button', { name: 'PRP' }).click();
 await m.screenshot({ path: `${SP}/r17-explain.png` });
 await m.getByRole('button', { name: '설명 완료', exact: true }).click(); await W(800);
