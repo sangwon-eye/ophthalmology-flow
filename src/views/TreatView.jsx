@@ -200,6 +200,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                       <button type="button" onClick={() => checkGo(p, t)} className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">{t.prepName || t.short || t.name} {fmtClock(st.startedAt)} · 확인</button>
                     ) : <>
                       <span className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-medium">{t.prepName || t.short || t.name} {fmtClock(st.startedAt)}</span>
+                      <button type="button" onClick={() => checkGo(p, t)} title="시간 전이지만 지금 확인" className="text-xs text-green-700 underline">지금 확인</button>
                       <button type="button" onClick={() => cancelGo(p, t)} className="text-xs text-slate-400 hover:text-rose-600 underline">시작 취소</button>
                     </>}
                   </div>
@@ -249,6 +250,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                       <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`)} title={`${prepWaitMin(t)}분 뒤 [확인] · 다시 누르면 시작 취소`}
                         className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-medium">{label} {fmtClock(st.startedAt)}</button>
                     )}
+                    {st?.startedAt && !due && <button type="button" onClick={() => confirmPrep(p, t, st)} title="시간 전이지만 지금 완료로 처리" className="text-xs text-green-700 underline">지금 확인</button>}
                     {st?.startedAt && <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`)} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
                       className="text-xs text-red-600 underline">검사 취소</button>}
                   </div>
