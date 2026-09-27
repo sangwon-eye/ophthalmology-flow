@@ -7,7 +7,7 @@ const { errors, ok, W, pick, back, cardOf } = tester(page);
 await page.goto(`${BASE}/`); await W(1000);
 await pick('처치실');
 const c = cardOf('최민지');
-ok(await c.getByText('History', { exact: true }).count() === 1, '처치실 검사 지정 대기 카드에 History');
+ok(/History/.test(await c.innerText()) && await c.getByRole('button', { name: '최민지 History 수정' }).count() === 1, '처치실 검사 지정 대기 카드에 History + [수정]');
 ok(await c.getByText('좌안 흐림 1달').count() === 1 && await c.getByText('있음 (5년)').count() === 1, '주호소·당뇨 기간 보임');
 ok(await c.getByText(/백내장 OD \(2020\)\s*녹내장 레이저/).count() === 1, '수술력 여러 줄 그대로');
 await c.screenshot({ path: `${SP}/r22-treat-hx-card.png` });

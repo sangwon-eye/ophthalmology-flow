@@ -337,7 +337,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             <div className="w-full">
               <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
             </div>
-            {(p.hx || p.hxMissing) && <HistoryDetail p={p} />}
+            {(p.hx || p.hxMissing) && <HistoryDetail p={p} editable />}
             <TodayTestsLine p={p} tests={allTests} />
             <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
@@ -356,6 +356,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             {needsTriageExam(p, settings) && <>
               <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
+              {(p.hx || p.hxMissing) && <HistoryDetail p={p} editable />}
               <TodayTestsLine p={p} tests={allTests} />
               <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
             </>}

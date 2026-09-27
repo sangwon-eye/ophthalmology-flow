@@ -745,10 +745,19 @@ export function TodayDoneLine({ p, tests, prefs }) {
   );
 }
 // 처치실 검사 지정용: 항목마다 한 줄씩 전부 (여러 줄 글은 줄바꿈 그대로)
-export function HistoryDetail({ p }) {
+// editable: 처치실(검사 지정 대기·예진 대기)에서 [수정]/[입력] — 시력방을 지난 뒤에도 고칠 수 있게
+export function HistoryDetail({ p, editable = false }) {
   const ctx = useContext(HxContext);
+  const [open, setOpen] = useState(false);
+  const modal = open && <HistoryModal p={p} onClose={() => setOpen(false)} />;
   if (!p.hx) {
-    if (p.hxMissing) return <div className="w-full text-sm bg-red-50 border border-red-300 text-red-700 rounded-lg px-3 py-1.5 font-semibold">History 미입력</div>;
+    if (p.hxMissing) return (
+      <div className="w-full text-sm bg-red-50 border border-red-300 text-red-700 rounded-lg px-3 py-1.5 font-semibold flex items-center justify-between gap-2">
+        History 미입력
+        {editable && <button type="button" onClick={() => setOpen(true)} aria-label={`${p.name} History 입력`} className="text-xs px-2.5 py-1 rounded-md bg-white border border-red-300 text-red-700 font-medium">입력</button>}
+        {modal}
+      </div>
+    );
     return null;
   }
   const rows = (ctx.fields || DEFAULT_HX_FIELDS).map(f => {
@@ -762,7 +771,10 @@ export function HistoryDetail({ p }) {
   });
   return (
     <div className="w-full text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg px-3 py-2">
-      <div className="font-semibold mb-1">History</div>
+      <div className="font-semibold mb-1 flex items-center justify-between gap-2">History
+        {editable && <button type="button" onClick={() => setOpen(true)} aria-label={`${p.name} History 수정`} className="text-xs px-2.5 py-1 rounded-md bg-white border border-sky-300 text-sky-700 font-medium hover:bg-sky-100">수정</button>}
+      </div>
+      {modal}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
         {rows.map(({ f, text }) => (
           <React.Fragment key={f.id}>
