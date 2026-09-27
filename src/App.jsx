@@ -1349,7 +1349,7 @@ function TestToggle({ label, done, onToggle, emphasize, onSpecial, disabled = fa
 
 // 오늘 검사: 평소에는 선택된 검사만 보여 주고, [검사 변경]을 누르면 모든 검사와 산동 설정(children)이 펼쳐집니다.
 // inline: 접힌 상태를 카드의 버튼 줄 안에 끼워 넣음 (chipsWhenClosed=false면 [검사 변경]만. 검사실은 위의 검사 칸과 겹치므로)
-function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, inline = false, chipsWhenClosed = true, children }) {
+function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, inline = false, chipsWhenClosed = true, closedLabel = '', children }) {
   const [open, setOpen] = useState(defaultOpen);
   if (!tests.length) return null;
   const shown = open ? tests : tests.filter(t => p.assigned?.[t.id]);
@@ -1377,7 +1377,7 @@ function TestPicker({ p, tests, onPick, onSpecial, defaultOpen = false, inline =
           </SpecialPressButton>
         );
   };
-  if (inline && !open) return <>{chipsWhenClosed && shown.map(chip)}{openButton}</>;
+  if (inline && !open) return <>{closedLabel && <span className="text-xs text-slate-400 mr-0.5">{closedLabel}</span>}{chipsWhenClosed && shown.map(chip)}{openButton}</>;
   return (
     <div className="w-full flex flex-wrap items-center gap-1.5 mt-1">
       <span className="text-xs text-slate-400 mr-1">오늘 검사</span>
@@ -2159,17 +2159,18 @@ function DraggableList({ items, getKey, onMove, renderItem, locked = false }) {
   );
 }
 
-function DilationBadge({ st, waitMin, eye }) {
+function DilationBadge({ st, waitMin, large = false }) {
   const w = Number(waitMin) || 15;
+  const sz = large ? 'text-sm px-2.5 py-1' : 'text-xs px-2 py-0.5';
   // 점안 전에는 빨간 [점안] 버튼만으로 충분해 따로 표시하지 않음 (점안 시각은 버튼에 표시)
   if (st.status === 'todo') return null;
   if (st.status === 'progress') {
-    return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">{st.mins}분 경과</span>;
+    return <span className={`${sz} rounded-full bg-blue-100 text-blue-800`}>{st.mins}분 경과</span>;
   }
   if (st.status === 'waiting') {
-    return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">{Math.max(0, w - st.mins)}분 남음</span>;
+    return <span className={`${sz} rounded-full bg-blue-100 text-blue-800`}>{Math.max(0, w - st.mins)}분 남음</span>;
   }
-  return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">산동 완료</span>;
+  return <span className={`${sz} rounded-full bg-green-100 text-green-800`}>산동 완료</span>;
 }
 
 // 산동 칩을 오른쪽 클릭(길게 누르기)했을 때 뜨는 좌·우안 선택 창
@@ -2202,7 +2203,7 @@ function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCancel })
 // compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
 // group: 카드 버튼 줄 안에 산동·점안을 한 덩어리로 (줄이 넘치면 함께 다음 줄로)
-function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, note = '' }) {
+function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false, note = '' }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);
@@ -2215,7 +2216,9 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
   const blocked = blockers.length > 0 && st.given === 0;
   if (compact && !dil && !cr) return null;
   if (togglesOnly) showDrops = false;
-  const chip = (on) => `text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
+  // large: 시력방처럼 산동을 해야 하는 곳에서 크게
+  const sz = large ? 'text-sm px-3 py-1.5 font-medium' : 'text-xs px-2.5 py-1';
+  const chip = (on) => `${sz} rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
   return (
     <div className={group ? 'inline-flex flex-wrap items-center gap-1.5' : inline ? 'contents' : 'w-full flex flex-wrap items-center gap-1.5'}>
       {!cr && (
@@ -2238,13 +2241,13 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
           onCancel={() => setEyeModal(false)}
         />
       )}
-      {crAvail && (
+      {crAvail && (cr || !compact) && (
         <button type="button" onClick={() => patchPatient(mutatePatients, pk, x => ({ cr: !x.cr }))} className={chip(cr)}>
           {cr ? 'CR' : 'CR 안 함'}
         </button>
       )}
       {showDrops && st.need && blocked && (
-        <span className="text-xs px-2 py-1 rounded-lg border border-slate-300 bg-slate-100 text-slate-600" title="산동 금지 검사가 끝나야 점안할 수 있어요">
+        <span className={`${sz} rounded-lg border border-slate-300 bg-slate-100 text-slate-600`} title="산동 금지 검사가 끝나야 점안할 수 있어요">
           {blockers.map(t => t.short).join(', ')} 끝난 뒤 점안
         </span>
       )}
@@ -2254,14 +2257,14 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
           type="button"
           onClick={() => toggleDrop(mutatePatients, pk, i)}
           title={t ? '다시 누르면 기록 취소' : '누르면 지금 시각으로 기록'}
-          className={`text-xs px-2.5 py-1 rounded-lg border ${t
+          className={`${sz} rounded-lg border ${t
             ? 'bg-slate-100 border-slate-200 text-slate-500'
             : i === st.given ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-300 text-slate-500'}`}
         >
           {cr ? `${i + 1}회 점안` : '점안'}{t ? ` ${fmtClock(t)}` : ''}
         </button>
       ))}
-      {st.need && !togglesOnly && !blocked && <DilationBadge st={st} waitMin={waitMin} eye={eye} />}
+      {st.need && !togglesOnly && !blocked && <DilationBadge st={st} waitMin={waitMin} large={large} />}
     </div>
   );
 }
@@ -3086,17 +3089,30 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                     onSpecial={isVision ? undefined : () => openSpecial(p, t)}
                   />
                 ))}
-                {/* 접힌 [검사 변경]은 검사 칸 줄 끝에. 검사실은 위 검사 칸과 겹치는 '오늘 검사' 칩을 접힌 상태에서 숨김 */}
-                <TestPicker inline chipsWhenClosed={isVision} p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
-                  <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
-                </TestPicker>
-                <DilationRow compact group p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
-                {otherRooms.length > 0 && (
-                  <span className="text-xs text-slate-500">
-                    다른 검사실 남음: {otherRooms.map(r => `${r.name} (${remainingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
-                  </span>
-                )}
-                {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
+                {(() => {
+                  const picker = (
+                    <TestPicker inline chipsWhenClosed={isVision} closedLabel={isVision ? '검사' : ''} p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
+                      <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
+                    </TestPicker>
+                  );
+                  const dilation = <DilationRow compact group large={isVision} p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />;
+                  // 시력방: 첫 줄은 할 일(측정값·History·산동), 오늘 검사는 둘째 줄에 작게 (Hx 내용 아래)
+                  if (isVision) return <>
+                    {dilation}
+                    <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>
+                    <div className="order-last w-full flex flex-wrap items-center gap-1.5">{picker}</div>
+                  </>;
+                  // 검사실: 접힌 [검사 변경]은 검사 칸 줄 끝에 (위 검사 칸과 겹치는 '오늘 검사' 칩은 숨김)
+                  return <>
+                    {picker}
+                    {dilation}
+                    {otherRooms.length > 0 && (
+                      <span className="text-xs text-slate-500">
+                        다른 검사실 남음: {otherRooms.map(r => `${r.name} (${remainingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
+                      </span>
+                    )}
+                  </>;
+                })()}
               </PatientRow>
             );
           }}
