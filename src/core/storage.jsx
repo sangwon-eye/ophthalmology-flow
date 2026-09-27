@@ -42,6 +42,8 @@ export const loadTodayOverride = (meta) => loadKey('today-override', null, meta)
 
 export function ensureBuiltins(s) {
   if (!s.rooms.some(r => r.builtin === 'treat')) s = { ...s, rooms: [...s.rooms, TREAT_ROOM] };
+  // 예전 설정: 처치실 검사에 켠 '시간 재기(준비)'는 이제 [시간 재기] 칩 (한 번 저장하면 timed 값이 생겨 다시 바꾸지 않음)
+  s = { ...s, tests: s.tests.map(t => (t.timed === undefined && t.prepOn && t.roomId === 'treat' ? { ...t, prepOn: false, timed: true } : t)) };
   // ARK는 설정에서 지우면(arkRemoved) 다시 넣지 않습니다
   s = { ...s, tests: s.tests.some(t => t.id === 'ark') ? s.tests.map(t => t.id === 'ark' ? { ...t, roomId: 'vision', builtin: 'ark' } : t) : s.arkRemoved ? s.tests : [ARK_TEST, ...s.tests] };
   if (s.tests.some(t => t.id === GAT_ID)) {

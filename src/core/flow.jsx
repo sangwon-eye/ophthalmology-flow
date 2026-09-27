@@ -187,43 +187,49 @@ export function clearOrders(p, testIds) {
 // p.prep[testId] = { startedAt, result: 'neg' | 'pos', at, name }
 export function hasPrep(t) { return !!t?.prepOn; }
 export function prepOf(p, t) { return p.prep?.[t.id] || null; }
+// 설정의 두 가지 칩 (한 검사에 둘 중 하나만):
+//  [검사 준비] prepOn : 그 검사 전에 처치실 '검사 준비'에서 할 일 (예: FAG 동의서·skin test). 확인해야 검사실로
+//  [시간 재기] timed  : 검사 자체가 시간을 재는 검사 (예: Schirmer, MMP). 검사 칸을 누르면 시작 시각 → [끝 · 확인]
+// 시작·확인 기록은 둘 다 p.prep[testId]
+export function isTimed(t) { return !!t?.timed; }
 // 준비 결과가 음성이어야 검사실에서 검사할 수 있음
-// 처치실 검사(예: Schirmer, MMP)의 시간 재기는 '진료 전 검사' 칸에서 바로 함 (검사 준비는 FAG처럼 검사실 검사의 준비만)
-export function isTreatPrep(t) { return hasPrep(t) && t.roomId === 'treat'; }
-export function prepBlocked(p, t) { return hasPrep(t) && !isTreatPrep(t) && prepOf(p, t)?.result !== 'neg'; }
+export function prepBlocked(p, t) { return hasPrep(t) && prepOf(p, t)?.result !== 'neg'; }
 // 양성이면 그 검사는 보류 (검사실 대기에서 빠지고, 진료실에 표시)
 export function prepPositive(p, t) { return hasPrep(t) && prepOf(p, t)?.result === 'pos'; }
 export function prepWaitMin(t) { return Math.max(0, Number(t?.prepWaitMin ?? 20) || 0); }
 // 처치실에서 준비할 검사 (지정됐고, 아직 안 했고, 결과 전)
 export function prepPendingTests(p, settings) {
-  return sortedTests(settings).filter(t => hasPrep(t) && !isTreatPrep(t) && p.assigned?.[t.id] && !p.done?.[t.id] && !prepOf(p, t)?.result);
+  return sortedTests(settings).filter(t => hasPrep(t) && p.assigned?.[t.id] && !p.done?.[t.id] && !prepOf(p, t)?.result);
 }
 // 시간 재기 방식: 'confirm'(기본, 시간이 되면 직원이 확인해야 넘어감 · FAG, Schirmer) / 'go'(시작하면 바로 넘어가고 시간이 되면 확인 알림 · MMP)
 export function prepGoMode(t) { return t?.prepMode === 'go'; }
 export function prepDue(st, t, now = Date.now()) { return !!st?.startedAt && now >= st.startedAt + prepWaitMin(t) * 60000; }
 // '바로 넘어감' 검사 중 결과 확인이 남은 것 (시작 때 검사는 완료로 넘어감)
 export function prepChecks(p, settings) {
-  return sortedTests(settings).filter(t => hasPrep(t) && prepGoMode(t) && p.assigned?.[t.id] && prepOf(p, t)?.go && !prepOf(p, t)?.checked);
+  return sortedTests(settings).filter(t => (hasPrep(t) || isTimed(t)) && prepGoMode(t) && p.assigned?.[t.id] && prepOf(p, t)?.go && !prepOf(p, t)?.checked);
 }
-// '진행 중 호출 금지'(예: Schirmer): 처치실에서 시작해 아직 확인 전이면 검사실에서 부르지 않음
+// 진행 중 호출 금지: 설정 칩. 정하지 않았으면 VF(시야검사)만 기본으로 켜짐 (다른 검사와 같은 칩으로 끌 수도 있음)
+export function holdCallOf(t) { return typeof t?.holdCall === 'boolean' ? t.holdCall : isVfTest(t || {}); }
+// 검사 준비·시간 재기 중(시작~확인)이고 호출 금지인 검사 (예: Schirmer): 다른 검사실에서 부르지 않음
 export function prepHolding(p, settings) {
-  return sortedTests(settings).find(t => hasPrep(t) && t.holdCall && !prepGoMode(t) && p.assigned?.[t.id] && !p.done?.[t.id] && prepOf(p, t)?.startedAt && !prepOf(p, t)?.result) || null;
+  return sortedTests(settings).find(t => (hasPrep(t) || isTimed(t)) && holdCallOf(t) && !prepGoMode(t) && p.assigned?.[t.id] && !p.done?.[t.id] && prepOf(p, t)?.startedAt && !prepOf(p, t)?.result) || null;
 }
-// 시간 재기 버튼 이름: 따로 적은 이름(예: skin test)이 없으면 검사 이름 (예전 기본값 '검사 준비'도 검사 이름으로)
+// 버튼 이름: 시간 재기는 검사 이름, 검사 준비는 적은 준비 이름(예: skin test), 없으면 검사 이름
 export function prepLabel(t) {
+  if (isTimed(t)) return t?.short || t?.name || '';
   const n = String(t?.prepName || '').trim();
   return n && n !== '검사 준비' ? n : (t?.short || t?.name || '');
 }
-// 처치실 검사는 [확인]이 곧 검사 완료 (검사실 검사는 '확인하면 검사 완료'를 켠 경우만)
-export function prepCompletesTest(t, settings) {
-  return !!t?.prepCompletes || t?.roomId === treatRoomOf(settings).id;
+// 시간 재기 검사는 [확인]이 곧 검사 완료 (검사 준비는 '확인하면 검사 완료'를 켠 경우만)
+export function prepCompletesTest(t) {
+  return isTimed(t) || !!t?.prepCompletes;
 }
 // 예전에 확인만 되고 완료가 안 된 처치실 검사 고치기 (바뀐 게 없으면 그대로)
 export function fixTreatPreps(p, settings) {
   let done = p.done, doneAt = p.doneAt, changed = false;
   sortedTests(settings).forEach(t => {
     const st = p.prep?.[t.id];
-    if (hasPrep(t) && t.roomId === treatRoomOf(settings).id && p.assigned?.[t.id] && st?.result === 'neg' && !done?.[t.id]) {
+    if (isTimed(t) && p.assigned?.[t.id] && st?.result === 'neg' && !done?.[t.id]) {
       done = { ...done, [t.id]: true }; doneAt = { ...(doneAt || {}), [t.id]: st.at || Date.now() }; changed = true;
     }
   });
@@ -240,7 +246,7 @@ export function prepStartPatch(x, t, at) {
 export function prepConfirmPatch(x, t, settings, at) {
   return {
     prep: { ...(x.prep || {}), [t.id]: { ...(x.prep?.[t.id] || {}), result: 'neg', at } },
-    ...(prepCompletesTest(t, settings) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
+    ...(prepCompletesTest(t) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
   };
 }
 export function prepCancelPatch(x, t) {
@@ -250,7 +256,7 @@ export function prepCancelPatch(x, t) {
   };
 }
 // 시간 재는 중이고(시작, 확인 전) 아직 완료 안 된 검사
-export function prepRunning(p, t) { const st = prepOf(p, t); return hasPrep(t) && !!st?.startedAt && !st.result && !st.go && !p.done?.[t.id]; }
+export function prepRunning(p, t) { const st = prepOf(p, t); return (hasPrep(t) || isTimed(t)) && !!st?.startedAt && !st.result && !st.go && !p.done?.[t.id]; }
 // 검사를 미시행으로 되돌리거나 뺄 때 시간 재기 기록(시작 시각·확인)도 지움 → 처음 상태([검사 이름])로
 export function withoutPrep(x, key) {
   if (!x.prep?.[key]) return {};
@@ -468,9 +474,9 @@ export function groupPending(p, g) {
 export function isVfTest(t) {
   return t.id === 'vf' || /\bVF\b/i.test(t.short || '') || /시야|\bVF\b/i.test(t.name || '');
 }
-// [▶ 시작]·[종료]로 하는 검사: VF, 또는 '진행 중 호출 금지'를 켠 일반 검사 (시간 재기 검사는 처치실 준비로 따로)
+// [▶ 시작]·[종료]로 하는 검사: '진행 중 호출 금지'를 켠 일반 검사 (VF는 기본으로 켜짐). 검사 준비·시간 재기 검사는 따로
 export function startStopTest(t) {
-  return isVfTest(t) || (!!t.holdCall && !t.prepOn);
+  return holdCallOf(t) && !hasPrep(t) && !isTimed(t);
 }
 export function activeVf(p) {
   return p.vfInProgress && p.assigned?.[p.vfInProgress] && !p.done?.[p.vfInProgress] ? p.vfInProgress : null;

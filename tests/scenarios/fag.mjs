@@ -44,15 +44,15 @@ await page.screenshot({ path: `${SP}/r33-mmp-due.png` });
 await chk.click(); await W();
 { const l = (await getKey('daily-patients')).value; ok(!!l.find(p => p.name === '장민호').prep.mmp.checked, 'MMP 확인 기록'); }
 ok(await page.getByText(/^확인할 검사/).count() === 0, '확인 후 목록에서 빠짐');
-const sch = page.locator('div.bg-white').filter({ hasText: 'Schirmer strip' }).filter({ has: page.getByText('임수빈', { exact: true }) }).first();
-ok(await sch.getByText('Schirmer strip', { exact: true }).count() === 1, '준비 이름은 버튼에 한 번만');
-await sch.getByRole('button', { name: 'Schirmer strip', exact: true }).click(); await W();
-ok(await sch.getByRole('button', { name: /^Schirmer strip \d\d:\d\d$/ }).count() === 1, '누르면 "Schirmer strip 시작 시각"');
+const sch = page.locator('div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).filter({ has: page.getByRole('button', { name: /^Schirmer/ }) }).last();
+ok(await sch.getByRole('button', { name: 'Schirmer', exact: true }).count() >= 1, '시간 재기 검사: 칸 이름은 검사 이름');
+await sch.getByRole('button', { name: 'Schirmer', exact: true }).first().click(); await W();
+ok(await sch.getByRole('button', { name: /^Schirmer \d\d:\d\d$/ }).count() === 1, '누르면 "Schirmer 시작 시각"');
 await backdate('임수빈', 'sch', 6);
 await page.waitForTimeout(15000);
 { const l = (await getKey('daily-patients')).value; ok(!l.find(p => p.name === '임수빈').done.sch, 'Schirmer: 시간이 돼도 확인 전에는 넘어가지 않음'); }
-ok(await sch.getByRole('button', { name: 'Schirmer strip 끝 · 확인' }).count() === 1, '시간이 되면 초록 [끝 · 확인]');
-await sch.getByRole('button', { name: 'Schirmer strip 끝 · 확인' }).click(); await W();
+ok(await sch.getByRole('button', { name: 'Schirmer 끝 · 확인' }).count() === 1, '시간이 되면 초록 [끝 · 확인]');
+await sch.getByRole('button', { name: 'Schirmer 끝 · 확인' }).click(); await W();
 { const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '임수빈').done.sch === true, 'Schirmer: 확인하면 검사 완료'); }
 ok(await page.getByText(/^진료 전 검사 · 1명/).count() === 1, '처치실: 진료 전 검사에 OSDI 환자(조현우)');
 ok(await page.locator('div.bg-white').filter({ has: page.getByText('조현우', { exact: true }) }).getByRole('button', { name: /^OSDI/ }).count() >= 1, 'OSDI는 검사실 대기 중에도 처치실에');

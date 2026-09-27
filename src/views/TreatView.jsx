@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTreatPrep, prepRunning } from '../core/flow.jsx';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -100,7 +100,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       setTick(n => n + 1);
       const now = Date.now();
       const due = [];
-      patients.forEach(p => sortedTests(settings).filter(t => isTreatPrep(t) && p.assigned?.[t.id] && prepRunning(p, t)).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${prepLabel(t)} 끝 · 확인해주세요` }); }));
+      patients.forEach(p => sortedTests(settings).filter(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t)).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${prepLabel(t)} 끝 · 확인해주세요` }); }));
       prepList.forEach(p => prepPendingTests(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${prepLabel(t)} 끝 · 확인해주세요` }); }));
       checkList.forEach(p => prepChecks(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${t.short || t.name} 확인할 시간` }); }));
       const fresh = seenDue.current ? due.filter(d => !seenDue.current.has(d.k)) : [];
@@ -147,9 +147,9 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
     patchPatient(mutatePatients, pk, x => ({
       prep: { ...(x.prep || {}), [t.id]: { ...st, result: 'neg', at } },
-      ...(prepCompletesTest(t, settings) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
+      ...(prepCompletesTest(t) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
     }));
-    showToast(`${p.name} ${t.short || t.name} ${prepCompletesTest(t, settings) ? '완료' : '확인, 검사실로'}`, () => patchPatient(mutatePatients, pk, () => before));
+    showToast(`${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`, () => patchPatient(mutatePatients, pk, () => before));
   };
   // 진료 전 처치 (예: PRP, YAG): 처치 완료 후 검사가 있으면 검사실, 없으면 진료 대기로
   const preProcList = patients.filter(p => !p.consultDone && pastVision(p) && preProcPending(p)).sort(order);
@@ -246,7 +246,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                       <button type="button" onClick={() => (prepGoMode(t) ? startGo(p, t) : setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`))}
                         className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium">{label}</button>
                     ) : due ? (
-                      <button type="button" onClick={() => confirmPrep(p, t, st)} title={prepCompletesTest(t, settings) ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
+                      <button type="button" onClick={() => confirmPrep(p, t, st)} title={prepCompletesTest(t) ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
                         className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">{label} 끝 · 확인</button>
                     ) : (
                       <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`)} title={`${prepWaitMin(t)}분 뒤 [확인] · 다시 누르면 시작 취소`}

@@ -10,8 +10,8 @@ const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 const { errors, ok, W, pick, back, cardOf } = tester(page);
 await page.goto(`${BASE}/`); await W();
 await pick('처치실');
-const card = page.locator('div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).filter({ hasText: 'Schirmer strip' }).first();
-await card.getByRole('button', { name: 'Schirmer strip', exact: true }).click(); await W();
+const card = page.locator('div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).filter({ has: page.getByRole('button', { name: /^Schirmer/ }) }).last();
+await card.getByRole('button', { name: 'Schirmer', exact: true }).first().click(); await W();
 await back();
 await pick('31번방');
 let c = cardOf('임수빈');
@@ -28,5 +28,6 @@ ok(await c.getByText(/호출 금지/).count() === 0 && !(await c.getByRole('butt
 await back();
 await pick('설정');
 ok(await page.locator('[data-test-row="Schirmer"]').getByRole('button', { name: /진행 중 호출 금지/ }).getAttribute('aria-pressed') === 'true', '설정: 진행 중 호출 금지 칩');
+ok(await page.locator('[data-test-row="Schirmer"]').getByRole('button', { name: /시간 재기/ }).getAttribute('aria-pressed') === 'true' && await page.locator('[data-test-row="Schirmer"]').getByRole('button', { name: /검사 준비/ }).getAttribute('aria-pressed') === 'false', '예전 처치실 시간 재기 → [시간 재기] 칩으로 자동 이동');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

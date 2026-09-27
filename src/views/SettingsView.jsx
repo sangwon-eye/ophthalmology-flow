@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, prepWaitMin, renameTestOptions, sortedTests, toDraft, isVfTest } from '../core/flow.jsx';
+import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, prepWaitMin, renameTestOptions, sortedTests, toDraft, isVfTest, holdCallOf } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';
@@ -85,7 +85,8 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
         prepName: String(t.prepName || '').trim() === '검사 준비' ? '' : String(t.prepName || '').trim(),
         prepWaitMin: Math.max(0, Math.round(Number(t.prepWaitMin ?? 20) || 0)),
         withExams: !!t.withExams,
-        holdCall: !!t.holdCall,
+        holdCall: holdCallOf(t),
+        timed: !!t.timed,
         noOrder: !!t.noOrder,
         noDilate: noDilateTest(t),
         prepCompletes: !!t.prepCompletes,
@@ -154,8 +155,9 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             ['popupOnClick', '세부 창', !!t.popupOnClick, true],
             ['noOrder', '처방 없음', !!t.noOrder, true],
             ['noDilate', '산동 금지', noDilateTest(t), true],
-            ['prepOn', '시간 재기', !!t.prepOn, true],
-            ['holdCall', '진행 중 호출 금지', !!t.holdCall, roomKey !== 'vision' && !isVfTest(t) && !(t.prepOn && t.prepMode === 'go')],
+            ['prepOn', '검사 준비', !!t.prepOn, roomKey !== 'vision'],
+            ['timed', '시간 재기', !!t.timed, true],
+            ['holdCall', '진행 중 호출 금지', holdCallOf(t), roomKey !== 'vision' && !(t.timed && t.prepMode === 'go')],
             ['withExams', '대기 중에도', !!t.withExams, isTreat],
             ['showWhenEmpty', '0명도 표시', t.showWhenEmpty !== false, machineGroups(tests).length >= 2],
           ].filter(o => o[3]);
@@ -172,8 +174,10 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                   {options.map(([k, label, on]) => (
                     <button key={k} type="button" aria-pressed={on} title={TEST_OPTION_HELP[k]}
                       onClick={() => {
-                        updateTest(t.id, k === 'prepOn' ? { prepOn: !on, prepWaitMin: t.prepWaitMin ?? 20 } : { [k]: !on });
-                        if (k === 'prepOn' && !on) toggleTestOpen(t.id, true); // 시간 재기를 켜면 분·이름을 적도록 펼침
+                        // 검사 준비와 시간 재기는 둘 중 하나만 (켜면 다른 하나는 꺼짐)
+                        updateTest(t.id, k === 'prepOn' ? { prepOn: !on, timed: false, prepWaitMin: t.prepWaitMin ?? 20 }
+                          : k === 'timed' ? { timed: !on, prepOn: false, prepWaitMin: t.prepWaitMin ?? 20 } : { [k]: !on });
+                        if ((k === 'prepOn' || k === 'timed') && !on) toggleTestOpen(t.id, true); // 켜면 시간·방식을 적도록 펼침
                       }}
                       className={`text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-500'}`}>
                       {on ? '✓ ' : ''}{label}
@@ -224,14 +228,20 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                   </div>}
                   {t.prepOn && (
                     <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
-                      시간 재기:
-                      <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} placeholder="버튼 이름 (비우면 검사 이름, 예: skin test)" onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-44 bg-white" />
-                      <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16 bg-white" />분
+                      검사 준비 (처치실에서 먼저):
+                      <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} placeholder="준비 이름 (예: 동의서 · skin test)" onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-48 bg-white" />
+                      <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16 bg-white" />분 뒤 [확인] → 검사실로
+                      <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={!!t.prepCompletes} onChange={e => updateTest(t.id, { prepCompletes: e.target.checked })} className="w-4 h-4" />확인하면 검사도 완료</label>
+                    </div>
+                  )}
+                  {t.timed && (
+                    <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
+                      시간 재기 (검사 칸에서):
+                      <input type="number" min="0" aria-label={`${t.short || t.name} 시간 재기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16 bg-white" />분
                       <select aria-label={`${t.short || t.name} 시간 재기 방식`} value={t.prepMode === 'go' ? 'go' : 'confirm'} onChange={e => updateTest(t.id, { prepMode: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white">
-                        <option value="confirm">시간이 되면 직원이 [확인]해야 넘어감 (예: FAG, Schirmer)</option>
-                        <option value="go">시작하면 바로 넘어가고, 시간이 되면 확인 알림 (예: MMP)</option>
+                        <option value="confirm">시간이 되면 [끝 · 확인]을 눌러야 완료 (예: Schirmer)</option>
+                        <option value="go">누르면 바로 완료, 시간이 되면 처치실에 확인 알림 (예: MMP)</option>
                       </select>
-                      {t.prepMode !== 'go' && !isTreat && <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={!!t.prepCompletes} onChange={e => updateTest(t.id, { prepCompletes: e.target.checked })} className="w-4 h-4" />확인하면 검사 완료</label>}
                     </div>
                   )}
                   <div className="flex items-center justify-end">
@@ -284,7 +294,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
               검사 이름이나 [자세히]를 누르면 이름·검사실·세부 종류를 고칠 수 있어요.</p>
             <p className="mt-2">세부 종류를 적어두면 창에서 종류를 고를 수 있어요 (예: OCT의 Macular, Disc, Angio). 어떤 검사든 오른쪽 클릭(터치스크린은 길게 누르기)하면 양안·우안·좌안과 검사 프로토콜을 지정하는 창이 떠요.</p>
             <ul className="mt-2 space-y-1">
-              {[['popupOnClick', '세부 창'], ['noOrder', '처방 없음'], ['noDilate', '산동 금지'], ['prepOn', '시간 재기'], ['holdCall', '진행 중 호출 금지'], ['withExams', '대기 중에도'], ['showWhenEmpty', '0명도 표시']].map(([k, l]) => (
+              {[['popupOnClick', '세부 창'], ['noOrder', '처방 없음'], ['noDilate', '산동 금지'], ['prepOn', '검사 준비'], ['timed', '시간 재기'], ['holdCall', '진행 중 호출 금지'], ['withExams', '대기 중에도'], ['showWhenEmpty', '0명도 표시']].map(([k, l]) => (
                 <li key={k}><b className="text-slate-800">{l}</b> · {TEST_OPTION_HELP[k]}</li>
               ))}
             </ul>
