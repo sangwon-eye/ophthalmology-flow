@@ -196,21 +196,12 @@ export function prepWaitMin(t) { return Math.max(0, Number(t?.prepWaitMin ?? 20)
 export function prepPendingTests(p, settings) {
   return sortedTests(settings).filter(t => hasPrep(t) && p.assigned?.[t.id] && !p.done?.[t.id] && !prepOf(p, t)?.result);
 }
-// 준비 시간이 다 된 검사를 '확인'(음성)으로 바꾼 환자 (자동 완료). 바뀐 게 없으면 그대로 돌려줌
-export function autoCompletePreps(p, settings, now = Date.now()) {
-  let changed = false;
-  const prep = { ...(p.prep || {}) };
-  let done = p.done, doneAt = p.doneAt;
-  sortedTests(settings).forEach(t => {
-    const st = prep[t.id];
-    if (!hasPrep(t) || !st?.startedAt || st.result || !p.assigned?.[t.id]) return;
-    const at = st.startedAt + prepWaitMin(t) * 60000;
-    if (now < at) return;
-    prep[t.id] = { ...st, result: 'neg', at, auto: true };
-    if (t.prepCompletes && !done?.[t.id]) { done = { ...done, [t.id]: true }; doneAt = { ...(doneAt || {}), [t.id]: at }; }
-    changed = true;
-  });
-  return changed ? { ...p, prep, done, doneAt } : p;
+// 시간 재기 방식: 'confirm'(기본, 시간이 되면 직원이 확인해야 넘어감 · FAG, Schirmer) / 'go'(시작하면 바로 넘어가고 시간이 되면 확인 알림 · MMP)
+export function prepGoMode(t) { return t?.prepMode === 'go'; }
+export function prepDue(st, t, now = Date.now()) { return !!st?.startedAt && now >= st.startedAt + prepWaitMin(t) * 60000; }
+// '바로 넘어감' 검사 중 결과 확인이 남은 것 (시작 때 검사는 완료로 넘어감)
+export function prepChecks(p, settings) {
+  return sortedTests(settings).filter(t => hasPrep(t) && prepGoMode(t) && p.assigned?.[t.id] && prepOf(p, t)?.go && !prepOf(p, t)?.checked);
 }
 export function prepPositiveNames(p) {
   return Object.values(p.prep || {}).filter(x => x?.result === 'pos').map(x => x.name).filter(Boolean);

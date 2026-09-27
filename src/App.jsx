@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, autoCompletePreps } from './core/flow.jsx';
+import { DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, loadHx, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -187,21 +187,6 @@ export default function App() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  // 검사 준비(skin test 등): 정한 시간이 지나면 저절로 완료. 처치실 화면을 켜 두지 않아도 되도록 모든 직원 화면에서 확인
-  // (여러 컴퓨터가 같이 써도 결과가 같음). 환자용 화면·QR 접수 컴퓨터는 하지 않음
-  const prepCheckRef = useRef({ patients, settings });
-  prepCheckRef.current = { patients, settings };
-  useEffect(() => {
-    if (role === 'board' || role === 'kiosk') return undefined;
-    const check = () => {
-      const { patients: ps, settings: st } = prepCheckRef.current;
-      if (!ps.some(p => autoCompletePreps(p, st) !== p)) return;
-      mutatePatients(prev => prev.map(p => autoCompletePreps(p, st)));
-    };
-    check();
-    const t = setInterval(check, 15000);
-    return () => clearInterval(t);
-  }, [role, mutatePatients]);
 
   const renderView = () => {
   if (!role) return <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} />;

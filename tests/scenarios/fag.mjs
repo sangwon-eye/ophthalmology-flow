@@ -5,6 +5,7 @@ await editKey('settings', s => {
   const tests = s.tests.map(t => t.id === 'fag' ? { ...t, prepOn: true, prepName: '동의서 · skin test', prepWaitMin: 20 } : t);
   tests.push({ id: 'osdi', name: 'OSDI 설문', short: 'OSDI', roomId: 'treat', order: 0, options: [], popupOnClick: false, machine: '', withExams: true });
   tests.push({ id: 'sch', name: 'Schirmer', short: 'Schirmer', roomId: 'treat', order: 2, options: [], popupOnClick: false, machine: '', prepOn: true, prepName: 'Schirmer strip', prepWaitMin: 5, prepCompletes: true, withExams: true, noOrder: true });
+  tests.push({ id: 'mmp', name: 'MMP', short: 'MMP', roomId: 'treat', order: 3, options: [], popupOnClick: false, machine: '', prepOn: true, prepName: 'MMP', prepWaitMin: 10, prepMode: 'go', withExams: true, noOrder: true });
   tests.push({ id: 'syr', name: 'Syringing', short: 'Syringing', roomId: 'treat', order: 1, options: [], popupOnClick: false, machine: '' });
   return { ...s, rooms, tests };
 });
@@ -12,8 +13,10 @@ await editKey('daily-patients', list => list.map(p => {
   if (p.name === '조현우') return { ...p, assigned: { ...p.assigned, fag: true, osdi: true, syr: true } };
   if (p.name === '한지훈') return { ...p, assigned: { ...p.assigned, fag: true } };
   if (p.name === '임수빈') return { ...p, assigned: { ...p.assigned, sch: true } };
+  if (p.name === '장민호') return { ...p, assigned: { ...p.assigned, mmp: true } };
   return p;
 }));
+const backdate = async (name, id, min) => editKey('daily-patients', list => list.map(p => (p.name === name ? { ...p, prep: { ...p.prep, [id]: { ...p.prep[id], startedAt: Date.now() - min * 60000 } } } : p)));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 const { errors, ok, W, pick, back, cardOf } = tester(page);
@@ -24,16 +27,31 @@ ok(await c.getByText('동의서 · skin test 전').count() === 1, '31번방: FAG
 await c.screenshot({ path: `${SP}/r16-fag-locked.png` });
 await back();
 await pick('처치실');
-ok(await page.getByText(/^검사 준비 · 3명/).count() === 1, '처치실: 검사 준비 3명 (FAG 2, Schirmer 1)');
-const backdate = async (name, id, min) => editKey('daily-patients', list => list.map(p => (p.name === name ? { ...p, prep: { ...p.prep, [id]: { ...p.prep[id], startedAt: Date.now() - min * 60000 } } } : p)));
+ok(await page.getByText(/^검사 준비 · 4명/).count() === 1, '처치실: 검사 준비 4명 (FAG 2, Schirmer 1, MMP 1)');
+// MMP(바로 넘어감): 누르면 시작 시각 기록 + 검사는 완료로 넘어감 → 시간이 되면 '확인할 검사'에서 확인
+const mmpCard = page.locator('div.bg-white').filter({ has: page.getByText('장민호', { exact: true }) }).filter({ has: page.getByRole('button', { name: 'MMP', exact: true }) }).first();
+await mmpCard.getByRole('button', { name: 'MMP', exact: true }).click(); await W();
+{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '장민호').done.mmp === true, 'MMP: 시작하면 바로 넘어감 (검사 완료)'); }
+ok(await page.getByText(/^확인할 검사 · 1명/).count() === 1, "처치실 맨 위 '확인할 검사'");
+await backdate('장민호', 'mmp', 11);
+await page.waitForTimeout(15000);
+const chk = page.getByRole('button', { name: /^MMP \d\d:\d\d · 확인$/ });
+ok(await chk.count() === 1, '시간이 되면 초록 [MMP 시각 · 확인]');
+ok(await page.getByText(/장민호 MMP 확인할 시간/).count() >= 1, '알림 표시');
+await page.screenshot({ path: `${SP}/r33-mmp-due.png` });
+await chk.click(); await W();
+{ const l = (await getKey('daily-patients')).value; ok(!!l.find(p => p.name === '장민호').prep.mmp.checked, 'MMP 확인 기록'); }
+ok(await page.getByText(/^확인할 검사/).count() === 0, '확인 후 목록에서 빠짐');
 const sch = page.locator('div.bg-white').filter({ hasText: 'Schirmer strip' }).filter({ has: page.getByText('임수빈', { exact: true }) }).first();
 ok(await sch.getByText('Schirmer strip', { exact: true }).count() === 1, '준비 이름은 버튼에 한 번만');
 await sch.getByRole('button', { name: 'Schirmer strip', exact: true }).click(); await W();
 ok(await sch.getByRole('button', { name: /^Schirmer strip \d\d:\d\d$/ }).count() === 1, '누르면 "Schirmer strip 시작 시각"');
 await backdate('임수빈', 'sch', 6);
-await page.waitForTimeout(20000);
-{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '임수빈').done.sch === true, 'Schirmer: 정한 시간이 지나면 저절로 검사 완료'); }
-ok(await sch.getByText(/Schirmer strip 완료 \d\d:\d\d/).count() === 1, '완료로 바뀌어 보임');
+await page.waitForTimeout(15000);
+{ const l = (await getKey('daily-patients')).value; ok(!l.find(p => p.name === '임수빈').done.sch, 'Schirmer: 시간이 돼도 확인 전에는 넘어가지 않음'); }
+ok(await sch.getByRole('button', { name: 'Schirmer strip 끝 · 확인' }).count() === 1, '시간이 되면 초록 [끝 · 확인]');
+await sch.getByRole('button', { name: 'Schirmer strip 끝 · 확인' }).click(); await W();
+{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '임수빈').done.sch === true, 'Schirmer: 확인하면 검사 완료'); }
 ok(await page.getByText(/^진료 전 검사 · 1명/).count() === 1, '처치실: 진료 전 검사에 OSDI 환자(조현우)');
 ok(await page.locator('div.bg-white').filter({ has: page.getByText('조현우', { exact: true }) }).getByRole('button', { name: /^OSDI/ }).count() >= 1, 'OSDI는 검사실 대기 중에도 처치실에');
 await page.screenshot({ path: `${SP}/r16-treat.png`, fullPage: true });
@@ -49,10 +67,10 @@ await backdate('조현우', 'fag', 21);
 const han = page.locator('div.bg-white').filter({ hasText: '동의서 · skin test' }).filter({ has: page.getByText('한지훈', { exact: true }) }).first();
 await han.getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await W();
 await han.getByRole('button', { name: '검사 취소' }).click(); await W();
-await page.waitForTimeout(20000);
-{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '조현우').prep.fag.result === 'neg', 'skin test: 20분 지나면 저절로 완료'); }
-ok(await prepCard.getByText(/동의서 · skin test 완료/).count() === 1, 'skin test 완료 표시');
+await page.waitForTimeout(15000);
 await prepCard.screenshot({ path: `${SP}/r32-skin-done.png` });
+await prepCard.getByRole('button', { name: '동의서 · skin test 끝 · 확인' }).click(); await W();
+{ const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '조현우').prep.fag.result === 'neg', 'skin test: 확인하면 검사실로'); }
 ok(await page.getByRole('button', { name: '동의서 · skin test', exact: true }).count() === 0, '남은 준비 없음');
 await back();
 await pick('31번방');

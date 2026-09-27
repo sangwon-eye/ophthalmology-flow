@@ -249,7 +249,7 @@ export const TEST_OPTION_HELP = {
   popupOnClick: '누를 때마다 세부 창(단안·종류)을 띄움. 끄면 바로 체크되고 오른쪽 클릭으로 창을 엶',
   noOrder: "처방이 필요 없는 검사 (예: OSDI). '처방 전' 표시를 하지 않음",
   noDilate: '이 검사가 끝나기 전에는 점안(산동)을 막음 (예: VF)',
-  prepOn: '처치실에서 시작 → 정한 시간 뒤 [확인]/[검사 취소] (예: FAG skin test, Schirmer, MMP)',
+  prepOn: '처치실에서 시작 시각 기록 → 정한 시간이 되면 [확인] (방식: 확인 후 넘어감 · 바로 넘어감, 자세히에서 선택)',
   withExams: '처치실 검사: 다른 검사실을 기다리는 동안에도 처치실 목록에 뜸 (예: OSDI). 끄면 다른 검사 뒤에 (예: Syringing)',
   showWhenEmpty: '검사실 화면 위쪽 장비 버튼을 대기 0명이어도 보임',
 };
