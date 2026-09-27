@@ -217,6 +217,11 @@ function assignAtTreat(p) {
 // 시력/안압을 마쳤고, 초진이면 처치실에서 검사 지정까지 마친 상태 → 검사실로 갈 수 있음
 // 시력방에서 하는 검사 id (설정의 시력방 검사, 예: ARK). App이 설정을 읽을 때마다 갱신합니다.
 let VISION_TEST_IDS = ['ark'];
+// 산동 금지 검사 (설정의 '산동 금지', 기본 VF). 끝나기 전에는 점안을 막습니다. App이 설정을 읽을 때마다 갱신
+let NO_DILATE_TESTS = [{ id: 'vf', short: 'VF' }];
+function dilationBlockers(p) {
+  return NO_DILATE_TESTS.filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
+}
 function visionComplete(p) {
   return !!p.done?.[VISION_KEY] && VISION_TEST_IDS.every(id => !p.assigned?.[id] || !!p.done?.[id]);
 }
@@ -318,7 +323,7 @@ const DILATE_EYE_LABEL = { OD: '우안 (OD)', OS: '좌안 (OS)' };
 function dilateEyeOf(value) { return ['OD', 'OS'].includes(value) ? value : undefined; }
 function needsDilation(p, prefs) {
   if (typeof p.dilateOverride === 'boolean') return p.dilateOverride;
-  // 산동이 필요한 진료 전 처치(예: PRP)가 남아 있으면 접수하자마자 '산동 함'
+  // 산동이 필요한 진료 전 처치(예: PRP)가 남아 있으면 접수하자마자 '산동'
   if ((p.preProcs || []).some(x => x.dilate && !x.done)) return true;
   return !!prefs?.[p.doctor]?.dilate;
 }
@@ -1303,6 +1308,19 @@ function SpecialPressButton({ onClick, onSpecial, className, title, children, di
   );
 }
 
+// 설정 > 검사 옵션 칩의 설명 (마우스를 올리면 보이고, 설정 위쪽 '옵션 설명'에 한 번 적혀 있음)
+const TEST_OPTION_HELP = {
+  popupOnClick: '누를 때마다 세부 창(단안·종류)을 띄움. 끄면 바로 체크되고 오른쪽 클릭으로 창을 엶',
+  noOrder: "처방이 필요 없는 검사 (예: OSDI). '처방 전' 표시를 하지 않음",
+  noDilate: '이 검사가 끝나기 전에는 점안(산동)을 막음 (예: VF)',
+  prepOn: '처치실에서 시작 → 정한 시간 뒤 [확인]/[검사 취소] (예: FAG skin test, Schirmer, MMP)',
+  withExams: '처치실 검사: 다른 검사실을 기다리는 동안에도 처치실 목록에 뜸 (예: OSDI). 끄면 다른 검사 뒤에 (예: Syringing)',
+  showWhenEmpty: '검사실 화면 위쪽 장비 버튼을 대기 0명이어도 보임',
+};
+// 산동 금지 검사: 설정에서 정하고, 정하지 않았으면 VF는 기본으로 산동 금지
+function noDilateTest(t) {
+  return typeof t?.noDilate === 'boolean' ? t.noDilate : isVfTest(t || {});
+}
 // 검사실에서 할 검사 한 칸. '오늘 검사' 칩(얇은 테두리·둥근 모양)과 구분되도록 굵은 테두리의 네모 칸으로 그립니다.
 const TEST_TILE = 'min-h-[2.25rem] rounded-lg border-2 flex items-center select-none';
 function TestToggle({ label, done, onToggle, emphasize, onSpecial, disabled = false }) {
@@ -1764,6 +1782,36 @@ function HistoryLine({ p }) {
   if (p.hxMissing) return <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 font-semibold">History 미입력</span>;
   return null;
 }
+// 처치실 검사 지정용: 항목마다 한 줄씩 전부 (여러 줄 글은 줄바꿈 그대로)
+function HistoryDetail({ p }) {
+  const ctx = useContext(HxContext);
+  if (!p.hx) {
+    if (p.hxMissing) return <div className="w-full text-sm bg-red-50 border border-red-300 text-red-700 rounded-lg px-3 py-1.5 font-semibold">History 미입력</div>;
+    return null;
+  }
+  const rows = (ctx.fields || DEFAULT_HX_FIELDS).map(f => {
+    const v = p.hx[f.id];
+    let text = '';
+    if (f.type === 'yn' || f.type === 'ynYears') {
+      if (v === true) text = `있음${f.type === 'ynYears' && p.hx[`${f.id}Years`] ? ` (${p.hx[`${f.id}Years`]}년)` : ''}`;
+      else if (v === false) text = '없음';
+    } else text = String(v ?? '').trim();
+    return { f, text };
+  });
+  return (
+    <div className="w-full text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg px-3 py-2">
+      <div className="font-semibold mb-1">History</div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        {rows.map(({ f, text }) => (
+          <React.Fragment key={f.id}>
+            <dt className="text-sky-700 whitespace-nowrap">{f.label}</dt>
+            <dd className={`whitespace-pre-wrap break-words ${text ? '' : 'text-slate-400'}`}>{text || '-'}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    </div>
+  );
+}
 function HistoryModal({ p, onClose }) {
   const ctx = useContext(HxContext);
   const mutatePatients = useContext(PatientMemoContext);
@@ -2087,14 +2135,13 @@ function DraggableList({ items, getKey, onMove, renderItem, locked = false }) {
 
 function DilationBadge({ st, waitMin, eye }) {
   const w = Number(waitMin) || 15;
-  if (st.status === 'todo') {
-    return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">점안 필요{eye ? ` · ${DILATE_EYE_LABEL[eye]}` : ''}</span>;
-  }
+  // 점안 전에는 빨간 [점안] 버튼만으로 충분해 따로 표시하지 않음 (점안 시각은 버튼에 표시)
+  if (st.status === 'todo') return null;
   if (st.status === 'progress') {
-    return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">CR {st.given}/{st.total}회, 마지막 점안 후 {st.mins}분</span>;
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">{st.mins}분 경과</span>;
   }
   if (st.status === 'waiting') {
-    return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">산동 중 {st.mins}분 (앞으로 {Math.max(0, w - st.mins)}분)</span>;
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">{Math.max(0, w - st.mins)}분 남음</span>;
   }
   return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">산동 완료</span>;
 }
@@ -2136,6 +2183,9 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
   const st = dilationState(p, prefs, waitMin);
   const eye = !cr && dil ? dilateEyeOf(p.dilateEye) : undefined;
   const [eyeModal, setEyeModal] = useState(false);
+  // VF처럼 산동 금지 검사가 남아 있으면 점안을 아예 막음 (이미 기록한 점안이 있으면 그대로 보여줌)
+  const blockers = dilationBlockers(p);
+  const blocked = blockers.length > 0 && st.given === 0;
   if (compact && !dil && !cr) return null;
   if (togglesOnly) showDrops = false;
   const chip = (on) => `text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
@@ -2148,7 +2198,7 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
           title="오른쪽 클릭: 좌·우안 지정"
           className={`${chip(dil)} select-none`}
         >
-          {dil ? `산동 함${eye ? ` · ${DILATE_EYE_LABEL[eye]}` : ''}` : '산동 안 함'}
+          {dil ? `산동${eye ? ` · ${DILATE_EYE_LABEL[eye]}` : ''}` : '산동 안 함'}
         </SpecialPressButton>
       )}
       {eyeModal && (
@@ -2163,11 +2213,15 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
       )}
       {crAvail && (
         <button type="button" onClick={() => patchPatient(mutatePatients, pk, x => ({ cr: !x.cr }))} className={chip(cr)}>
-          {cr ? 'CR 함' : 'CR 안 함'}
+          {cr ? 'CR' : 'CR 안 함'}
         </button>
       )}
-      {note && showDrops && st.need && st.given === 0 && <span className="text-xs text-amber-700">{note}</span>}
-      {showDrops && st.need && st.drops.map((t, i) => (
+      {showDrops && st.need && blocked && (
+        <span className="text-xs px-2 py-1 rounded-lg border border-slate-300 bg-slate-100 text-slate-600" title="산동 금지 검사가 끝나야 점안할 수 있어요">
+          {blockers.map(t => t.short).join(', ')} 끝난 뒤 점안
+        </span>
+      )}
+      {showDrops && st.need && !blocked && st.drops.map((t, i) => (
         <button
           key={i}
           type="button"
@@ -2180,7 +2234,7 @@ function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, comp
           {cr ? `${i + 1}회 점안` : '점안'}{t ? ` ${fmtClock(t)}` : ''}
         </button>
       ))}
-      {st.need && !togglesOnly && <DilationBadge st={st} waitMin={waitMin} eye={eye} />}
+      {st.need && !togglesOnly && !blocked && <DilationBadge st={st} waitMin={waitMin} eye={eye} />}
     </div>
   );
 }
@@ -2270,7 +2324,7 @@ function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onCancel }) {
+function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onCancel }) {
   const [preSel, setPreSel] = useState(() => preProcChoice?.initial || []);
   const tests = orderForPicking(rawTests, settings);
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
@@ -2308,6 +2362,7 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
       <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
         <h3 className="text-lg font-medium mb-1 text-slate-900">{title}</h3>
         {subtitle && <p className="text-sm text-slate-500 mb-4">{subtitle}</p>}
+        {info && <div className="mb-4">{info}</div>}
         {followup && <div className="text-sm text-indigo-700 mb-3">다음 내원 담당: {followupDoctor || '미지정'}</div>}
         {/* 2열 체크 칸. 세부 입력(단안·옵션)이 열린 칸만 한 줄 전체를 쓴다 */}
         <div className="grid grid-cols-2 gap-2 mb-6">
@@ -2382,7 +2437,7 @@ function TestCheckModal({ title, subtitle, tests: rawTests, settings, initial, i
           <div className="rounded-xl border border-slate-200 p-3 mb-6">
             <div className="text-sm text-slate-700 mb-2">다음 내원 산동</div>
             <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
-              {[['yes', '산동 함'], ['no', '산동 안 함']].map(([k, label]) => (
+              {[['yes', '산동'], ['no', '산동 안 함']].map(([k, label]) => (
                 <SpecialPressButton
                   key={k}
                   onClick={() => setDil(d => ({ ...d, mode: k }))}
@@ -2997,9 +3052,7 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
                 ))}
                 {isVision && firstVisitChip(p)}
                 {isVision && <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>}
-                {/* VF처럼 산동 전에 해야 하는 검사가 남아 있으면 작게만 알려줌 (산동 여부는 직원 판단) */}
-                <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients}
-                  note={sortedTests(settings).some(t => isVfTest(t) && p.assigned?.[t.id] && !p.done?.[t.id]) ? 'VF 남음' : ''} />
+                <DilationRow compact p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                 {otherRooms.length > 0 && (
                   <span className="text-xs text-slate-500">
                     다른 검사실 남음: {otherRooms.map(r => `${r.name} (${remainingTests(p, settings, r.id).map(t => t.short).join(', ')})`).join(', ')}
@@ -3845,6 +3898,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
             <div className="w-full">
               <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
             </div>
+            {(p.hx || p.hxMissing) && <HistoryDetail p={p} />}
             {p.addOnCheck && doneTests.length > 0 && <div className="w-full text-xs text-slate-500">오늘 이미 한 검사: {doneTests.map(t => t.short || t.name).join(', ')}</div>}
             <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
@@ -3908,6 +3962,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
           subtitle={assignAtTreat(triageFor)
             ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'
             : `${triageFor.primaryDoctor || '1차'} 진료를 마쳤습니다. ${triageFor.doctor} 진료 전에 할 검사를 체크하세요. 이미 한 검사는 다시 하지 않습니다. 없으면 바로 진료 대기로 이동합니다.${allTests.some(t => triageFor.done?.[t.id]) ? ` (오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')})` : ''}`}
+          info={(triageFor.hx || triageFor.hxMissing) && <HistoryDetail p={triageFor} />}
           tests={allTests}
           settings={settings}
           initial={triageFor.assigned}
@@ -4588,7 +4643,7 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
           })()}
           {fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
           {fuIds.flatMap(id => followupRows(id, fuMap[id])).map(({ id, doctor: fuDoctor, fu }) => {
-            const dilText = [fu.dilate === 'yes' ? `산동 함${dilateEyeOf(fu.dilateEye) ? ` (${DILATE_EYE_LABEL[fu.dilateEye]})` : ''}` : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
+            const dilText = [fu.dilate === 'yes' ? `산동${dilateEyeOf(fu.dilateEye) ? ` (${DILATE_EYE_LABEL[fu.dilateEye]})` : ''}` : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
             const preText = (fu.preProcs || []).map(pid => (settings.procedures || []).find(x => x.id === pid)?.name).filter(Boolean).join(', ');
             const names = [preText && `진료 전 처치: ${preText}`, allTests.filter(t => fu[t.id]).map(t => testLabelWithOptions(t, fu.detail?.[t.id])).join(', '), dilText].filter(Boolean).join(' / ');
             const fuNotes = allTests
@@ -5033,6 +5088,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
         prepWaitMin: Math.max(0, Math.round(Number(t.prepWaitMin ?? 20) || 0)),
         withExams: !!t.withExams,
         noOrder: !!t.noOrder,
+        noDilate: noDilateTest(t),
         prepCompletes: !!t.prepCompletes,
       })),
       procedures: (draft.procedures || [])
@@ -5137,56 +5193,30 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                   </select></label>;
                 })}</div>
               </div>}
-              <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
-                <input type="checkbox" checked={!!t.noOrder} onChange={e => updateTest(t.id, { noOrder: e.target.checked })} className="w-4 h-4 mt-0.5" />
-                <span>
-                  처방이 필요 없는 검사
-                  <span className="block text-xs text-slate-400">예: OSDI 설문. 켜면 검사실 카드에 '처방 전' 표시가 나오지 않아요</span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
-                <input type="checkbox" checked={!!t.popupOnClick} onChange={e => updateTest(t.id, { popupOnClick: e.target.checked })} className="w-4 h-4 mt-0.5" />
-                <span>
-                  누를 때마다 세부 창 띄우기
-                  <span className="block text-xs text-slate-400">끄면 평소엔 바로 체크되고, 필요할 때만 오른쪽 클릭으로 창을 열어요</span>
-                </span>
-              </label>
-              <div className="flex items-start gap-2 text-sm text-slate-700 py-2 flex-wrap">
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input type="checkbox" checked={!!t.prepOn} onChange={e => updateTest(t.id, { prepOn: e.target.checked, prepWaitMin: t.prepWaitMin ?? 20 })} className="w-4 h-4 mt-0.5" />
-                  <span>
-                    처치실 준비 단계
-                    <span className="block text-xs text-slate-400">처치실에서 시작 → 정한 시간이 지나면 [확인] / [검사 취소]. 예: FAG(동의서 · skin test 20분), Schirmer(5분), MMP(10분)</span>
-                  </span>
-                </label>
-                {t.prepOn && <>
-                  <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} placeholder="예: 동의서 · skin test" onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-44" />
-                  <label className="flex items-center gap-1 text-xs text-slate-600">
-                    <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16" />분 뒤 확인
-                  </label>
-                  <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer" title="끄면 확인 후 검사실에서 검사합니다 (예: FAG)">
-                    <input type="checkbox" checked={!!t.prepCompletes} onChange={e => updateTest(t.id, { prepCompletes: e.target.checked })} className="w-4 h-4" />확인하면 검사 완료 (예: Schirmer, MMP)
-                  </label>
-                </>}
+              {/* 검사 옵션: 설명은 위쪽 '옵션 설명'에 한 번만, 여기서는 짧은 이름의 켜고 끄는 칩 */}
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-1.5">
+                {[
+                  ['popupOnClick', '세부 창', !!t.popupOnClick, true],
+                  ['noOrder', '처방 없음', !!t.noOrder, true],
+                  ['noDilate', '산동 금지', noDilateTest(t), true],
+                  ['prepOn', '시간 재기', !!t.prepOn, true],
+                  ['withExams', '대기 중에도', !!t.withExams, isTreat],
+                  ['showWhenEmpty', '0명도 표시', t.showWhenEmpty !== false, machineGroups(tests).length >= 2],
+                ].filter(o => o[3]).map(([k, label, on]) => (
+                  <button key={k} type="button" aria-pressed={on} title={TEST_OPTION_HELP[k]}
+                    onClick={() => updateTest(t.id, k === 'prepOn' ? { prepOn: !on, prepWaitMin: t.prepWaitMin ?? 20 } : { [k]: !on })}
+                    className={`text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-500'}`}>
+                    {on ? '✓ ' : ''}{label}
+                  </button>
+                ))}
               </div>
-              {isTreat && (
-                <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
-                  <input type="checkbox" checked={!!t.withExams} onChange={e => updateTest(t.id, { withExams: e.target.checked })} className="w-4 h-4 mt-0.5" />
-                  <span>
-                    검사실 대기 중에도 바로 하기
-                    <span className="block text-xs text-slate-400">예: OSDI 설문. 켜면 다른 검사실 검사를 기다리는 동안에도 처치실 목록에 뜹니다. 끄면 다른 검사 뒤에 (예: Syringing)</span>
-                  </span>
-                </label>
-              )}
-              {/* 검사실 화면 위쪽 장비 버튼은 장비(분류)가 2개 이상일 때만 나오므로 그때만 보여줌 */}
-              {machineGroups(tests).length >= 2 && (
-                <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer py-2">
-                  <input type="checkbox" checked={t.showWhenEmpty !== false} onChange={e => updateTest(t.id, { showWhenEmpty: e.target.checked })} className="w-4 h-4 mt-0.5" />
-                  <span>
-                    대기 0명이어도 위쪽 목록에 보이기
-                    <span className="block text-xs text-slate-400">검사실 화면 위쪽 장비 버튼. 끄면 기다리는 환자가 있을 때만 보여요 (같은 분류로 묶인 검사는 하나만 켜도 보임)</span>
-                  </span>
-                </label>
+              {t.prepOn && (
+                <div className="sm:col-span-2 flex items-center gap-2 flex-wrap text-xs text-slate-600 bg-white border border-slate-200 rounded-lg px-2 py-1.5">
+                  시간 재기:
+                  <input aria-label={`${t.short || t.name} 준비 이름`} value={t.prepName ?? ''} placeholder="예: 동의서 · skin test" onChange={e => updateTest(t.id, { prepName: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-44" />
+                  <input type="number" min="0" aria-label={`${t.short || t.name} 준비 대기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16" />분
+                  <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={!!t.prepCompletes} onChange={e => updateTest(t.id, { prepCompletes: e.target.checked })} className="w-4 h-4" />확인하면 검사 완료</label>
+                </div>
               )}
             </div>
           </div>
@@ -5228,6 +5258,14 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
             세부 종류를 적어두면 창에서 종류를 고를 수 있어요 (예: OCT의 Macular, Disc, Angio). 어떤 검사든 오른쪽 클릭(터치스크린은 길게 누르기)하면 양안·우안·좌안과 검사 프로토콜을 지정하는 창이 떠요. 연구처럼 매번 적어야 하는 항목은 '누를 때마다 세부 창 띄우기'를 켜두세요.
           </p>
 
+          <details className="bg-white border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm text-slate-600">
+            <summary className="cursor-pointer font-medium text-slate-800">검사 옵션 설명 (검사마다 있는 동그란 버튼)</summary>
+            <ul className="mt-2 space-y-1">
+              {[['popupOnClick', '세부 창'], ['noOrder', '처방 없음'], ['noDilate', '산동 금지'], ['prepOn', '시간 재기'], ['withExams', '대기 중에도'], ['showWhenEmpty', '0명도 표시']].map(([k, l]) => (
+                <li key={k}><b className="text-slate-800">{l}</b> · {TEST_OPTION_HELP[k]}</li>
+              ))}
+            </ul>
+          </details>
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
               <Field label="시력방 이름 (직원 화면)">
@@ -5338,7 +5376,7 @@ function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, mutateDo
                   <option value="prof">교수님이 직접</option>
                   <option value="resident">전공의</option>
                 </select>
-                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="진료 전 처치로 지정되면 접수하자마자 '산동 함'이 됩니다">
+                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="진료 전 처치로 지정되면 접수하자마자 '산동'이 켜집니다">
                   <input type="checkbox" checked={!!x.dilate} onChange={e => updateProc(x.id, { dilate: e.target.checked })} className="w-4 h-4" />
                   산동 필요
                 </label>
@@ -5647,6 +5685,7 @@ export default function App() {
   const [hxStore, mutateHxStore, syncHxStore, markHxStore] = useSharedStore('patient-history', loadHx, {});
   const [lastSync, setLastSync] = useState(null);
   VISION_TEST_IDS = settings.tests.filter(t => t.roomId === 'vision').map(t => t.id);
+  NO_DILATE_TESTS = settings.tests.filter(noDilateTest).map(t => ({ id: t.id, short: t.short || t.name }));
   // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
   forcedToday = todayOverride?.date && todayOverride.setOn === realTodayISO() ? todayOverride.date : null;
   const setToday = (date) => mutateTodayOverride(() => (date && date !== realTodayISO() ? { date, setOn: realTodayISO() } : null));
