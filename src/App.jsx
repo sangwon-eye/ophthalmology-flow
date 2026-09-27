@@ -1759,14 +1759,9 @@ const HX_TYPES = [['yn', '있음/없음'], ['ynYears', '있음/없음 + 기간(�
 function hxFieldsOf(settings) {
   return Array.isArray(settings?.hxFields) && settings.hxFields.length ? settings.hxFields : DEFAULT_HX_FIELDS;
 }
-// OCS '초진'이어도 우리 프로그램에 지난 기록(FU 지정·이전 시력·히스토리)이 있으면 예정된 FU로 보고 추천하지 않음
-function hxSuggested(p, ctx) {
-  if (!p.firstVisit) return false;
-  const pastMeasure = Array.isArray(ctx.measure?.[p.id]) && ctx.measure[p.id].some(r => r.date < p.date);
-  return !ctx.fuMap?.[p.id] && !pastMeasure && !ctx.store?.[p.id];
-}
-function hxNeeded(p, ctx) {
-  return typeof p.hxNeeded === 'boolean' ? p.hxNeeded : hxSuggested(p, ctx);
+// 초진이면 무조건 History 필요. FU가 길어 초진으로 올라온 환자는 재진으로, 재진인데 필요하면 초진으로 고치면 됨
+function hxNeeded(p) {
+  return !!p.firstVisit;
 }
 function hxSummary(hx, fields = DEFAULT_HX_FIELDS) {
   if (!hx) return '';
@@ -1788,6 +1783,24 @@ function HistoryLine({ p }) {
   }
   if (p.hxMissing) return <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 font-semibold">History 미입력</span>;
   return null;
+}
+// 처치실(검사 지정·예진): 오늘 지정된 검사를 보기만. 한 검사는 초록 ✓, 남은 검사는 회색
+function TodayTestsLine({ p, tests }) {
+  const list = tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id]);
+  return (
+    <div className="w-full flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-slate-400 mr-0.5">오늘 검사</span>
+      {list.length === 0 && <span className="text-slate-400">없음</span>}
+      {list.map(t => {
+        const done = !!p.done?.[t.id];
+        return (
+          <span key={t.id} className={`px-2 py-0.5 rounded-full border flex items-center gap-0.5 ${done ? 'bg-green-50 border-green-300 text-green-800' : 'bg-white border-slate-300 text-slate-500'}`}>
+            {done && <Check size={11} />}{testLabelWithOptions(t, p.detail?.[t.id])}{done ? '' : ' (남음)'}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 // 처치실 검사 지정용: 항목마다 한 줄씩 전부 (여러 줄 글은 줄바꿈 그대로)
 function HistoryDetail({ p }) {
@@ -1835,8 +1848,6 @@ function HistoryModal({ p, onClose }) {
     return out;
   });
   const set = (k, v) => setF(cur => ({ ...cur, [k]: v }));
-  // History를 적은 환자는 시력 후 처치실에서 오늘 검사를 정함 (초진은 원래 그렇게 감)
-  const [toTreat, setToTreat] = useState(() => (p.firstVisit ? true : p.hx ? !!p.hxAssign : !visionComplete(p)));
   const save = () => {
     const at = Date.now();
     const hx = { at };
@@ -1847,7 +1858,7 @@ function HistoryModal({ p, onClose }) {
       if (x.type === 'ynYears') hx[`${x.id}Years`] = v ? String(f[`${x.id}Years`] || '').trim() : '';
       if (x.keep) { keep[x.id] = hx[x.id]; if (x.type === 'ynYears') keep[`${x.id}Years`] = hx[`${x.id}Years`]; }
     });
-    patchPatient(mutatePatients, patientKey(p), () => ({ hx, hxMissing: false, ...(p.firstVisit ? {} : { hxAssign: toTreat }) }));
+    patchPatient(mutatePatients, patientKey(p), () => ({ hx, hxMissing: false }));
     if (ctx.mutate) ctx.mutate(prev => ({ ...(prev || {}), [p.id]: { ...keep, date: p.date, updatedAt: at } }));
     onClose();
   };
@@ -1882,16 +1893,10 @@ function HistoryModal({ p, onClose }) {
               </label>
             )
           ))}
-          {!p.firstVisit && (
-            <label className="flex items-center gap-2 text-sm text-slate-800 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 cursor-pointer">
-              <input type="checkbox" checked={toTreat} onChange={e => setToTreat(e.target.checked)} className="w-4 h-4" />
-              시력검사 후 처치실에서 오늘 검사 정하기
-            </label>
-          )}
         </div>
         <div className="flex gap-3 mt-6">
           <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
-          <button type="button" onClick={save} className="flex-1 py-3 rounded-xl bg-sky-600 text-white font-medium">저장</button>
+          <button type="button" onClick={save} className="flex-1 py-3 rounded-xl bg-sky-600 text-white font-medium">확인</button>
         </div>
       </div>
     </div>
@@ -1901,10 +1906,10 @@ function HistoryModal({ p, onClose }) {
 function HistoryControl({ p }) {
   const ctx = useContext(HxContext);
   const [open, setOpen] = useState(false);
-  const need = hxNeeded(p, ctx);
+  const need = hxNeeded(p);
   return (
     <>
-      {/* History가 필요한 환자만 버튼 (OCS 초진 + 지난 기록 없음, 또는 관리자 명단 관리에서 'History 필요'로 켠 환자). 끄기는 관리자에서 */}
+      {/* 초진만 버튼 (재진은 없음) */}
       {!p.hx && need && (
         <button type="button" onClick={() => setOpen(true)} className="text-sm px-3 py-1.5 rounded-lg font-medium bg-amber-500 text-white">
           History 필요
@@ -1918,21 +1923,6 @@ function HistoryControl({ p }) {
       )}
       {open && <HistoryModal p={p} onClose={() => setOpen(false)} />}
     </>
-  );
-}
-
-// 관리자 명단 관리: 이 환자를 'History 필요'로 지정/해제 (FU loss·중간 내원 등). 시력방에 [History 필요]가 뜸
-function HxNeedToggle({ p }) {
-  const ctx = useContext(HxContext);
-  const mutatePatients = useContext(PatientMemoContext);
-  if (p.hx || p.consultDone) return null;
-  const need = hxNeeded(p, ctx);
-  return (
-    <button type="button" aria-pressed={need} onClick={() => patchPatient(mutatePatients, patientKey(p), () => ({ hxNeeded: !need }))}
-      title={need ? '누르면 History 필요 해제' : '누르면 시력방에 History 필요 표시'}
-      className={`text-xs px-3 py-1.5 rounded-lg border ${need ? 'bg-amber-50 border-amber-400 text-amber-800 font-medium' : 'border-slate-300 text-slate-400'}`}>
-      History 필요
-    </button>
   );
 }
 
@@ -2857,19 +2847,18 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
     patchPatient(mutatePatients, patientKey(p), x => updateVf(x, t.id, action, at));
   };
 
-  // History가 필요한데 안 적고 시력/안압을 끝내면: 경고만 하고 진료실 카드에 'History 미입력' 표시
-  const hxCtx = useContext(HxContext);
-  const hxWarn = (p, key) => key === VISION_KEY && !p.hx && hxNeeded(p, hxCtx);
+  // History가 필요한 환자는 History 창에서 [확인](빈칸이어도)을 눌러야 시력/안압을 완료할 수 있음
+  const hxBlock = (p, key) => key === VISION_KEY && !p.hx && hxNeeded(p);
+  const HX_BLOCK_MSG = (p) => `${p.name} History를 먼저 확인해주세요 (빈칸이어도 [History 필요] → [확인])`;
   const markDone = (p, key, val) => {
     if (activeVf(p)) return;
     const pk = patientKey(p);
+    if (val && hxBlock(p, key)) { showToast(HX_BLOCK_MSG(p)); return; }
     writeDone(pk, key, val, Date.now());
     if (val) {
-      const noHx = hxWarn(p, key);
-      if (noHx) patchPatient(mutatePatients, pk, () => ({ hxMissing: true }));
       const noIop = key === VISION_KEY && !hasIop(p);
       const toTriage = key === VISION_KEY && assignAtTreat(p) ? ', 처치실로' : '';
-      showToast(`${p.name} ${testLabel(key)} 완료${noIop ? ' (안압 값 없음)' : ''}${toTriage}${noHx ? ' · ⚠ History 미입력' : ''}`, () => writeDone(pk, key, false, null));
+      showToast(`${p.name} ${testLabel(key)} 완료${noIop ? ' (안압 값 없음)' : ''}${toTriage}`, () => writeDone(pk, key, false, null));
     }
   };
 
@@ -2902,7 +2891,8 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
       : x))));
   };
 
-  const handleMeasureSave = ({ measure, complete, gat, date }) => {
+  const handleMeasureSave = ({ measure, complete: wantComplete, gat, date }) => {
+    let complete = wantComplete;
     const { key: pk, mode: mmode } = measureFor;
     const p = patients.find(x => patientKey(x) === pk);
     setMeasureFor(null);
@@ -2918,6 +2908,9 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
       ? { gat: measure.gat }
       : { ucva: measure.ucva, bcva: measure.bcva, autoV: measure.autoV, nct: measure.nct };
     const doneKey = mmode === 'gat' ? GAT_ID : VISION_KEY;
+    // History 확인 전이면 측정값만 저장하고 완료는 막음
+    const blocked = complete && hxBlock(p, doneKey);
+    if (blocked) complete = false;
     const at = Date.now();
     mutatePatients(prev => prev.map(x => {
       if (patientKey(x) !== pk || activeVf(x)) return x;
@@ -2928,12 +2921,12 @@ function StationView({ mode, settings, doctorPrefs, patients, history, mutatePat
       }
       if (complete) {
         nx = { ...nx, done: { ...nx.done, [doneKey]: true }, doneAt: { ...(nx.doneAt || {}), [doneKey]: at } };
-        if (hxWarn(x, doneKey)) nx = { ...nx, hxMissing: true };
       }
       return nx;
     }));
     mutateHistory(prev => mergeHistory(prev, p.id, p.date, patch));
-    if (complete) showToast(`${p.name} ${testLabel(doneKey)} 완료${hxWarn(p, doneKey) ? ' · ⚠ History 미입력' : ''}`, () => writeDone(pk, doneKey, false, null));
+    if (blocked) showToast(`측정값 저장됨 · ${HX_BLOCK_MSG(p)}`);
+    else if (complete) showToast(`${p.name} ${testLabel(doneKey)} 완료`, () => writeDone(pk, doneKey, false, null));
   };
 
   // 되돌리기 목록
@@ -3939,14 +3932,13 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
           검사 지정 대기 (초진 · History · 2차 진료) · {triage.length}명
         </SectionTitle>
         {triage.map(p => {
-          const doneTests = allTests.filter(t => p.done?.[t.id]);
           return (
           <SimpleCard key={patientKey(p)} p={p} tone="sky">
             <div className="w-full">
               <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
             </div>
             {(p.hx || p.hxMissing) && <HistoryDetail p={p} />}
-            {p.addOnCheck && doneTests.length > 0 && <div className="w-full text-xs text-slate-500">오늘 이미 한 검사: {doneTests.map(t => t.short || t.name).join(', ')}</div>}
+            <TodayTestsLine p={p} tests={allTests} />
             <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
               {assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'}
@@ -3964,6 +3956,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
             {needsTriageExam(p, settings) && <>
               <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
+              <TodayTestsLine p={p} tests={allTests} />
               <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
             </>}
             {(p.procedures || []).some(x => x.performer === 'resident') && (
@@ -4009,7 +4002,7 @@ function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePat
           subtitle={assignAtTreat(triageFor)
             ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'
             : `${triageFor.primaryDoctor || '1차'} 진료를 마쳤습니다. ${triageFor.doctor} 진료 전에 할 검사를 체크하세요. 이미 한 검사는 다시 하지 않습니다. 없으면 바로 진료 대기로 이동합니다.${allTests.some(t => triageFor.done?.[t.id]) ? ` (오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')})` : ''}`}
-          info={(triageFor.hx || triageFor.hxMissing) && <HistoryDetail p={triageFor} />}
+          info={<div className="space-y-2"><TodayTestsLine p={triageFor} tests={allTests} />{(triageFor.hx || triageFor.hxMissing) && <HistoryDetail p={triageFor} />}</div>}
           tests={allTests}
           settings={settings}
           initial={triageFor.assigned}
@@ -4624,7 +4617,6 @@ function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, m
                   {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
                   {doctors.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
-                <HxNeedToggle p={p} />
                 <button type="button" onClick={() => toggleFirst(patientKey(p))} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
                 </button>
