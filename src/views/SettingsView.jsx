@@ -85,6 +85,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
         prepName: String(t.prepName || '').trim() || (t.prepOn ? '검사 준비' : ''),
         prepWaitMin: Math.max(0, Math.round(Number(t.prepWaitMin ?? 20) || 0)),
         withExams: !!t.withExams,
+        holdCall: !!t.holdCall,
         noOrder: !!t.noOrder,
         noDilate: noDilateTest(t),
         prepCompletes: !!t.prepCompletes,
@@ -148,6 +149,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             ['noOrder', '처방 없음', !!t.noOrder, true],
             ['noDilate', '산동 금지', noDilateTest(t), true],
             ['prepOn', '시간 재기', !!t.prepOn, true],
+            ['holdCall', '진행 중 호출 금지', !!t.holdCall, !!t.prepOn && t.prepMode !== 'go'],
             ['withExams', '대기 중에도', !!t.withExams, isTreat],
             ['showWhenEmpty', '0명도 표시', t.showWhenEmpty !== false, machineGroups(tests).length >= 2],
           ].filter(o => o[3]);
@@ -276,7 +278,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
               검사 이름이나 [자세히]를 누르면 이름·검사실·세부 종류를 고칠 수 있어요.</p>
             <p className="mt-2">세부 종류를 적어두면 창에서 종류를 고를 수 있어요 (예: OCT의 Macular, Disc, Angio). 어떤 검사든 오른쪽 클릭(터치스크린은 길게 누르기)하면 양안·우안·좌안과 검사 프로토콜을 지정하는 창이 떠요.</p>
             <ul className="mt-2 space-y-1">
-              {[['popupOnClick', '세부 창'], ['noOrder', '처방 없음'], ['noDilate', '산동 금지'], ['prepOn', '시간 재기'], ['withExams', '대기 중에도'], ['showWhenEmpty', '0명도 표시']].map(([k, l]) => (
+              {[['popupOnClick', '세부 창'], ['noOrder', '처방 없음'], ['noDilate', '산동 금지'], ['prepOn', '시간 재기'], ['holdCall', '진행 중 호출 금지'], ['withExams', '대기 중에도'], ['showWhenEmpty', '0명도 표시']].map(([k, l]) => (
                 <li key={k}><b className="text-slate-800">{l}</b> · {TEST_OPTION_HELP[k]}</li>
               ))}
             </ul>

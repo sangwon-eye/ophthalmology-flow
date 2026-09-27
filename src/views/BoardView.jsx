@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { COLOR_MAP, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete } from '../core/flow.jsx';
+import { COLOR_MAP, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
 
@@ -143,13 +143,14 @@ export function ExamBoardList({ patients, settings, compact }) {
             <div key={patientKey(p)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 flex items-center justify-between gap-2 flex-wrap">
               <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(p)}</span>
               <div className="flex flex-wrap gap-2 justify-end">
+                {!activeVf(p) && prepHolding(p, settings) && <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
                 {activeVf(p) && <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
                 {!activeVf(p) && treatTodo(p).length > 0 && (
                   <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200`}>
                     {treat.patientName || treat.name}: {treatTodo(p).join(', ')}
                   </span>
                 )}
-                {(activeVf(p) ? [] : pendingRooms(p, settings)).map(r => {
+                {(activeVf(p) || prepHolding(p, settings) ? [] : pendingRooms(p, settings)).map(r => {
                   const c = COLOR_MAP[roomColor(settings, r.id)];
                   return (
                     <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-full border ${c.bg} ${c.text} ${c.border}`}>

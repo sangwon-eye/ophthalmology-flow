@@ -4,7 +4,7 @@ import {
   Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
 } from 'lucide-react';
-import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistory, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds } from '../core/flow.jsx';
+import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistory, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -250,7 +250,10 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
             const idx = shown.indexOf(p);
             const pk = patientKey(p);
             const runningVf = activeVf(p);
-            const topTest = showPriority && !runningVf ? pendingTests(p, settings, room.id)[0] : null;
+            // 처치실에서 '진행 중 호출 금지' 검사(예: Schirmer) 중이면 VF 검사 중처럼 잠금 (처치실 화면 자신은 제외)
+            const held = isVision || room?.builtin === 'treat' ? null : prepHolding(p, settings);
+            const locked = !!(runningVf || held);
+            const topTest = showPriority && !locked ? pendingTests(p, settings, room.id)[0] : null;
             const otherRooms = isVision ? [] : settings.rooms.filter(r => r.id !== room.id && remainingTests(p, settings, r.id).length > 0);
             const prev = previousMeasure(p, history);
             const notes = notesOf(p, allTests);
@@ -318,6 +321,7 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
                   </button>
                 )}
                 {isVision && <HistoryControl p={p} />}
+                {held && <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{treatRoomOf(settings).name} {held.short || held.name} 중 · 호출 금지</span>}
                 {tests.filter(t => p.assigned?.[t.id] && t.id !== VISION_KEY).map(t => (
                   !p.done?.[t.id] && prepBlocked(p, t) ? (
                     // 처치실 준비(예: skin test)가 끝나야 할 수 있는 검사: 잠긴 칸으로 상태만 보여줌
@@ -333,13 +337,13 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
                         <button type="button" onClick={() => changeVf(p, t, 'cancel')} className="self-stretch px-2.5 text-slate-500 hover:text-slate-700 border-l border-amber-300 bg-white">시작 취소</button>
                       </div>
                     ) : (
-                      <div key={t.id} className={`${TEST_TILE} overflow-hidden text-sm ${topTest?.id === t.id ? 'border-amber-400 bg-amber-50' : 'border-slate-300 bg-white'} ${runningVf ? 'opacity-40' : ''}`}>
+                      <div key={t.id} className={`${TEST_TILE} overflow-hidden text-sm ${topTest?.id === t.id ? 'border-amber-400 bg-amber-50' : 'border-slate-300 bg-white'} ${locked ? 'opacity-40' : ''}`}>
                         <span className="px-3 font-semibold text-slate-800">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
-                        <button type="button" disabled={!!runningVf} onClick={() => changeVf(p, t, 'start')} className="self-stretch px-3 bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold border-l border-amber-300 flex items-center gap-1">▶ 시작</button>
+                        <button type="button" disabled={locked} onClick={() => changeVf(p, t, 'start')} className="self-stretch px-3 bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold border-l border-amber-300 flex items-center gap-1">▶ 시작</button>
                       </div>
                     )
                   ) : <TestToggle
-                    disabled={!!runningVf}
+                    disabled={locked}
                     key={t.id}
                     label={testLabelWithOptions(t, p.detail?.[t.id])}
                     done={!!p.done?.[t.id]}

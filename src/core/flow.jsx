@@ -203,6 +203,10 @@ export function prepDue(st, t, now = Date.now()) { return !!st?.startedAt && now
 export function prepChecks(p, settings) {
   return sortedTests(settings).filter(t => hasPrep(t) && prepGoMode(t) && p.assigned?.[t.id] && prepOf(p, t)?.go && !prepOf(p, t)?.checked);
 }
+// '진행 중 호출 금지'(예: Schirmer): 처치실에서 시작해 아직 확인 전이면 검사실에서 부르지 않음
+export function prepHolding(p, settings) {
+  return sortedTests(settings).find(t => hasPrep(t) && t.holdCall && !prepGoMode(t) && p.assigned?.[t.id] && !p.done?.[t.id] && prepOf(p, t)?.startedAt && !prepOf(p, t)?.result) || null;
+}
 export function prepPositiveNames(p) {
   return Object.values(p.prep || {}).filter(x => x?.result === 'pos').map(x => x.name).filter(Boolean);
 }
