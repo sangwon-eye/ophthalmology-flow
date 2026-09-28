@@ -13,6 +13,7 @@ npx playwright install chromium
 ## 실행
 ```
 npm run build
+npm run lint                  # 코드 검사 (경고 0개여야 통과)
 node tests/run.mjs            # 전체
 node tests/run.mjs r29 hx     # 파일 이름에 r29·hx 가 들어간 것만
 ```

@@ -26,9 +26,18 @@ function oldBrowserCss() {
   };
 }
 
+// 화면에 보이는 버전 = 화면 파일을 만든 시각 (한국 시간, 예: 09-28 14:05)
+function buildTime() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date()).map(x => [x.type, x.value]));
+  return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+}
+
 // 개발 중(npm run dev)에는 데이터 요청을 공유 서버(npm start, 3000번 포트)로 넘깁니다.
 export default defineConfig({
   plugins: [react(), tailwindcss(), oldBrowserCss()],
+  define: { __BUILD_TIME__: JSON.stringify(buildTime()) },
   build: { target: `chrome${OLD_CHROME}` },
   server: { proxy: { '/api': 'http://127.0.0.1:3000' } },
 });

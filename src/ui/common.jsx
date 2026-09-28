@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, withoutPrep } from '../core/flow.jsx';
+import { COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -63,6 +63,8 @@ export function TextSizeControl({ className = '' }) {
 
 // 직원 화면 폭: 넓은 모니터에서 카드가 한 줄에 들어가도록 넓게 (좁은 화면·태블릿은 화면 폭에 맞춤)
 export const SHELL_WIDTH = 'max-w-6xl';
+// 화면 버전 (화면 파일을 만든 시각). 업데이트 뒤 각 PC가 새 화면인지 확인할 때 봅니다.
+export const APP_VERSION = `버전 ${typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : '-'}`;
 export function ScreenShell({ title, color, onBack, lastSync, count, extra, sub, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
@@ -87,7 +89,9 @@ export function ScreenShell({ title, color, onBack, lastSync, count, extra, sub,
         {sub && <div className={`${SHELL_WIDTH} mx-auto px-5 pb-2`}>{sub}</div>}
       </div>
       <div className={`${SHELL_WIDTH} mx-auto px-5 py-5`}>{children}</div>
-      {lastSync && <div className="t-hint text-center text-xs text-slate-400 pb-6 print:hidden">마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')}</div>}
+      <div className="t-hint text-center text-xs text-slate-400 pb-6 print:hidden">
+        {lastSync && <>마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')} · </>}{APP_VERSION}
+      </div>
     </div>
   );
 }
@@ -1222,20 +1226,32 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
           {single ? `${cr ? 'CR' : `산동${eyeText}`} · ${blockers.map(t => t.short).join(', ')} 끝난 뒤` : `${blockers.map(t => t.short).join(', ')} 끝난 뒤 점안`}
         </span>
       )}
-      {showDrops && st.need && !blocked && st.drops.map((t, i) => (
-        <button
-          key={i}
-          type="button"
-          onClick={() => toggleDrop(mutatePatients, pk, i)}
-          title={t ? '다시 누르면 기록 취소' : '누르면 지금 시각으로 기록'}
-          className={`${sz} rounded-lg border ${t
-            ? 'bg-slate-100 border-slate-200 text-slate-500'
-            : i === st.given ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-300 text-slate-500'}`}
-        >
-          {single ? (cr ? `CR ${i + 1}회` : `산동${eyeText}`) : (cr ? `${i + 1}회 점안` : '점안')}{t ? ` ${fmtClock(t)}` : ''}
-        </button>
-      ))}
+      {showDrops && st.need && !blocked && st.drops.map((t, i) => {
+        // 추가 점안이 있으면 버튼 하나에 마지막 시각과 횟수만 (누르면 마지막 추가 점안만 취소)
+        const extraLast = !cr && st.extra.length ? st.extra[st.extra.length - 1] : 0;
+        const shown = extraLast || t;
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={() => (extraLast ? undoExtraDrop(mutatePatients, pk) : toggleDrop(mutatePatients, pk, i))}
+            title={extraLast
+              ? `점안 ${[t, ...st.extra].map(fmtClock).join(', ')} · 누르면 ${fmtClock(extraLast)} 추가 점안 취소`
+              : t ? '다시 누르면 기록 취소' : '누르면 지금 시각으로 기록'}
+            className={`${sz} rounded-lg border ${t
+              ? 'bg-slate-100 border-slate-200 text-slate-500'
+              : i === st.given ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-300 text-slate-500'}`}
+          >
+            {single ? (cr ? `CR ${i + 1}회` : `산동${eyeText}`) : (cr ? `${i + 1}회 점안` : '점안')}{shown ? ` ${fmtClock(shown)}` : ''}{extraLast ? ` · ${st.extra.length + 1}회` : ''}
+          </button>
+        );
+      })}
       {st.need && !togglesOnly && !blocked && <DilationBadge st={st} large={large} />}
+      {/* 산동 완료인데 덜 됐을 때: 한 번 더 점안 (CR 제외, 산동 금지 검사가 남아 있으면 숨김) */}
+      {showDrops && st.need && !cr && st.status === 'ready' && blockers.length === 0 && (
+        <button type="button" onClick={() => addExtraDrop(mutatePatients, pk)} title="산동이 덜 됐으면 한 번 더 점안 (이 시각부터 다시 시간을 잽니다)"
+          className="text-xs text-rose-700 underline">추가 점안</button>
+      )}
     </div>
   );
 }

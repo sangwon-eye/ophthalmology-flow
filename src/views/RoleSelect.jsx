@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode } from 'lucide-react';
 import { COLOR_MAP, INPUT, applyCheckin, forcedToday, patientKey, preProcPending, realTodayISO, roomColor, roomTests, todayISO, treatRoomOf } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
-import { TextSizeControl } from '../ui/common.jsx';
+import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
 import { patientBoardName } from './BoardView.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -281,6 +281,7 @@ export function RoleSelect({ settings, onSelect, onSetToday }) {
             <div className="grid gap-3 sm:grid-cols-3">{manage.map(small)}</div>
           </section>
         </div>
+        <div className="text-center text-xs text-slate-400 mt-6">{APP_VERSION}</div>
       </div>
     </div>
   );

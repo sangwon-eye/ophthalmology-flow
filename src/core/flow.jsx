@@ -425,15 +425,25 @@ export function dilationState(p, prefs, waitMin, now = Date.now()) {
   const total = cr ? 4 : 1;
   const drops = Array.from({ length: total }, (_, i) => (p.drops || [])[i] || null);
   const given = drops.filter(Boolean).length;
-  const last = given ? Math.max(...drops.filter(Boolean)) : 0;
+  // 추가 점안(산동이 덜 됐을 때, CR 제외): 기존 점안 기록과 따로 두고, 기다리는 시간은 마지막 추가 점안부터 다시
+  const extra = !cr && given === total ? (p.dropsExtra || []).filter(Boolean) : [];
+  const last = Math.max(0, ...drops.filter(Boolean), ...extra);
   const mins = last ? Math.floor((now - last) / 60000) : 0;
-  const base = { need: true, cr, total, drops, given, mins };
+  const base = { need: true, cr, total, drops, given, mins, extra };
   if (given === 0) return { ...base, status: 'todo' };
   if (given < total) return { ...base, status: 'progress' };
   return { ...base, status: mins >= (Number(waitMin) || 15) ? 'ready' : 'waiting' };
 }
 export function patchPatient(mutatePatients, pk, fn) {
   mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, ...fn(x) } : x)));
+}
+// 추가 점안 기록 / 마지막 추가 점안만 취소 (처음 점안 기록 drops 는 건드리지 않음)
+export function addExtraDrop(mutatePatients, pk) {
+  const at = Date.now();
+  patchPatient(mutatePatients, pk, x => ({ dropsExtra: [...(x.dropsExtra || []), at] }));
+}
+export function undoExtraDrop(mutatePatients, pk) {
+  patchPatient(mutatePatients, pk, x => ({ dropsExtra: (x.dropsExtra || []).slice(0, -1) }));
 }
 export function toggleDrop(mutatePatients, pk, i) {
   const at = Date.now();
@@ -654,6 +664,7 @@ export function activateLinked(list, pk, settings, at = Date.now()) {
       done, doneAt,
       measure: x.measure || primary.measure,
       drops: (x.drops || []).some(Boolean) ? x.drops : [...(primary.drops || [])],
+      dropsExtra: (x.drops || []).some(Boolean) ? (x.dropsExtra || []) : [...(primary.dropsExtra || [])],
       addOnCheck: check, triageAssigned: false, triageDone: false,
     };
   });
@@ -1062,6 +1073,7 @@ export function lastActivityAt(p) {
   (p.procedures || []).forEach(i => times.push(i.orderedAt, i.doneAt));
   (p.preProcs || []).forEach(i => times.push(i.doneAt));
   (p.drops || []).forEach(v => times.push(v));
+  (p.dropsExtra || []).forEach(v => times.push(v));
   times.push(p.triageAssignedAt, p.triageAt, p.seenAt, p.calledAt, p.consultDoneAt, p.vfStartedAt, p.treatRequest?.at);
   const valid = times.filter(t => typeof t === 'number' && Number.isFinite(t) && t > 1e12);
   return valid.length ? Math.max(...valid) : null;
