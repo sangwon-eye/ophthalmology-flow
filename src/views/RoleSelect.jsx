@@ -125,7 +125,8 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
     setResult(r);
     beep(r.ok);
     clearTimeout(clearTimer.current);
-    clearTimer.current = setTimeout(() => setResult(null), 5000);
+    // 노란 안내 문구(접수 안내·처치실 안내)가 있으면 읽을 시간을 더 줌
+    clearTimer.current = setTimeout(() => setResult(null), r.note ? 8000 : 5000);
   };
   const handle = async (code) => {
     const { patients: list, settings: s } = latest.current;
