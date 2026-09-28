@@ -157,6 +157,7 @@ function writeItem(key, value) {
   const item = { version: (readItem(key)?.version || 0) + 1, value, updatedAt: new Date().toISOString() };
   writeFileSafely(keyFile(key), JSON.stringify(item));
   cache.set(key, item);
+  notifyChange(key);
   return item;
 }
 
@@ -233,6 +234,38 @@ function archiveOldPatients() {
   writeItem(LIVE_PATIENTS_KEY, JSON.stringify(list.filter(p => !old.includes(p))));
   console.log(`지난 명단 ${old.length}명을 보관 파일로 옮겼습니다.`);
 }
+
+/* ---------------- 변경 알림 (서버 → 모든 화면) ---------------- */
+// 저장이 일어나면 연결된 모든 화면에 "무엇이 바뀌었는지"(예: daily-patients)만 바로 알립니다. 환자 정보는 보내지 않습니다.
+// 알림을 받은 화면은 평소처럼 서버에서 새 내용을 받아 갑니다. 알림이 막혀도 화면은 4초마다 스스로 확인합니다.
+const eventClients = new Set();
+const NOTIFY_BATCH_MS = 300; // 0.3초 안에 생긴 변경은 모아서 한 번에 알림
+let pendingKeys = null;
+function sendEvent(res, text) {
+  if (res.writableEnded || res.destroyed) { eventClients.delete(res); return; }
+  try { res.write(text); } catch { eventClients.delete(res); }
+}
+function notifyChange(key) {
+  const base = String(key).split('/')[0]; // 나눠 둔 기록(measure-history/07)은 원래 이름으로
+  if (!pendingKeys) {
+    pendingKeys = new Set();
+    setTimeout(() => {
+      const msg = `event: change\ndata: ${JSON.stringify({ keys: [...pendingKeys] })}\n\n`;
+      pendingKeys = null;
+      for (const res of eventClients) sendEvent(res, msg);
+    }, NOTIFY_BATCH_MS);
+  }
+  pendingKeys.add(base);
+}
+function handleEvents(req, res) {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+  res.write('retry: 3000\n\n'); // 연결이 끊기면 브라우저가 3초 뒤 다시 연결
+  eventClients.add(res);
+  res.on('error', () => eventClients.delete(res));
+  req.on('close', () => eventClients.delete(res));
+}
+// 조용할 때도 연결이 끊기지 않도록 25초마다 짧은 신호
+setInterval(() => { for (const res of eventClients) sendEvent(res, ': ping\n\n'); }, 25000).unref();
 
 fs.mkdirSync(KEYS_DIR, { recursive: true });
 migrateOldStore();
@@ -317,6 +350,7 @@ async function handleLock(req, res, pathname) {
 async function handleApi(req, res, pathname) {
   if (pathname.startsWith('/api/settings-lock')) return handleLock(req, res, pathname);
   if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId() });
+  if (pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res);
 
   // 서버끄기.bat 에서 사용. 서버 PC 자신에서만 끌 수 있습니다.
   if (pathname === '/api/shutdown') {

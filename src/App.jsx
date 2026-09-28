@@ -179,11 +179,44 @@ export default function App() {
     setLastSync(new Date());
   }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, markBoardNotices, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride, syncBoardNotices]);
 
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 4000);
-    return () => clearInterval(t);
+  // 새로 받기는 한 번에 하나씩 (늦게 도착한 옛 내용이 새 내용을 덮지 않도록). 받는 중에 또 요청되면 끝난 뒤 한 번 더
+  const refreshing = useRef(false);
+  const refreshAgain = useRef(false);
+  const runRefresh = useCallback(async () => {
+    if (refreshing.current) { refreshAgain.current = true; return; }
+    refreshing.current = true;
+    try {
+      do { refreshAgain.current = false; await refresh(); } while (refreshAgain.current);
+    } finally {
+      refreshing.current = false;
+    }
   }, [refresh]);
+
+  // 4초마다 스스로 확인 (서버 알림이 막혀도 이것으로 맞춰짐)
+  useEffect(() => {
+    runRefresh();
+    const t = setInterval(runRefresh, 4000);
+    return () => clearInterval(t);
+  }, [runRefresh]);
+
+  // 서버가 "바뀌었다"고 알려주면 바로 새로 받기 (다른 컴퓨터에서 누른 버튼이 거의 즉시 보임)
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return undefined;
+    let es = null;
+    const open = () => {
+      if (es || document.hidden) return;
+      es = new EventSource('/api/events');
+      es.addEventListener('change', () => { runRefresh(); });
+      es.onopen = () => { runRefresh(); }; // 다시 연결되면 그사이 놓친 변경을 확인
+    };
+    const close = () => { if (es) { es.close(); es = null; } };
+    // 숨겨진 탭은 알림 연결을 닫아 둡니다 (브라우저가 한 서버에 동시에 여는 연결 수가 정해져 있어서).
+    // 숨겨진 동안에도 4초 확인은 계속되고, 다시 보이면 연결합니다.
+    const onVisible = () => { if (document.hidden) close(); else open(); };
+    open();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { document.removeEventListener('visibilitychange', onVisible); close(); };
+  }, [runRefresh]);
 
   // 처치실 시간 재기 검사: 확인만 되고 완료가 안 된 예전 기록을 완료로 (Schirmer가 진료 전 검사에 남던 문제)
   useEffect(() => {
