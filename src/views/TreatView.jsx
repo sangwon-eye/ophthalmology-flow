@@ -1,10 +1,6 @@
 // 처치실 화면
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, hasPrep, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch } from '../core/flow.jsx';
+import React, { useState, useEffect, useRef } from 'react';
+import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, pastVision, patchPatient, patientKey, pendingRooms, preProcPending, prepOf, prepPendingTests, prepWaitMin, roomPending, roomTests, sortedTests, treatRequested, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';

@@ -1,10 +1,5 @@
 // 진료 흐름·검사·산동·측정값 등 화면과 무관한 규칙과 계산
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import * as XLSX from 'xlsx';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /* 색상                                                                */

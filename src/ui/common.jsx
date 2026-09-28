@@ -1,11 +1,10 @@
 // 여러 화면이 함께 쓰는 카드·버튼·창
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
+  Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
 import { COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, withoutPrep } from '../core/flow.jsx';
-import { DEFAULT_HX_FIELDS, loadKey, visionNames } from '../core/storage.jsx';
+import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 공용 UI                                                             */
@@ -1171,7 +1170,7 @@ export function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCa
 // compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
 // group: 카드 버튼 줄 안에 산동·점안을 한 덩어리로 (줄이 넘치면 함께 다음 줄로)
-export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false, note = '' }) {
+export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);

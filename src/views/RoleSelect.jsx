@@ -1,9 +1,6 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode } from 'lucide-react';
 import { COLOR_MAP, INPUT, applyCheckin, forcedToday, patientKey, preProcPending, realTodayISO, roomColor, roomTests, todayISO, treatRoomOf } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { TextSizeControl } from '../ui/common.jsx';
@@ -168,6 +165,8 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
     };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); clearTimeout(clearTimer.current); };
+    // handle 은 명단·설정을 latest(ref)에서 매번 새로 읽으므로 다시 등록할 필요가 없습니다 (일부러 뺌)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askPassword]);
 
   const exit = async () => {

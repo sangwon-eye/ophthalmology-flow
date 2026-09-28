@@ -1,10 +1,7 @@
 // 시력방·검사실 화면
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
-import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, isVfTest, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, hasPrep, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes } from '../core/flow.jsx';
+import React, { useState, useEffect } from 'react';
+import { Check, Search, RotateCcw } from 'lucide-react';
+import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -12,7 +9,21 @@ import { SectionTitle } from './ConsultView.jsx';
 /* ------------------------------------------------------------------ */
 /* 검사실 화면 (시력/안압 + 설정된 검사실 공용)                           */
 /* ------------------------------------------------------------------ */
-export function StationView({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistoryEntry, onBack, lastSync, embedded = false }) {
+// 보고 있던 검사실이 설정에서 삭제되면 안내만 보여줍니다.
+// (이 확인을 화면 본체 밖에 두어야, 화면 도중에 검사실이 사라져도 React 훅 순서가 바뀌어 흰 화면으로 멈추지 않습니다)
+export function StationView(props) {
+  const { mode, settings, onBack, lastSync } = props;
+  if (mode !== 'vision' && !settings.rooms.some(r => r.id === mode)) {
+    return (
+      <ScreenShell title="검사실" color="slate" onBack={onBack} lastSync={lastSync}>
+        <EmptyState text="이 검사실은 설정에서 삭제되었습니다. 메인 화면을 눌러 다시 선택해주세요." />
+      </ScreenShell>
+    );
+  }
+  return <StationScreen {...props} />;
+}
+
+function StationScreen({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistoryEntry, onBack, lastSync, embedded = false }) {
   const [filter, setFilter] = useState('all');
   const [sortMode, changeSort] = useSortMode(mode === 'vision' ? 'sort-vision' : `sort-room-${mode}`);
   const nameSort = sortMode === 'name';
@@ -26,14 +37,6 @@ export function StationView({ mode, settings, doctorPrefs, patients, history, mu
   useEffect(() => { const i = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(i); }, []);
   const isVision = mode === 'vision';
   const room = isVision ? null : settings.rooms.find(r => r.id === mode);
-
-  if (!isVision && !room) {
-    return (
-      <ScreenShell title="검사실" color="slate" onBack={onBack} lastSync={lastSync}>
-        <EmptyState text="이 검사실은 설정에서 삭제되었습니다. 메인 화면을 눌러 다시 선택해주세요." />
-      </ScreenShell>
-    );
-  }
 
   const color = isVision ? 'blue' : roomColor(settings, room.id);
   const title = isVision ? visionNames(settings).name : room.name;

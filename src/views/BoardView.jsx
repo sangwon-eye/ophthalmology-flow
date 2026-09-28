@@ -1,9 +1,5 @@
 // 환자용 화면·QR 접수
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { WAIT_TEXT, shownWait, COLOR_MAP, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl } from '../ui/common.jsx';

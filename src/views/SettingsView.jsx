@@ -1,10 +1,7 @@
 // 설정 화면
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
-import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, prepWaitMin, renameTestOptions, sortedTests, toDraft, isVfTest, holdCallOf } from '../core/flow.jsx';
+import React, { useState } from 'react';
+import { Plus, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, renameTestOptions, sortedTests, toDraft, holdCallOf } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';

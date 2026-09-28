@@ -1,9 +1,5 @@
 // 서버 저장소 읽기·쓰기와 공유 상태 훅
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ARK_TEST, DEFAULT_SETTINGS, DRAG_ACTIVE, GAT_ID, GAT_TEST, TREAT_ROOM, normalizeTests, todayISO } from './flow.jsx';
 
 /* ------------------------------------------------------------------ */

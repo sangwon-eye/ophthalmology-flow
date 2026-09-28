@@ -1,10 +1,7 @@
 // 관리자 화면(명단·FU·통계·안내문)
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import {
-  Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Check, Plus,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Upload, Trash2, Search, GripVertical, RotateCcw, Syringe, StickyNote, ScanBarcode,
-} from 'lucide-react';
+import { Upload, Trash2, Search, RotateCcw } from 'lucide-react';
 import { DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, cleanDetail, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { loadFu, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
@@ -68,7 +65,7 @@ export function avgText(values) {
   if (!values.length) return '-';
   return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}분`;
 }
-export function DayStats({ patients, settings, doctors }) {
+export function DayStats({ patients, doctors }) {
   const [date, setDate] = useState(todayISO());
   const archived = useArchivedPatients(date);
   const list = (archived.isArchived ? archived.list : patients).filter(p => p.date === date && !p.linkWaiting);
