@@ -1,5 +1,6 @@
 import { chromium, SP, editKey, tester, BASE } from '../lib.mjs';
 // 메인 화면 방별 대기 인원 = 각 화면 위쪽 '대기 N명', 진료실은 교수님별 한 줄, 변동이 바로 반영
+await editKey('doctors', d => [...d, '박없음']); // 오늘 환자가 없는 교수님
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 const { errors, ok, W, back } = tester(page);
@@ -17,6 +18,7 @@ for (const key of ['vision', 'room:B', 'room:C', 'procedure']) {
 // 진료실: 합계 + 교수님별
 const line = await page.locator('[data-count-detail="consult"]').innerText();
 const per = Object.fromEntries([...line.matchAll(/(김선웅|나상훈|이종혁) (\d+)/g)].map(m => [m[1], Number(m[2])]));
+ok(!line.includes('박없음'), '오늘 환자가 없는 교수님은 빠짐');
 ok(Object.keys(per).length === 3, `진료실 칸에 교수님별 인원 (${JSON.stringify(per)})`);
 ok(await tileN('consult') === Object.values(per).reduce((a, b) => a + b, 0), '진료실 대기 = 교수님별 합계');
 await page.locator('[data-tile="consult"]').click(); await W(600);

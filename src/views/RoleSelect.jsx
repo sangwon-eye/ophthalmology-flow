@@ -204,17 +204,8 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
   );
 }
 
-const PREVIEW = typeof window !== 'undefined' ? window.localStorage.getItem('oph-preview') || 'A' : 'A';
+// 메인 화면 칸 아래 대기 인원: 방 색깔 큰 숫자 + '명 대기', 진료실은 교수님별 한 줄
 function WaitBelow({ k, count, detail, c }) {
-  if (PREVIEW === 'A') return (
-    <div data-count={k} className="flex flex-col items-center gap-1.5 mt-2.5">
-      <span className={`inline-flex items-baseline gap-1.5 px-4 py-1 rounded-full shadow-sm ${count ? `${c.solid} text-white` : 'bg-slate-100 text-slate-400'}`}>
-        <span className="text-xs font-medium opacity-90">대기</span><span className="text-xl font-bold leading-none">{count}</span>
-      </span>
-      {detail && <div data-count-detail={k} className="flex flex-wrap justify-center gap-1">{detail.map(([d, n]) => (
-        <span key={d} className={`text-xs px-2 py-0.5 rounded-full border ${n ? 'bg-white border-amber-300 text-slate-700' : 'bg-white border-slate-200 text-slate-400'}`}>{d} <b>{n}</b></span>))}</div>}
-    </div>
-  );
   return (
     <div data-count={k} className="text-center mt-2">
       <div className="flex items-baseline justify-center gap-1">
