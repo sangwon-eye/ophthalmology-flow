@@ -1,18 +1,22 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 Persistent
+#Include <OCR>  ; Lib\OCR.ahk — 윈도우에 들어 있는 화면 글자 인식(OCR)을 쓰는 공개 라이브러리 (Descolada, MIT, Lib\OCR-LICENSE.txt)
 
 /*
   OCS 처방 도우미 (ophthalmology flow → OCS)
 
   - F9  : OCS에 열린 환자의 오늘 검사 처방을 넣습니다.
-  - F10 : 명단 모드. 흐름 프로그램의 처방 대기 명단을 받아 OCS 외래 명단에서 환자를 찾아 넣고,
+  - F10 : 명단 모드. 오늘 처방을 넣을 환자를 예약 순서대로 OCS 외래 명단에서 찾아 넣고,
           환자마다 멈춥니다. 확인·서명한 뒤 F9를 누르면 다음 환자로 갑니다.
   - 서명(F2)과 Delete(D/C) 키는 누르지 않습니다.
 
-  흐름 프로그램 서버(server.js)의 /api/ocs/… 주소로 오늘 명단·처방을 받고, 넣은 검사를 '처방 완료'로 표시합니다.
-  (서버 쪽 규칙: scripts/ocs-api.js, src/core/ocs.js)
-  자세한 사용법은 같은 폴더의 README.md를 보세요.
+  화면 위치를 외워 두지 않고, 매번 OCS 화면의 글자를 읽어서 찾습니다(창을 옮기거나 칸 크기가 바뀌어도 따라감).
+    · 환자번호: 화면에 여러 번 보이는 번호 (오더발행·EMR 제목의 [16318174] 등)
+    · 처방 입력창 · 명단 여는 버튼: 등록할 때 그 근처 글자(예: '입력창')를 기억해 두고 그 글자를 찾아 누름
+    · 명단의 환자: '환자번호' 머리글 아래에서 그 번호를 찾아 더블클릭 (안 보이면 휠로 내려 가며 찾음)
+  흐름 프로그램 서버(server.js)의 /api/ocs/… 주소로 오늘 처방을 받고, 넣은 검사를 '처방 완료'로 표시합니다.
+  (서버 쪽: scripts/ocs-api.js, src/core/ocs.js) 자세한 사용법은 같은 폴더의 README.md.
 */
 
 APP_NAME := "OCS 처방 도우미"
@@ -21,8 +25,6 @@ LOG_PATH := A_ScriptDir "\ophflow-helper.log"
 TAG := "OPHFLOW1"
 
 MB_YESNO := 4, MB_QUESTION := 32, MB_WARN := 48, MB_INFO := 64, MB_DEF2 := 256, MB_TOP := 0x40000
-
-DEFAULT_STEPS := "click:ListButton|wait:1500|click:ListSearch|key:^a|type:{ID}|key:{Enter}|wait:1500|dclick:ListFirstRow|wait:3000"
 
 GENERAL_DEFAULTS := Map(
   "HotkeyRun", "F9",
@@ -36,24 +38,28 @@ GENERAL_DEFAULTS := Map(
   "WaitAfterEnter", "1200",
   "BatchConfirm", "1",
   "CaretCheck", "1",
-  "SizeTolerance", "40"
+  "OcrScale", "2",
+  "OcrLang", "",
+  "PatientIdMin", "6",
+  "PatientIdMax", "10",
+  "ListOpenWait", "1500",
+  "ListScroll", "5",
+  "ListMaxPages", "40",
+  "ChartOpenWait", "2500"
 )
 
 ; 설정 창에서 등록하는 항목 (순서대로 표시)
-POINTS := [
-  {key: "ServerUrl",      kind: "server", label: "흐름 프로그램 서버 주소",         help: ""},
-  {key: "OcsWindow",      kind: "ocs",   label: "OCS 창",                         help: "OCS 진료 화면(처방을 넣는 화면) 아무 곳에"},
-  {key: "PatientNoStart", kind: "point", label: "환자번호 앞쪽 (드래그 시작)",      help: "OCS 화면의 환자번호 숫자 바로 왼쪽에"},
-  {key: "PatientNoEnd",   kind: "point", label: "환자번호 뒤쪽 (드래그 끝)",        help: "OCS 화면의 환자번호 숫자 바로 오른쪽에"},
-  {key: "OrderInput",     kind: "point", label: "처방 입력창",                     help: "오더발행의 처방 입력창 안에"},
-  {key: "ListButton",     kind: "point", label: "외래 명단 여는 버튼 (명단 모드)",  help: "OCS 외래 명단을 여는 버튼 위에"},
-  {key: "ListSearch",     kind: "point", label: "명단 환자검색 칸 (명단 모드)",     help: "외래 명단의 '환자정보(번호,이름)' 입력칸 안에"},
-  {key: "ListFirstRow",   kind: "point", label: "명단 첫 줄 (명단 모드)",           help: "환자를 검색했을 때 나오는 명단 첫 줄의 환자이름 위에"}
+ITEMS := [
+  {key: "ServerUrl",  kind: "server", label: "흐름 프로그램 서버 주소",         help: ""},
+  {key: "OcsWindow",  kind: "ocs",    label: "OCS 창",                         help: "OCS 진료 화면(처방을 넣는 화면) 아무 곳에"},
+  {key: "OrderInput", kind: "anchor", label: "처방 입력창",                    help: "오더발행의 처방 입력창 안('입력창' 글자 위)에"},
+  {key: "ListButton", kind: "anchor", label: "외래 명단 여는 버튼 (명단 모드)", help: "OCS 외래 명단을 여는 버튼 위에"}
 ]
 
 CoordMode "Mouse", "Screen"
 CoordMode "ToolTip", "Screen"
 CoordMode "Caret", "Screen"
+CoordMode "Pixel", "Screen"
 SetTitleMatchMode 2
 SetKeyDelay 20, 15
 
@@ -83,7 +89,7 @@ EnsureIni() {
   text := "
   (
 ; OCS 처방 도우미 설정 파일
-; 창과 위치는 트레이 아이콘 > 설정 (위치 등록)에서 등록합니다.
+; 서버 주소·OCS 창·기준 글자는 트레이 아이콘 > 설정에서 등록합니다.
 ; 이 파일을 고친 뒤에는 트레이 아이콘 > 설정 다시 불러오기를 누르세요.
 
 [General]
@@ -107,8 +113,19 @@ WaitAfterEnter=1200
 BatchConfirm=1
 ; 1 = 입력창을 누른 뒤 글자 커서 위치로 입력창이 맞는지 확인 (OCS가 커서 위치를 알려주지 않으면 건너뜀)
 CaretCheck=1
-; OCS 창 크기가 등록할 때와 이 값(픽셀)보다 많이 다르면 멈춤
-SizeTolerance=40
+
+; 화면 글자 인식: 확대 배율(작은 글씨는 2~3), 언어(비우면 윈도우 기본 언어, 예: ko, en-US)
+OcrScale=2
+OcrLang=
+; 환자번호 자릿수 (최소~최대)
+PatientIdMin=6
+PatientIdMax=10
+; 외래 명단: 여는 버튼을 누른 뒤 기다림, 한 번에 휠을 내리는 칸 수, 최대로 내려 볼 횟수
+ListOpenWait=1500
+ListScroll=5
+ListMaxPages=40
+; 명단에서 더블클릭한 뒤 환자 화면이 열릴 때까지 기다림
+ChartOpenWait=2500
 
 [Server]
 ; 흐름 프로그램 주소 (브라우저 주소창에 쓰는 것과 같음. 예: http://192.168.0.10:3000)
@@ -116,14 +133,8 @@ Url=
 
 [Windows]
 
-[Points]
-
-[OpenPatient]
-; 명단 모드에서 OCS 외래 명단으로 환자를 여는 순서 ( | 로 구분 )
-;   click:위치이름   dclick:위치이름 (더블클릭)   type:글자 ({ID} = 환자번호)   key:키 (AutoHotkey 표기)   wait:밀리초
-;   위치이름: ListButton (명단 여는 버튼), ListSearch (환자검색 칸), ListFirstRow (명단 첫 줄)
-;   Delete 키(D/C)와 F2(서명)는 쓸 수 없습니다.
-Steps=click:ListButton|wait:1500|click:ListSearch|key:^a|type:{ID}|key:{Enter}|wait:1500|dclick:ListFirstRow|wait:3000
+[Anchors]
+; 기준 글자|창 안 가로 위치(0~1)|세로 위치(0~1)|누를 곳까지 가로 거리|세로 거리  (설정 창에서 등록)
   )"
   FileAppend StrReplace(text, "`n", "`r`n"), INI_PATH, "UTF-16"
 }
@@ -136,10 +147,9 @@ LoadConfig() {
   Cfg["ServerUrl"] := RTrim(Trim(IniRead(INI_PATH, "Server", "Url", "")), "/")
   for k in ["OcsExe", "OcsClass", "OcsW", "OcsH"]
     Cfg[k] := Trim(IniRead(INI_PATH, "Windows", k, ""))
-  for p in POINTS
-    if p.kind = "point"
-      Cfg[p.key] := Trim(IniRead(INI_PATH, "Points", p.key, ""))
-  Cfg["Steps"] := Trim(IniRead(INI_PATH, "OpenPatient", "Steps", DEFAULT_STEPS))
+  for it in ITEMS
+    if it.kind = "anchor"
+      Cfg[it.key] := Trim(IniRead(INI_PATH, "Anchors", it.key, ""))
 }
 
 Num(key) {
@@ -154,7 +164,8 @@ BuildTray() {
   A_IconTip := APP_NAME
   tray := A_TrayMenu
   tray.Delete()
-  tray.Add("설정 (위치 등록)", ShowSetup)
+  tray.Add("설정 (등록)", ShowSetup)
+  tray.Add("화면 글자 읽기 시험", (*) => TestOcr())
   tray.Add("흐름 연결 시험", TestFlow)
   tray.Add("연습 모드 (메모장)", TogglePractice)
   tray.Add()
@@ -164,7 +175,7 @@ BuildTray() {
   tray.Add("설정 다시 불러오기", (*) => Reload())
   tray.Add()
   tray.Add("종료", (*) => ExitApp())
-  tray.Default := "설정 (위치 등록)"
+  tray.Default := "설정 (등록)"
 }
 
 RegisterHotkeys() {
@@ -224,13 +235,12 @@ AbortNow(*) {
 
 StartupCheck() {
   missing := []
-  if Cfg["OcsExe"] = ""
-    missing.Push("OCS 창")
   if Cfg["ServerUrl"] = ""
     missing.Push("흐름 프로그램 서버 주소")
-  for k in ["PatientNoStart", "PatientNoEnd", "OrderInput"]
-    if !HasPoint(k)
-      missing.Push(PointLabel(k))
+  if Cfg["OcsExe"] = ""
+    missing.Push("OCS 창")
+  if !HasAnchor("OrderInput")
+    missing.Push("처방 입력창")
   if missing.Length {
     MsgBox "처음 쓰시려면 아래 항목을 먼저 등록해야 해요.`n`n· " Join(missing, "`n· ") "`n`n설정 창을 엽니다.", APP_NAME, MB_INFO | MB_TOP
     ShowSetup()
@@ -266,22 +276,21 @@ SameId(a, b) {
   return a != "" && (a = b || LTrim(a, "0") = LTrim(b, "0"))
 }
 
-PointByKey(key) {
-  for p in POINTS
-    if p.key = key
-      return p
-  return {key: key, kind: "point", label: key, help: ""}
+ItemByKey(key) {
+  for it in ITEMS
+    if it.key = key
+      return it
+  return {key: key, kind: "anchor", label: key, help: ""}
 }
-PointLabel(key) => PointByKey(key).label
-HasPoint(key) => Cfg.Has(key) && RegExMatch(Cfg[key], "^-?\d+,-?\d+$")
 
-; 등록한 위치(OCS 창 안쪽 기준)를 화면 좌표로
-PointXY(hwnd, key) {
-  if !HasPoint(key)
-    throw Error("'" PointLabel(key) "' 위치가 등록되지 않았어요. 트레이 아이콘 > 설정에서 등록해주세요.")
-  xy := StrSplit(Cfg[key], ",")
-  WinGetClientPos(&cx, &cy, , , "ahk_id " hwnd)
-  return {x: cx + Integer(xy[1]), y: cy + Integer(xy[2])}
+; 화면에 빨간 네모를 잠깐 표시 (찾은 곳 확인용, 누르지 않음)
+ShowBox(x, y, w, h, ms := 3000, color := "Red", d := 3) {
+  g := Gui("+AlwaysOnTop -Caption +ToolWindow -DPIScale +E0x08000000 +E0x20")
+  g.BackColor := color
+  iw := w + d, ih := h + d, w := w + d * 2, h := h + d * 2, x := x - d, y := y - d
+  WinSetRegion("0-0 " w "-0 " w "-" h " 0-" h " 0-0 " d "-" d " " iw "-" d " " iw "-" ih " " d "-" ih " " d "-" d, g.Hwnd)
+  g.Show("NA x" x " y" y " w" w " h" h)
+  SetTimer((*) => g.Destroy(), -ms)
 }
 
 ; OCS 프로그램 창 중 가장 큰 창 (팝업이 아닌 메인 화면)
@@ -299,16 +308,13 @@ MainOcsWindow() {
   return best
 }
 
-; 지금 앞에 있는 창이 등록한 OCS 메인 화면과 같은 크기인지 (팝업이 앞에 있거나 창 크기가 바뀌면 위치가 틀어짐)
-CheckOcsWindow(hwnd) {
-  if gPractice || Cfg["OcsW"] = "" || Cfg["OcsH"] = ""
+; 지금 앞에 있는 창이 OCS 메인 화면인지 (팝업이 앞에 있으면 멈춤)
+CheckMainWindow(hwnd) {
+  if gPractice
     return
-  WinGetClientPos(, , &w, &h, "ahk_id " hwnd)
-  tol := Num("SizeTolerance")
-  if Abs(w - Cfg["OcsW"]) > tol || Abs(h - Cfg["OcsH"]) > tol
-    throw Error("지금 앞에 있는 OCS 창 크기(" w "×" h ")가 등록할 때(" Cfg["OcsW"] "×" Cfg["OcsH"] ")와 달라요.`n`n"
-      . "· 팝업 창이 떠 있다면 닫고 OCS 메인 화면을 클릭한 뒤 다시 시도하세요.`n"
-      . "· OCS를 최대화했는지 확인하세요. 크기를 바꿔 쓰실 거라면 설정에서 창과 위치를 다시 등록하세요.")
+  main := MainOcsWindow()
+  if main && main != hwnd
+    throw Error("OCS의 작은 창(팝업)이 앞에 있어요. 닫고 OCS 메인 화면을 클릭한 뒤 다시 해 주세요.")
 }
 
 ActivateOcs(hwnd) {
@@ -329,7 +335,7 @@ AbortableSleep(ms) {
   }
 }
 
-; 한글 입력 상태를 영문으로 (검색어와 숫자가 한글로 바뀌지 않도록)
+; 한글 입력 상태를 영문으로 (검색어가 한글로 바뀌지 않도록)
 ImeOff(hwnd := 0) {
   try {
     if !hwnd
@@ -356,6 +362,160 @@ OpenReadme() {
     return
   }
   try Run('notepad.exe "' path '"')
+}
+
+; =====================================================================
+; 화면 글자 인식 (OCR)
+; =====================================================================
+; OCS 창에 지금 보이는 글자를 읽어 둔 것. 단어: {text, x, y, w, h, cx, cy} (화면 좌표)
+; 어두운 바탕의 글씨도 읽도록 두 가지로 읽음: 1 = 흑백, 2 = 흑백 + 색 반전 (필요할 때만)
+class OcsScreen {
+  __New(hwnd) {
+    WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+    ; 최대화 창은 테두리가 화면 밖으로 조금 나가므로 화면 안쪽만
+    vx := SysGet(76), vy := SysGet(77), vw := SysGet(78), vh := SysGet(79)
+    x1 := Max(x, vx), y1 := Max(y, vy), x2 := Min(x + w, vx + vw), y2 := Min(y + h, vy + vh)
+    if x2 - x1 < 40 || y2 - y1 < 40
+      throw Error("OCS 창이 화면에 보이지 않아요.")
+    this.hwnd := hwnd, this.x := x1, this.y := y1, this.w := x2 - x1, this.h := y2 - y1
+    this.cache := Map()
+  }
+  Words(v) {
+    if !this.cache.Has(v)
+      this.cache[v] := this.Read(v)
+    return this.cache[v]
+  }
+  Read(v) {
+    scale := IsNumber(Cfg["OcrScale"]) ? Number(Cfg["OcrScale"]) : 2
+    if scale < 1
+      scale := 2
+    maxDim := OCR.MaxImageDimension
+    scale := Min(scale, (maxDim - 1) / Max(this.w, this.h))
+    opts := {scale: scale, grayscale: 1}
+    if v = 2
+      opts.invertcolors := 1
+    if Cfg["OcrLang"] != ""
+      opts.lang := Cfg["OcrLang"]
+    try {
+      res := OCR.FromRect(this.x, this.y, this.w, this.h, opts)
+    } catch as e {
+      throw Error("화면 글자를 읽지 못했어요: " e.Message "`n`n윈도우 언어에 글자 인식 기능이 없으면 설정 파일에서 OcrLang=en-US 로 바꿔 보세요.")
+    }
+    words := []
+    for w in res.Words
+      words.Push({text: Trim(w.Text), x: w.x, y: w.y, w: w.w, h: w.h, cx: w.x + w.w // 2, cy: w.y + w.h // 2})
+    return words
+  }
+}
+
+; 글자 인식에서 흔히 헷갈리는 글자를 숫자로 (O→0, l·I·|→1)
+DigitsOf(text) {
+  t := RegExReplace(text, "^[\[\(]+|[\]\)\.,:]+$")
+  if !RegExMatch(t, "^[0-9OolI|]+$")
+    return ""
+  fixed := RegExReplace(RegExReplace(t, "[Oo]", "0"), "[lI|]", "1")
+  ; 바꾼 글자가 한 개를 넘으면 숫자로 보지 않음
+  return StrLen(RegExReplace(t, "\D")) >= StrLen(t) - 1 ? fixed : ""
+}
+IsPatientId(d) => d != "" && StrLen(d) >= Num("PatientIdMin") && StrLen(d) <= Num("PatientIdMax")
+
+; 지금 열린 환자의 번호: 화면에 두 번 이상 보이는 번호 ([ ]로 감싼 번호는 두 번으로 셈). 애매하면 ""
+PatientIdIn(words) {
+  score := Map()
+  for w in words {
+    d := DigitsOf(w.text)
+    if !IsPatientId(d)
+      continue
+    score[d] := (score.Has(d) ? score[d] : 0) + (InStr(w.text, "[") || InStr(w.text, "]") ? 2 : 1)
+  }
+  best := "", bestScore := 0, tie := false
+  for id, s in score {
+    if s > bestScore
+      best := id, bestScore := s, tie := false
+    else if s = bestScore
+      tie := true
+  }
+  return bestScore >= 2 && !tie ? best : ""
+}
+PatientIdFrom(scr) {
+  for v in [1, 2] {
+    id := PatientIdIn(scr.Words(v))
+    if id != ""
+      return id
+  }
+  return ""
+}
+
+; 기준 글자 (설정 창에서 등록): "글자|가로비율|세로비율|dx|dy"
+HasAnchor(key) => Cfg.Has(key) && Cfg[key] != ""
+AnchorOf(key) {
+  if !HasAnchor(key)
+    throw Error("'" ItemByKey(key).label "'이(가) 등록되지 않았어요. 트레이 아이콘 > 설정에서 등록해주세요.")
+  f := StrSplit(Cfg[key], "|")
+  if f.Length < 5
+    throw Error("'" ItemByKey(key).label "' 등록 값이 잘못됐어요. 설정에서 다시 등록해주세요.")
+  return {text: f[1], rx: Number(f[2]), ry: Number(f[3]), dx: Integer(f[4]), dy: Integer(f[5])}
+}
+SameWord(a, b) => StrReplace(a, " ") = StrReplace(b, " ")
+
+; 기준 글자를 화면에서 찾아 누를 곳 {x, y, word}. 같은 글자가 여러 개면 등록할 때 자리와 가장 가까운 것. 못 찾으면 ""
+FindAnchor(scr, key) {
+  a := AnchorOf(key)
+  for v in [1, 2] {
+    best := "", bestD := 1000000000
+    for w in scr.Words(v) {
+      if !SameWord(w.text, a.text)
+        continue
+      d := ((w.cx - scr.x) / scr.w - a.rx) ** 2 + ((w.cy - scr.y) / scr.h - a.ry) ** 2
+      if d < bestD
+        best := w, bestD := d
+    }
+    if IsObject(best)
+      return {x: best.cx + a.dx, y: best.cy + a.dy, word: best}
+  }
+  return ""
+}
+
+; 외래 명단의 '환자번호' 머리글들 (명단이 열려 있지 않으면 빈 배열)
+ListHeads(scr) {
+  for v in [1, 2] {
+    heads := []
+    for w in scr.Words(v)
+      if InStr(w.text, "환자번호")
+        heads.Push(w)
+    if heads.Length
+      return heads
+  }
+  return []
+}
+; 머리글 아래 같은 칸에 있는 환자번호 단어들
+ListIds(scr, heads, v) {
+  out := []
+  for w in scr.Words(v) {
+    d := DigitsOf(w.text)
+    if !IsPatientId(d)
+      continue
+    for hd in heads {
+      if w.cy > hd.cy + hd.h // 2 && Abs(w.cx - hd.cx) < Max(hd.w, 60) * 1.5 {
+        out.Push({id: d, word: w})
+        break
+      }
+    }
+  }
+  return out
+}
+FindInList(scr, heads, id) {
+  for v in [1, 2]
+    for x in ListIds(scr, heads, v)
+      if SameId(x.id, id)
+        return x.word
+  return ""
+}
+ListSignature(scr, heads) {
+  ids := []
+  for x in ListIds(scr, heads, 1)
+    ids.Push(x.id)
+  return Join(ids, ",")
 }
 
 ; =====================================================================
@@ -454,47 +614,20 @@ TestFlow(*) {
 ; =====================================================================
 ; OCS 조작
 ; =====================================================================
-; OCS 화면의 환자번호를 드래그해서 복사
+; 지금 화면의 환자번호 (연습 모드에서는 직접 입력)
 ReadPatientNo(hwnd) {
   if gPractice {
     r := InputBox("연습 모드: OCS 화면에 열린 환자번호라고 생각하고 번호를 입력하세요.", APP_NAME, "w360 h140")
-    return r.Result = "OK" ? RegExReplace(r.Value, "\D") : ""
+    return {id: r.Result = "OK" ? RegExReplace(r.Value, "\D") : "", scr: ""}
   }
-  return ReadPatientNoReal(hwnd)
-}
-
-ReadPatientNoReal(hwnd) {
-  p1 := PointXY(hwnd, "PatientNoStart")
-  p2 := PointXY(hwnd, "PatientNoEnd")
-  MouseGetPos &mx, &my
-  A_Clipboard := ""
-  MouseClickDrag "Left", p1.x, p1.y, p2.x, p2.y, 5
-  Sleep 150
-  Send "^c"
-  ok := ClipWait(1.5)
-  MouseMove mx, my, 0
-  if !ok
-    return ""
-  return RegExMatch(A_Clipboard, "\d{5,12}", &m) ? m[0] : ""
-}
-
-; 환자를 연 직후에는 화면이 늦게 바뀔 수 있어 몇 번 다시 읽음
-ReadPatientNoRetry(hwnd, expect, tries := 3) {
-  no := ""
-  loop tries {
-    no := ReadPatientNoReal(hwnd)
-    if SameId(no, expect)
-      return no
-    if A_Index < tries
-      AbortableSleep(1000)
-  }
-  return no
+  scr := OcsScreen(hwnd)
+  return {id: PatientIdFrom(scr), scr: scr}
 }
 
 CheckCaretNear(p) {
   if CaretGetPos(&x, &y) {
     if Abs(x - p.x) > 250 || Abs(y - p.y) > 60
-      throw Error("처방 입력창에 커서가 들어가지 않은 것 같아요. '처방 입력창' 위치를 다시 등록해주세요.`n(이 확인이 계속 잘못 걸리면 설정 파일에서 CaretCheck=0)")
+      throw Error("처방 입력창에 커서가 들어가지 않은 것 같아요. '처방 입력창'을 다시 등록해주세요.`n(이 확인이 계속 잘못 걸리면 설정 파일에서 CaretCheck=0)")
   }
 }
 
@@ -518,9 +651,17 @@ TypeSearch(text) {
   }
 }
 
+; 처방 입력창 찾기 (그 환자의 첫 처방 전에 한 번. 넣는 동안에는 화면 배치가 그대로이므로 같은 자리를 씀)
+FindOrderInput(scr) {
+  pt := FindAnchor(scr, "OrderInput")
+  if !IsObject(pt)
+    throw Error("처방 입력창을 화면에서 찾지 못했어요 (기준 글자 '" AnchorOf("OrderInput").text "').`n오더발행 화면이 보이는지, 입력창이 비어 있는지 확인해주세요. 아무것도 넣지 않았어요.")
+  return pt
+}
+
 ; 처방을 한 줄씩 입력: 입력창 클릭 → 검색어 → (Enter) → ↓ N번 → Enter
 ; 입력창을 지우려고 Ctrl+A나 Delete를 쓰지 않는다 (OCS에서 Delete는 D/C).
-EnterOrders(hwnd, orders) {
+EnterOrders(hwnd, orders, pt) {
   done := 0
   MouseGetPos &mx, &my
   try {
@@ -532,11 +673,10 @@ EnterOrders(hwnd, orders) {
         AbortableSleep(300)
         continue
       }
-      p := PointXY(hwnd, "OrderInput")
-      Click p.x " " p.y
+      Click pt.x " " pt.y
       AbortableSleep(Num("WaitAfterClick"))
       if Cfg["CaretCheck"] = "1"
-        CheckCaretNear(p)
+        CheckCaretNear(pt)
       StepCheck(hwnd)
       ImeOff(hwnd)
       TypeSearch(o.text)
@@ -567,62 +707,72 @@ EnterOrders(hwnd, orders) {
   return {count: done, error: ""}
 }
 
-CheckForbiddenKey(keys) {
-  if RegExMatch(keys, "i)\{\s*(Del|Delete|F2)\b")
-    throw Error("환자 열기 순서(Steps)에 쓸 수 없는 키가 있어요 (Delete = D/C, F2 = 서명): " keys)
-}
-
-CheckStepsReady() {
-  missing := []
-  for step in StrSplit(Cfg["Steps"], "|") {
-    parts := StrSplit(Trim(step), ":", , 2)
-    if parts.Length < 2
-      continue
-    act := Trim(parts[1]), arg := Trim(parts[2])
-    if (act = "click" || act = "dclick") && !HasPoint(arg)
-      missing.Push(PointLabel(arg))
-    if act = "key"
-      CheckForbiddenKey(arg)
-  }
-  if missing.Length
-    throw Error("명단 모드에 필요한 위치가 등록되지 않았어요:`n· " Join(missing, "`n· ") "`n`n트레이 아이콘 > 설정에서 등록해주세요.")
-}
-
-; 설정 파일 [OpenPatient] Steps 순서대로 OCS 외래 명단에서 환자를 연다
-OpenPatient(hwnd, id) {
+; 명단 모드: OCS 외래 명단에서 환자번호를 찾아 그 줄을 더블클릭 (검색칸은 쓰지 않음)
+OpenFromList(hwnd, id) {
   if gPractice {
-    SendText "`n[환자 열기] OCS 외래 명단에서 " id " 검색 → 첫 줄 더블클릭`n"
+    SendText "`n[환자 열기] OCS 외래 명단에서 " id " 줄을 찾아 더블클릭`n"
     return
   }
-  for step in StrSplit(Cfg["Steps"], "|") {
-    step := Trim(step)
-    if step = ""
-      continue
-    if gAbort
-      throw Error("Esc를 눌러 멈췄어요.")
-    parts := StrSplit(step, ":", , 2)
-    act := Trim(parts[1]), arg := parts.Length >= 2 ? parts[2] : ""
-    switch act {
-      case "click":
-        p := PointXY(hwnd, Trim(arg))
-        Click p.x " " p.y
-        AbortableSleep(Num("WaitAfterClick"))
-      case "dclick":
-        p := PointXY(hwnd, Trim(arg))
-        Click p.x " " p.y " 2"
-        AbortableSleep(Num("WaitAfterClick"))
-      case "type":
-        ImeOff()
-        SendEvent "{Raw}" StrReplace(arg, "{ID}", id)
-      case "key":
-        CheckForbiddenKey(arg)
-        Send arg
-      case "wait":
-        AbortableSleep(Integer(Trim(arg)))
-      default:
-        throw Error("환자 열기 순서(Steps)에 모르는 동작이 있어요: " step)
+  scr := OcsScreen(hwnd)
+  heads := ListHeads(scr)
+  if !heads.Length {
+    btn := HasAnchor("ListButton") ? FindAnchor(scr, "ListButton") : ""
+    if !IsObject(btn)
+      throw Error("외래 명단이 열려 있지 않고, '외래 명단 여는 버튼'도 화면에서 찾지 못했어요.`n외래 명단을 열어 두고 다시 해 보세요. 처방은 넣지 않았어요.")
+    Click btn.x " " btn.y
+    AbortableSleep(Num("ListOpenWait"))
+    scr := OcsScreen(hwnd)
+    heads := ListHeads(scr)
+    if !heads.Length
+      throw Error("외래 명단을 열지 못했어요 ('환자번호' 머리글을 찾지 못함). 처방은 넣지 않았어요.")
+  }
+  w := FindInList(scr, heads, id)
+  if !IsObject(w) {
+    ; 맨 위로 올린 뒤 한 화면씩 내려 가며 찾음 (명단 끝에 닿아 더 바뀌지 않으면 멈춤)
+    gx := heads[1].cx, gy := heads[1].cy + heads[1].h * 4
+    MouseMove gx, gy, 0
+    loop 4 {
+      Send "{WheelUp 10}"
+      Sleep 80
+    }
+    AbortableSleep(500)
+    last := ""
+    loop Num("ListMaxPages") {
+      scr := OcsScreen(hwnd)
+      heads := ListHeads(scr)
+      if !heads.Length
+        throw Error("찾는 도중 외래 명단이 닫혔어요. 처방은 넣지 않았어요.")
+      w := FindInList(scr, heads, id)
+      if IsObject(w)
+        break
+      sig := ListSignature(scr, heads)
+      if sig = last
+        break
+      last := sig
+      MouseMove gx, gy, 0
+      Send "{WheelDown " Num("ListScroll") "}"
+      AbortableSleep(500)
     }
   }
+  if !IsObject(w)
+    throw Error("OCS 외래 명단에서 " id " 환자를 찾지 못했어요 (명단 끝까지 찾아봄). 처방은 넣지 않았어요.`n명단 조건(날짜·진료의)이 맞는지 확인해주세요.")
+  Click w.cx " " w.cy " 2"
+}
+
+; 명단에서 연 뒤 그 환자 화면이 맞는지 (몇 번 다시 읽음). 맞으면 그 화면(OcsScreen), 아니면 오류
+WaitPatientScreen(hwnd, id) {
+  AbortableSleep(Num("ChartOpenWait"))
+  if !WinWaitActive("ahk_id " hwnd, , 5)
+    throw Error("환자를 연 뒤 OCS 메인 화면이 앞에 오지 않았어요. 떠 있는 창을 확인해주세요. 처방은 넣지 않았어요.")
+  no := ""
+  loop 3 {
+    scr := OcsScreen(hwnd)
+    no := PatientIdFrom(scr)
+    if SameId(no, id)
+      return scr
+    AbortableSleep(1000)
+  }
+  throw Error("OCS에 " id " 환자 화면이 열리지 않았어요 (읽은 번호: " (no = "" ? "없음" : no) "). 처방은 넣지 않았어요.")
 }
 
 ; =====================================================================
@@ -637,7 +787,7 @@ ConfirmText(r, fromList := false) {
   if F(r, "doctor") != ""
     t .= "담당:  " F(r, "doctor") "`n"
   if fromList
-    t .= "   → OCS 외래 명단에서 이 환자를 열고, 환자번호가 같은지 확인한 뒤 넣어요.`n"
+    t .= "   → OCS 외래 명단에서 이 환자를 찾아 열고, 환자번호가 같은지 확인한 뒤 넣어요.`n"
   else
     t .= "   → OCS 화면에서 읽은 환자번호와 같아요. 이름도 확인해주세요.`n"
   t .= "`n넣을 처방 " r.orders.Length "건`n"
@@ -759,11 +909,12 @@ RunCurrent() {
   gRunning := true, gAbort := false
   saved := ClipboardAll()
   try {
-    CheckOcsWindow(hwnd)
-    ShowTip("OCS 환자번호 읽는 중… (멈춤: Esc)")
-    no := ReadPatientNo(hwnd)
+    CheckMainWindow(hwnd)
+    ShowTip("OCS 화면 글자 읽는 중… (멈춤: Esc)")
+    first := ReadPatientNo(hwnd)
+    no := first.id
     if no = ""
-      throw Error("OCS 화면에서 환자번호를 읽지 못했어요.`n환자 화면이 열려 있는지 확인하고, 안 되면 설정에서 '환자번호' 위치를 다시 등록해주세요.")
+      throw Error("OCS 화면에서 환자번호를 읽지 못했어요.`n환자 화면(오더발행)이 열려 있는지 확인하고, 트레이 아이콘 > 화면 글자 읽기 시험으로 확인해 보세요.")
     ShowTip("흐름 프로그램에서 " no " 처방을 가져오는 중…")
     r := PatientPlan(no)
     ActivateOcs(hwnd)
@@ -777,13 +928,19 @@ RunCurrent() {
     if MsgBox(ConfirmText(r), APP_NAME " · 처방 넣기", MB_YESNO | MB_QUESTION | MB_TOP) != "Yes"
       return
     ActivateOcs(hwnd)
-    ; 확인 창을 보는 사이 OCS 환자가 바뀌지 않았는지 다시 읽음
-    again := gPractice ? no : ReadPatientNoReal(hwnd)
-    if !SameId(again, no)
-      throw Error("확인하는 동안 OCS의 환자가 바뀌었어요 (지금: " (again = "" ? "읽지 못함" : again) "). 아무것도 넣지 않았어요.")
+    pt := ""
+    if !gPractice && r.orders.Length {
+      ; 확인 창을 보는 사이 OCS 환자가 바뀌지 않았는지 다시 읽고, 처방 입력창도 찾음
+      ShowTip("OCS 화면 다시 확인 중…")
+      scr := OcsScreen(hwnd)
+      again := PatientIdFrom(scr)
+      if !SameId(again, no)
+        throw Error("확인하는 동안 OCS의 환자가 바뀌었어요 (지금: " (again = "" ? "읽지 못함" : again) "). 아무것도 넣지 않았어요.")
+      pt := FindOrderInput(scr)
+    }
     Log((gPractice ? "[연습] " : "") "현재 환자 " no " 입력 시작 " r.orders.Length "건")
     ShowTip(F(r, "name") " 처방 입력 중… 마우스·키보드를 만지지 마세요 (멈춤: Esc)")
-    res := EnterOrders(hwnd, r.orders)
+    res := EnterOrders(hwnd, r.orders, pt)
     out := FinishPatient(hwnd, r, res)
     ClearTip()
     if out.clean
@@ -806,12 +963,12 @@ RunCurrent() {
 ; =====================================================================
 BatchStart() {
   global gRunning, gAbort
-  hwnd := WinExist("A")
+  ; 외래 명단이 열린 채로 시작해도 되도록, 명단 모드는 OCS 메인 화면 기준
+  hwnd := gPractice ? WinExist("A") : MainOcsWindow()
   gRunning := true, gAbort := false
   try {
-    CheckOcsWindow(hwnd)
-    if !gPractice
-      CheckStepsReady()
+    if !hwnd
+      throw Error("OCS 창을 찾지 못했어요.")
     ShowTip("흐름 프로그램에서 오늘 처방 대기 명단을 가져오는 중…")
     r := Api("list")
     ClearTip()
@@ -949,7 +1106,6 @@ BatchNext() {
   try {
     try Batch.lv.Modify(idx, "Select Focus Vis")
     ActivateOcs(hwnd)
-    CheckOcsWindow(hwnd)
     BatchSetStatus(item.name " (" item.id ") 처방을 가져오는 중…")
     r := PatientPlan(item.id)
     ActivateOcs(hwnd)
@@ -970,19 +1126,16 @@ BatchNext() {
       BatchSetStatus(out.msg (out.ok ? NextText() : ""))
       return
     }
-    ShowTip(item.name " 환자를 여는 중… 마우스·키보드를 만지지 마세요 (멈춤: Esc)")
-    OpenPatient(hwnd, item.id)
-    if !WinWaitActive("ahk_id " hwnd, , 5)
-      throw Error("환자를 연 뒤 OCS 메인 화면이 앞에 오지 않았어요. 떠 있는 창을 확인해주세요. 처방은 넣지 않았어요.")
-    no := gPractice ? item.id : ReadPatientNoRetry(hwnd, item.id)
-    if !SameId(no, item.id) {
-      SetItem(idx, "열기 실패")
-      throw Error("OCS에서 " item.name " (" item.id ") 환자를 열지 못했어요 (읽은 번호: " (no = "" ? "없음" : no) ").`n처방은 넣지 않았어요.`n`n"
-        . Cfg["HotkeyRun"] "로 다시 시도하거나 [이 환자 건너뛰기]를 눌러주세요.")
+    ShowTip(item.name " 환자를 명단에서 찾는 중… 마우스·키보드를 만지지 마세요 (멈춤: Esc)")
+    OpenFromList(hwnd, item.id)
+    pt := ""
+    if !gPractice {
+      scr := WaitPatientScreen(hwnd, item.id)
+      pt := FindOrderInput(scr)
     }
     Log((gPractice ? "[연습] " : "") "명단 모드 " item.id " 입력 시작 " r.orders.Length "건")
     ShowTip(item.name " 처방 입력 중… 마우스·키보드를 만지지 마세요 (멈춤: Esc)")
-    res := EnterOrders(hwnd, r.orders)
+    res := EnterOrders(hwnd, r.orders, pt)
     out := FinishPatient(hwnd, r, res)
     ClearTip()
     if res.error = "" {
@@ -992,13 +1145,15 @@ BatchNext() {
         MsgBox out.msg, APP_NAME, MB_WARN | MB_TOP
     } else {
       SetItem(idx, "멈춤 " res.count "/" r.orders.Length)
-      BatchSetStatus(out.msg "`n`n" Cfg["HotkeyRun"] "를 누르면 이 환자를 다시 열고 남은 처방만 넣어요. [이 환자 건너뛰기]로 넘길 수도 있어요.")
+      BatchSetStatus(out.msg "`n`n" Cfg["HotkeyRun"] "를 누르면 이 환자를 다시 찾아 남은 처방만 넣어요. [이 환자 건너뛰기]로 넘길 수도 있어요.")
       MsgBox out.msg, APP_NAME, MB_WARN | MB_TOP
     }
   } catch as e {
     ClearTip()
+    if InStr(e.Message, "찾지 못했어요") || InStr(e.Message, "열리지 않았어요")
+      SetItem(idx, "열기 실패")
     Log("오류(명단) " item.id ": " e.Message)
-    BatchSetStatus(e.Message)
+    BatchSetStatus(e.Message "`n`n" Cfg["HotkeyRun"] "로 다시 시도하거나 [이 환자 건너뛰기]를 눌러주세요.")
     MsgBox e.Message, APP_NAME, MB_WARN | MB_TOP
   } finally {
     Sleep 200
@@ -1043,7 +1198,8 @@ TogglePractice(*) {
   if gPractice {
     A_TrayMenu.Check("연습 모드 (메모장)")
     MsgBox "연습 모드를 켰어요.`n`n메모장을 열고 그 안에서 " Cfg["HotkeyRun"] "(현재 환자) 또는 " Cfg["HotkeyBatch"] "(명단 모드)를 눌러보세요.`n"
-      . "OCS 대신 메모장에 무엇을 어떤 순서로 넣을지 글로 적어 줘요.`n흐름 프로그램과는 실제로 주고받아요.", APP_NAME, MB_INFO | MB_TOP
+      . "OCS 대신 메모장에 무엇을 어떤 순서로 넣을지 글로 적어 줘요.`n흐름 프로그램 서버와는 실제로 주고받아요.`n`n"
+      . "OCS 화면을 제대로 읽는지는 트레이 아이콘 > 화면 글자 읽기 시험으로 확인하세요.", APP_NAME, MB_INFO | MB_TOP
   } else {
     A_TrayMenu.Uncheck("연습 모드 (메모장)")
     MsgBox "연습 모드를 껐어요. 이제 OCS에서 동작합니다.", APP_NAME, MB_INFO | MB_TOP
@@ -1051,20 +1207,72 @@ TogglePractice(*) {
 }
 
 ; =====================================================================
-; 설정 창 (위치 등록)
+; 화면 글자 읽기 시험 (누르지 않고 읽기만, 찾은 곳을 빨간 네모로 표시)
+; =====================================================================
+TestOcr() {
+  global gRunning
+  if gRunning
+    return
+  main := MainOcsWindow()
+  if !main {
+    MsgBox "OCS 창을 찾지 못했어요. OCS를 켜고 'OCS 창'을 등록했는지 확인해주세요.", APP_NAME, MB_WARN | MB_TOP
+    return
+  }
+  gRunning := true
+  try {
+    if SetupGui
+      SetupGui.Hide()
+    ActivateOcs(main)
+    t0 := A_TickCount
+    scr := OcsScreen(main)
+    no := PatientIdFrom(scr)
+    pt := HasAnchor("OrderInput") ? FindAnchor(scr, "OrderInput") : ""
+    btn := HasAnchor("ListButton") ? FindAnchor(scr, "ListButton") : ""
+    heads := ListHeads(scr)
+    listCount := heads.Length ? ListIds(scr, heads, 1).Length : 0
+    sec := Round((A_TickCount - t0) / 1000, 1)
+    ; 찾은 곳 표시: 환자번호(초록), 처방 입력창·명단 버튼(빨강), 명단 환자번호(파랑)
+    if no != ""
+      for v in [1, 2]
+        for w in scr.Words(v)
+          if DigitsOf(w.text) = no
+            ShowBox(w.x, w.y, w.w, w.h, 6000, "Lime")
+    if IsObject(pt)
+      ShowBox(pt.x - 12, pt.y - 8, 24, 16, 6000, "Red")
+    if IsObject(btn)
+      ShowBox(btn.x - 12, btn.y - 8, 24, 16, 6000, "Red")
+    if heads.Length
+      for x in ListIds(scr, heads, 1)
+        ShowBox(x.word.x, x.word.y, x.word.w, x.word.h, 6000, "Blue")
+    msg := "화면 글자를 읽는 데 " sec "초 걸렸어요 (찾은 곳을 6초 동안 네모로 표시).`n`n"
+    msg .= "환자번호 (초록): " (no != "" ? no : "읽지 못함 — 환자 화면이 열려 있는지 확인") "`n"
+    msg .= "처방 입력창 (빨강): " (!HasAnchor("OrderInput") ? "아직 등록 안 함" : IsObject(pt) ? "찾음" : "못 찾음 (입력창이 비어 있는지 확인)") "`n"
+    msg .= "외래 명단 여는 버튼 (빨강): " (!HasAnchor("ListButton") ? "등록 안 함" : IsObject(btn) ? "찾음" : "못 찾음") "`n"
+    msg .= "외래 명단 (파랑): " (heads.Length ? "열려 있음 · 환자번호 " listCount "개 읽음" : "열려 있지 않음") "`n`n"
+    msg .= "네모가 엉뚱한 곳에 있으면 그 항목을 다시 등록하거나, 설정 파일의 OcrScale(확대 배율)을 3으로 올려 보세요."
+    MsgBox msg, APP_NAME " · 화면 글자 읽기 시험", MB_INFO | MB_TOP
+  } catch as e {
+    MsgBox e.Message, APP_NAME, MB_WARN | MB_TOP
+  } finally {
+    gRunning := false
+  }
+}
+
+; =====================================================================
+; 설정 창 (등록)
 ; =====================================================================
 ShowSetup(*) {
   global SetupGui, SetupLv
   if !SetupGui {
     g := Gui("+AlwaysOnTop", APP_NAME " · 설정")
     g.SetFont("s10", "Malgun Gothic")
-    g.AddText("w640", "항목을 고르고 [선택 항목 등록]을 누르세요. 서버 주소는 직접 적고, 창·위치는 이 창이 잠시 숨겨진 뒤 안내대로 마우스를 올리고 F8을 누르세요 (취소: Esc).`n"
-      . "OCS는 평소 쓰는 크기(최대화)로 두고 등록하세요. 창 크기나 화면 배치가 바뀌면 다시 등록해야 해요.`n"
-      . "명단 모드 위치 3개는 OCS 외래 명단을 연 상태에서 등록하세요.")
-    lv := g.AddListView("w640 r9 -Multi NoSortHdr", ["항목", "등록된 값"])
+    g.AddText("w640", "항목을 고르고 [선택 항목 등록]을 누르세요. 서버 주소는 직접 적고, 나머지는 이 창이 잠시 숨겨진 뒤 안내대로 마우스를 올리고 F8을 누르세요 (취소: Esc).`n"
+      . "처방 입력창·명단 버튼은 위치가 아니라 그 근처 글자를 기억해요. 창을 옮기거나 칸 크기가 바뀌어도 그 글자를 찾아 누릅니다.`n"
+      . "등록한 뒤 [화면 글자 읽기 시험]으로 제대로 찾는지 확인하세요.")
+    lv := g.AddListView("w640 r6 -Multi NoSortHdr", ["항목", "등록된 값"])
     lv.OnEvent("DoubleClick", (*) => StartRecord())
     g.AddButton("w155", "선택 항목 등록").OnEvent("Click", (*) => StartRecord())
-    g.AddButton("x+6 w155", "환자번호 읽기 시험").OnEvent("Click", (*) => TestReadNo())
+    g.AddButton("x+6 w155", "화면 글자 읽기 시험").OnEvent("Click", (*) => TestOcr())
     g.AddButton("x+6 w155", "흐름 연결 시험").OnEvent("Click", TestFlow)
     g.AddButton("x+6 w155", "설정 파일 열기").OnEvent("Click", (*) => Run('notepad.exe "' INI_PATH '"'))
     g.OnEvent("Close", (*) => g.Hide())
@@ -1078,16 +1286,16 @@ RefreshSetup() {
   if !SetupLv
     return
   SetupLv.Delete()
-  for p in POINTS {
-    switch p.kind {
-      case "ocs":
-        v := Cfg["OcsExe"] = "" ? "" : Cfg["OcsExe"] "   (창 크기 " Cfg["OcsW"] "×" Cfg["OcsH"] ")"
+  for it in ITEMS {
+    switch it.kind {
       case "server":
         v := Cfg["ServerUrl"]
+      case "ocs":
+        v := Cfg["OcsExe"] = "" ? "" : Cfg["OcsExe"]
       default:
-        v := Cfg[p.key]
+        v := HasAnchor(it.key) ? "기준 글자 '" StrSplit(Cfg[it.key], "|")[1] "'" : ""
     }
-    SetupLv.Add("", p.label, v = "" ? "— 미등록" : v)
+    SetupLv.Add("", it.label, v = "" ? "— 미등록" : v)
   }
   SetupLv.ModifyCol(1, 250), SetupLv.ModifyCol(2, 370)
 }
@@ -1099,18 +1307,18 @@ StartRecord() {
     MsgBox "등록할 항목을 먼저 고르세요.", APP_NAME, MB_INFO | MB_TOP
     return
   }
-  p := POINTS[row]
-  if p.kind = "server" {
+  it := ITEMS[row]
+  if it.kind = "server" {
     AskServerUrl()
     return
   }
-  if p.kind = "point" && Cfg["OcsExe"] = "" {
+  if it.kind = "anchor" && Cfg["OcsExe"] = "" {
     MsgBox "먼저 'OCS 창'을 등록해주세요.", APP_NAME, MB_INFO | MB_TOP
     return
   }
-  gRecording := p.key
+  gRecording := it.key
   SetupGui.Hide()
-  ToolTip "[" p.label " 등록]`n" p.help " 마우스를 올리고 F8을 누르세요.`n(클릭하지 않아도 돼요 · 취소: Esc)", A_ScreenWidth // 2 - 260, 12, 2
+  ToolTip "[" it.label " 등록]`n" it.help " 마우스를 올리고 F8을 누르세요.`n(클릭하지 않아도 돼요 · 취소: Esc)", A_ScreenWidth // 2 - 260, 12, 2
 }
 
 ; 서버 주소는 직접 적음 (브라우저 주소창의 주소와 같음)
@@ -1138,67 +1346,57 @@ CancelRecord(*) {
 
 RecordNow(*) {
   global gRecording
-  p := PointByKey(gRecording)
+  it := ItemByKey(gRecording)
   gRecording := ""
   ToolTip(, , , 2)
   MouseGetPos &mx, &my, &win
   try {
     exe := WinGetProcessName("ahk_id " win)
-    switch p.kind {
-      case "ocs":
-        WinGetClientPos(, , &w, &h, "ahk_id " win)
-        IniWrite exe, INI_PATH, "Windows", "OcsExe"
-        IniWrite WinGetClass("ahk_id " win), INI_PATH, "Windows", "OcsClass"
-        IniWrite w, INI_PATH, "Windows", "OcsW"
-        IniWrite h, INI_PATH, "Windows", "OcsH"
-        note := "OCS 창을 등록했어요: " exe " (창 크기 " w "×" h ")`n창 크기가 바뀌었다면 아래 위치들도 다시 등록해주세요."
-      default:
-        if exe != Cfg["OcsExe"]
-          throw Error("OCS 화면 위에 마우스를 올리고 F8을 눌러주세요.`n(지금 마우스 아래 프로그램: " exe ")")
-        main := MainOcsWindow()
-        if !main
-          throw Error("OCS 창을 찾지 못했어요.")
-        WinGetClientPos(&cx, &cy, &w, &h, "ahk_id " main)
-        IniWrite((mx - cx) "," (my - cy), INI_PATH, "Points", p.key)
-        note := "'" p.label "' 위치를 등록했어요 (" (mx - cx) ", " (my - cy) ")."
-        if Cfg["OcsW"] != "" && (Abs(w - Cfg["OcsW"]) > Num("SizeTolerance") || Abs(h - Cfg["OcsH"]) > Num("SizeTolerance"))
-          note .= "`n`n⚠ 지금 OCS 창 크기(" w "×" h ")가 'OCS 창'을 등록할 때(" Cfg["OcsW"] "×" Cfg["OcsH"] ")와 달라요. 'OCS 창'부터 다시 등록해주세요."
+    if it.kind = "ocs" {
+      WinGetClientPos(, , &w, &h, "ahk_id " win)
+      IniWrite exe, INI_PATH, "Windows", "OcsExe"
+      IniWrite WinGetClass("ahk_id " win), INI_PATH, "Windows", "OcsClass"
+      IniWrite w, INI_PATH, "Windows", "OcsW"
+      IniWrite h, INI_PATH, "Windows", "OcsH"
+      note := "OCS 창을 등록했어요: " exe
+    } else {
+      if exe != Cfg["OcsExe"]
+        throw Error("OCS 화면 위에 마우스를 올리고 F8을 눌러주세요.`n(지금 마우스 아래 프로그램: " exe ")")
+      main := MainOcsWindow()
+      if !main
+        throw Error("OCS 창을 찾지 못했어요.")
+      ShowTip("화면 글자 읽는 중…")
+      scr := OcsScreen(main)
+      ; 마우스와 가장 가까운 글자(두 글자 이상, 숫자만 있는 것은 뺌)를 기준으로
+      best := "", bestD := 1000000000
+      for v in [1, 2] {
+        for w in scr.Words(v) {
+          if StrLen(w.text) < 2 || RegExMatch(w.text, "^[0-9\s\[\]\(\)\.,:;/|_-]+$")
+            continue
+          ddx := Max(w.x - mx, 0, mx - (w.x + w.w)), ddy := Max(w.y - my, 0, my - (w.y + w.h))
+          d := ddx * ddx + ddy * ddy
+          if d < bestD
+            best := w, bestD := d
+        }
+        if IsObject(best) && bestD = 0
+          break
+      }
+      ClearTip()
+      if !IsObject(best) || bestD > 150 * 150
+        throw Error("마우스 근처에서 글자를 찾지 못했어요. 글자(예: '입력창', 버튼 이름) 위나 바로 옆에 마우스를 올리고 다시 등록해주세요.")
+      rx := Round((best.cx - scr.x) / scr.w, 4), ry := Round((best.cy - scr.y) / scr.h, 4)
+      IniWrite(StrReplace(best.text, "|") "|" rx "|" ry "|" (mx - best.cx) "|" (my - best.cy), INI_PATH, "Anchors", it.key)
+      ShowBox(best.x, best.y, best.w, best.h, 4000, "Red")
+      note := "'" it.label "'의 기준 글자를 '" best.text "'(으)로 등록했어요 (빨간 네모).`n앞으로 이 글자를 찾아서, 지금 마우스가 있던 자리를 누릅니다."
+      if Sqrt(bestD) > 40
+        note .= "`n`n⚠ 기준 글자가 마우스에서 조금 떨어져 있어요. 더 가까운 글자가 있으면 그 위에서 다시 등록해 보세요."
     }
     LoadConfig()
     ShowSetup()
     MsgBox note, APP_NAME, MB_INFO | MB_TOP
   } catch as e {
+    ClearTip()
     ShowSetup()
     MsgBox e.Message, APP_NAME, MB_WARN | MB_TOP
-  }
-}
-
-TestReadNo() {
-  global gRunning
-  if gRunning
-    return
-  main := MainOcsWindow()
-  if !main {
-    MsgBox "OCS 창을 찾지 못했어요. OCS를 켜고 'OCS 창'을 등록했는지 확인해주세요.", APP_NAME, MB_WARN | MB_TOP
-    return
-  }
-  gRunning := true
-  saved := ClipboardAll()
-  try {
-    SetupGui.Hide()
-    ActivateOcs(main)
-    no := ReadPatientNoReal(main)
-    ShowSetup()
-    if no = ""
-      MsgBox "환자번호를 읽지 못했어요.`n환자 화면이 열려 있는지, '환자번호 앞쪽·뒤쪽' 위치가 숫자 양 끝에 맞는지 확인해주세요.", APP_NAME, MB_WARN | MB_TOP
-    else
-      MsgBox "읽은 환자번호: " no "`n`nOCS 화면의 번호와 같은지 확인하세요.", APP_NAME, MB_INFO | MB_TOP
-  } catch as e {
-    ShowSetup()
-    MsgBox e.Message, APP_NAME, MB_WARN | MB_TOP
-  } finally {
-    Sleep 200
-    A_Clipboard := saved
-    gRunning := false
   }
 }
