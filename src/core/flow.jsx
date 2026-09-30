@@ -1147,3 +1147,54 @@ export function shownWait(waits, patients, kind, now = Date.now()) {
   }
   return w.shown && w.shownDate === todayISO() ? w.shown : null;
 }
+
+/* 방별 대기 인원 (메인 화면 숫자·띵동 알림·각 화면이 같은 기준을 씀) */
+export function visionWaiting(patients) {
+  return patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p));
+}
+// 검사실 묶음 = 시력방·처치실을 뺀 모든 검사실 (자동)
+export function examRooms(settings) {
+  return settings.rooms.filter(r => r.builtin !== 'treat');
+}
+export function roomWaiting(patients, settings, roomId) {
+  return patients.filter(p => !p.consultDone && roomPending(p, settings, roomId));
+}
+// 검사실 묶음에서 대기 순서가 가장 빠른 환자 (지금 검사 중·호출 금지 중인 환자는 뺌)
+export function earliestExamPatient(patients, settings) {
+  const ids = examRooms(settings).map(r => r.id);
+  const list = patients.filter(p => !p.consultDone && !activeVf(p) && !prepHolding(p, settings) && ids.some(id => roomPending(p, settings, id)));
+  return [...list].sort(byQueue)[0] || null;
+}
+// '[끝 · 확인]'을 눌러야 완료되는 처치실 시간 재기 검사 중 시간이 된 것 (예: Schirmer)
+export function treatTimedDue(p, settings, now = Date.now()) {
+  return roomTests(settings, treatRoomOf(settings).id)
+    .filter(t => isTimed(t) && !prepGoMode(t) && p.assigned?.[t.id] && prepRunning(p, t) && prepDue(prepOf(p, t), t, now));
+}
+// 처치실 할 일 묶음별 환자 (정렬 전)
+export function treatWork(patients, settings, now = Date.now()) {
+  const treatId = treatRoomOf(settings).id;
+  return {
+    requests: patients.filter(treatRequested),
+    triage: patients.filter(needsTriageAssign),
+    procs: patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)),
+    prep: patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).length > 0),
+    check: patients.filter(p => prepChecks(p, settings).length > 0 || treatTimedDue(p, settings, now).length > 0),
+    preProc: patients.filter(p => !p.consultDone && pastVision(p) && preProcPending(p)),
+    exams: patients.filter(p => !p.consultDone && roomPending(p, settings, treatId)),
+  };
+}
+export function treatWorkCount(work) {
+  return Object.values(work).reduce((n, list) => n + list.length, 0);
+}
+// 처치실 띵동: 어느 묶음이든 새 환자, 또는 시간 재기·검사 준비·결과 확인의 '시간 됨'
+export function treatChimeKeys(patients, settings, now = Date.now()) {
+  const work = treatWork(patients, settings, now);
+  const keys = Object.entries(work).flatMap(([name, list]) => list.map(p => `${name}:${patientKey(p)}`));
+  patients.forEach(p => {
+    const pk = patientKey(p);
+    treatTimedDue(p, settings, now).forEach(t => keys.push(`due:${pk}:${t.id}`));
+    prepPendingTests(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) keys.push(`due:${pk}:${t.id}`); });
+    prepChecks(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) keys.push(`due:${pk}:${t.id}`); });
+  });
+  return keys;
+}

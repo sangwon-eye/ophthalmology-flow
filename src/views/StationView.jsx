@@ -1,10 +1,11 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomPending, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionComplete, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes } from '../core/flow.jsx';
+import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
-import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
+import { ChimeControl, useChime } from '../ui/chime.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 검사실 화면 (시력/안압 + 설정된 검사실 공용)                           */
@@ -66,11 +67,22 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const notCheckedIn = isVision
     ? patients.filter(p => !p.consultDone && !p.checkin && inSession(p, session) && (!q || (p.name || '').includes(q) || String(p.id).includes(q))).sort(nameSort ? byName : byQueue)
     : [];
-  const roomList = (isVision
-    ? patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p))
-    : patients.filter(p => !p.consultDone && roomPending(p, settings, room.id))
-  ).sort(byQueue);
+  const roomList = (isVision ? visionWaiting(patients) : roomWaiting(patients, settings, room.id)).sort(byQueue);
+  // 검사실 묶음(시력방·처치실을 뺀 모든 검사실): 윗줄에 같은 묶음의 다른 검사실 대기도 '보기만'으로, 띵동도 묶음 전체
+  const isExamRoom = !isVision && room.builtin !== 'treat' && !embedded;
+  const groupRooms = isExamRoom ? examRooms(settings) : [];
+  const groupLists = Object.fromEntries(groupRooms.map(r => [r.id, r.id === room.id ? roomList : roomWaiting(patients, settings, r.id)]));
+  // 대기 순서가 가장 빠른 환자(지금 검사 중인 환자 제외)가 기다리는 검사 칩에 빨간 점 → 어느 검사도 소외되지 않게
+  const earliest = isExamRoom ? earliestExamPatient(patients, settings) : null;
+  const dotFor = (roomId, g) => !!earliest && pendingTests(earliest, settings, roomId).some(t => g.tests.some(x => x.id === t.id));
+  const dotTitle = earliest ? `대기 순서가 가장 빠른 환자: ${earliest.name} (예약 ${earliest.reservation || '-'})` : '';
+  // 띵동: 시력방은 새 접수, 검사실은 묶음 안 어느 검사실이든 대기 명단에 새 환자
+  useChime(isVision ? roomList.map(patientKey) : groupRooms.flatMap(r => groupLists[r.id].map(p => `${r.id}:${patientKey(p)}`)),
+    { ready: !!lastSync && (isVision || isExamRoom) });
   const activeGroup = groups.find(g => g.key === filter) || null;
+  // 설정에서 '대기 0명이어도 보이기'를 켠 검사는 항상, 끈 검사는 기다리는 환자가 있을 때만
+  const visibleGroups = (gs, list) => gs.filter(g => g.tests.some(t => t.showWhenEmpty !== false) || activeGroup?.key === g.key || list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p))));
+  const groupLabel = (g, list) => `${g.key} ${list.filter(p => groupPending(p, g)).length}명${list.some(p => g.tests.some(t => t.id === activeVf(p))) ? ' · 검사 중' : ''}`;
   // VF 분류에서도 진행 중인 카드와 종료 버튼을 계속 보여준다.
   const shown = activeGroup ? roomList.filter(p => groupPending(p, activeGroup) || activeGroup.tests.some(t => t.id === activeVf(p))) : roomList;
   const toggleFirstVisit = (pk) => patchPatient(mutatePatients, pk, x => ({ firstVisit: !x.firstVisit }));
@@ -235,6 +247,30 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
       <div className="flex items-start justify-between gap-2 mb-3">
         {isVision ? (
           <div className="self-center text-sm font-medium text-slate-500">검사 대기 · {roomList.length}명</div>
+        ) : isExamRoom ? (
+          <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2" data-testid="exam-top">
+            <span className="text-sm font-medium text-slate-500">검사 대기</span>
+            {groups.length >= 2 ? <>
+              <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
+              {visibleGroups(groups, roomList).map(g => (
+                <FilterChip key={g.key} active={activeGroup?.key === g.key} onClick={() => setFilter(g.key)} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} />
+              ))}
+            </> : groups.map(g => <InfoChip key={g.key} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} />)}
+            {/* 같은 묶음의 다른 검사실: 보기만 */}
+            {groupRooms.filter(r => r.id !== room.id).map(r => {
+              const list = groupLists[r.id];
+              // 다른 검사실은 짧게: 기다리는 환자가 있는(또는 검사 중인) 검사만
+              const rGroups = machineGroups(roomTests(settings, r.id)).filter(g => list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p))));
+              return (
+                <span key={r.id} data-room={r.id} className="inline-flex flex-wrap items-center gap-2">
+                  <span className="text-slate-300" aria-hidden="true">│</span>
+                  <span className="text-xs font-medium text-slate-500">{r.name}</span>
+                  {rGroups.length ? rGroups.map(g => <InfoChip key={g.key} label={groupLabel(g, list)} dot={dotFor(r.id, g)} title={dotTitle} />)
+                    : <span className="text-xs text-slate-400">대기 {list.length}명</span>}
+                </span>
+              );
+            })}
+          </div>
         ) : groups.length >= 2 ? (
           <div className="flex-1 min-w-0 flex flex-wrap gap-2">
             <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
@@ -513,7 +549,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   );
   if (embedded) return <div className="mb-8">{content}</div>;
   return (
-    <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length}>
+    <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length} extra={isVision || isExamRoom ? <ChimeControl /> : undefined}>
       {content}
     </ScreenShell>
   );

@@ -433,11 +433,25 @@ export function TestDetailModal({ test, patientName, on, value, onApply, onRemov
   );
 }
 
-export function FilterChip({ active, onClick, label }) {
+// dot: 대기 순서가 가장 빠른 환자가 기다리는 검사 (빨간 점)
+function RedDot() {
+  return <span aria-hidden="true" className="inline-block w-2 h-2 rounded-full bg-red-500 shrink-0" />;
+}
+export function FilterChip({ active, onClick, label, dot = false, title }) {
   return (
-    <button type="button" onClick={onClick} className={`text-sm px-3 py-1.5 rounded-full border ${active ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>
-      {label}
+    <button type="button" onClick={onClick} data-dot={dot ? '1' : undefined} title={dot ? title : undefined}
+      className={`text-sm px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${active ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>
+      {dot && <RedDot />}{label}
     </button>
+  );
+}
+// 보기만 하는 칩 (같은 묶음의 다른 검사실 대기 등). 눌러도 아무 일 없음
+export function InfoChip({ label, dot = false, title }) {
+  return (
+    <span data-dot={dot ? '1' : undefined} title={dot ? title : undefined}
+      className="text-sm px-3 py-1.5 rounded-full border border-dashed border-slate-300 bg-slate-50 text-slate-500 inline-flex items-center gap-1.5">
+      {dot && <RedDot />}{label}
+    </span>
   );
 }
 

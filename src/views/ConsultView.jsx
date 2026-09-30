@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
 import { COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
+import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -132,6 +133,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const mine = patients.filter(p => p.doctor === selectedDoctor);
   const explainList = mine.filter(awaitingExplain).sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0));
   const inRoom = mine.find(inConsult);
+  // 띵동: 이 교수님 진료실에 진료 호출이 생기면 (진료실 앞 PC 등). 교수님을 바꾸면 기준만 다시 잡음
+  useChime(mine.filter(inConsult).map(patientKey), { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
   const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
   const onHold = mine.filter(p => p.consultHold && !p.consultDone && !p.seen && (!allDone(p, settings) || p.treatRequest));
   const testing = mine.filter(p => !p.consultDone && !p.consultHold && !p.seen && p.checkin && !allDone(p, settings) && !inTreatRoom(p, settings)).length;
@@ -325,7 +328,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       onBack={onBack}
       lastSync={lastSync}
       count={waiting.length}
-      extra={<DoctorPicker doctors={doctors} value={selectedDoctor} onChange={setSelectedDoctor} />}
+      extra={<><ChimeControl /><DoctorPicker doctors={doctors} value={selectedDoctor} onChange={setSelectedDoctor} /></>}
       sub={selectedDoctor ? <SummaryBar label="진료실 할 일 요약" items={[
         { id: 'consult-explain', label: '설명 대기', n: explainList.length },
         { id: 'consult-waiting', label: '진료 대기', n: waiting.length },

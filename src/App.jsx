@@ -222,12 +222,13 @@ export default function App() {
 
 
   const renderView = () => {
-  if (!role) return <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} />;
-
-  const onBack = () => setRole(null);
   const today = todayISO();
   // 1차 진료 설명 완료를 기다리는 2차 진료는 관리자·전체 명단에서만 보입니다.
   const patientsToday = patients.filter(p => p.date === today && !p.linkWaiting);
+  const main = <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} patients={patientsToday} doctors={doctors} />;
+  if (!role) return main;
+
+  const onBack = () => setRole(null);
 
   if (role === 'vision' || role.startsWith('room:')) {
     return (
@@ -330,7 +331,7 @@ export default function App() {
       />
     );
   }
-  return <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} />;
+  return main;
   };
   return <PatientMemoContext.Provider value={mutatePatients}>
     <NoticeContext.Provider value={boardNotices || { notices: {} }}>

@@ -1,7 +1,7 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
 import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode } from 'lucide-react';
-import { COLOR_MAP, INPUT, applyCheckin, forcedToday, patientKey, preProcPending, realTodayISO, roomColor, roomTests, todayISO, treatRoomOf } from '../core/flow.jsx';
+import { COLOR_MAP, INPUT, applyCheckin, consultWaiting, forcedToday, patientKey, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, todayISO, treatRoomOf, treatWork, treatWorkCount, visionWaiting } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
 import { patientBoardName } from './BoardView.jsx';
@@ -204,19 +204,22 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
   );
 }
 
-export function RoleSelect({ settings, onSelect, onSetToday }) {
+export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doctors = [] }) {
   // 메인 화면: 매일 쓰는 직원 화면(진료 흐름)은 크게, 환자용 화면·관리는 작게 묶어서 한 화면에 모두
+  // 방마다 대기 인원(각 화면 위쪽 '대기 N명'과 같은 숫자). 진료실은 교수님별로 한 줄
+  const byDoctor = doctors.map(d => [d, patients.filter(p => p.doctor === d && consultWaiting(p, settings)).length]);
   const flow = [
-    { key: 'vision', label: visionNames(settings).name, sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue' },
+    { key: 'vision', label: visionNames(settings).name, sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue', count: visionWaiting(patients).length },
     ...settings.rooms.filter(r => r.builtin !== 'treat').map(r => ({
       key: `room:${r.id}`,
       label: r.name,
       sub: roomTests(settings, r.id).map(t => t.short).join(', ') || '검사 없음',
       icon: Camera,
       color: roomColor(settings, r.id),
+      count: roomWaiting(patients, settings, r.id).length,
     })),
-    { key: 'procedure', label: treatRoomOf(settings).name, sub: roomTests(settings, treatRoomOf(settings).id).length ? '진료 전 검사 · 예진 · 전공의 처치' : '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo' },
-    { key: 'consult', label: '진료실', sub: '교수님별 진료 대기', icon: Stethoscope, color: 'amber' },
+    { key: 'procedure', label: treatRoomOf(settings).name, sub: roomTests(settings, treatRoomOf(settings).id).length ? '진료 전 검사 · 예진 · 전공의 처치' : '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo', count: treatWorkCount(treatWork(patients, settings)) },
+    { key: 'consult', label: '진료실', sub: byDoctor.length ? byDoctor.map(([d, n]) => `${d} ${n}`).join(' · ') : '교수님별 진료 대기', icon: Stethoscope, color: 'amber', count: byDoctor.reduce((a, [, n]) => a + n, 0) },
   ];
   const patientSide = [
     { key: 'board', label: '환자용 화면', sub: '대기 명단 모니터', icon: Monitor },
@@ -258,13 +261,14 @@ export function RoleSelect({ settings, onSelect, onSetToday }) {
         </div>
         {groupTitle('진료 흐름 · 직원 화면')}
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] mb-6">
-          {flow.map(({ key, label, sub, icon: Icon, color }) => {
+          {flow.map(({ key, label, sub, icon: Icon, color, count }) => {
             const c = COLOR_MAP[color] || COLOR_MAP.slate;
             return (
               <button key={key} type="button" onClick={() => onSelect(key)} className={`flex flex-col items-center gap-2 px-3 py-5 rounded-2xl border-2 ${c.border} ${c.bg} hover:shadow-md transition-shadow`}>
                 <Icon size={30} className={c.text} />
                 <div className="text-center min-w-0">
                   <div className="t-tile font-medium text-slate-900">{label}</div>
+                  <div data-count={key} className={`text-lg font-semibold ${count ? 'text-slate-900' : 'text-slate-400'}`}>대기 {count}</div>
                   <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{sub}</div>
                 </div>
               </button>
