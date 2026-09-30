@@ -176,9 +176,11 @@ export function useSharedStore(storageKey, loader, initial) {
     return run;
   }, [storageKey, loader]);
 
-  const mark = useCallback(() => seq.current, []);
+  // 새로 받기를 시작할 때 표시. 저장이 진행 중일 때 시작한 새로 받기는 저장 전 내용을 가져올 수 있어 쓰지 않습니다
+  // (쓰면 방금 넣은 내용이 잠깐 사라졌다가 다시 나타남). 저장이 끝나면 서버 알림·4초 확인으로 곧 다시 받습니다.
+  const mark = useCallback(() => (pending.current > 0 ? null : seq.current), []);
   const sync = useCallback((incoming, startedAt) => {
-    if (pending.current === 0 && !DRAG_ACTIVE && seq.current === startedAt) setValue(incoming);
+    if (startedAt !== null && pending.current === 0 && !DRAG_ACTIVE && seq.current === startedAt) setValue(incoming);
   }, []);
 
   return [value, mutate, sync, mark, mutateEntry];
