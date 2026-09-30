@@ -116,15 +116,18 @@
   환자번호 띠·명단 칸 자리는 ini `[Learned]`에 기억(다시 켜도 빠름). 명단 모드 창은 일하는 동안 숨김(화면을 가리지 않게).
 - 기다림은 **화면 변화 감지**(AdaptiveWait=1): 설정 시간은 '최대', 입력창 둘레가 바뀐 뒤 StableMs(300) 그대로면 다음으로.
   단 최소 시간(WaitMinAfterType 500·WaitMinAfterEnter 600)은 꼭 기다림(후보 목록이 덜 떴을 때 ↓ 방지). 입력창 줄(±24px)은 커서 깜박임 때문에 감시에서 뺌.
-- UIA(윈도우 접근성)는 바로 쓰지 않고 **진단 도구만**: `ocs-helper/uia-check.ahk`(트레이 > 화면 요소 확인, F7, 이름·번호 가림, 읽기만).
-  라이브러리 `Lib/UIA.ahk`(Descolada/UIA-v2, MIT, 그대로)는 이 도구에서만 include. 결과를 받아 UIA 방식으로 바꿀지 결정.
+- **UIA(윈도우 접근성)를 가장 먼저** 씀(사용자 선택 "UIA 먼저 + 안 되면 지금 방식"). '화면 요소 확인'(`ocs-helper/uia-check.ahk`, F7, 이름·번호 가림) 결과:
+  OCS = HIS.exe(WPF). 처방 입력창 `ucOrderSearchList` 안 `txtSearch`, 그 입력창의 조상 환자 칸(ListBoxItem) 이름 "… [환자번호] 이름 (F/나이)" → [ ] 번호,
+  Patient List `btnPatient`, 외래 명단 `ucSavePatientManagement` 안 `ListControlContainer`(줄 내용은 안 알려 줌 = MockAutomationPeer → 명단 번호 찾기는 글자 인식).
+  UIA 입력창은 누른 뒤 HasKeyboardFocus·빈 칸 확인, Enter 뒤 입력창이 비워지면 다음(비워지지 않으면 멈춤). 다른 환자 칸이 둘 이상 보이면 UIA로 고르지 않음.
+  `IUIAutomationActivateScreenReader := 0`(화면 읽기 표시 안 켬). UseUia=0이면 끔. 후보 목록에서 고른 줄 이름 확인 기능은 만들지 않음(사용자: 필요 없음).
 - 별도 'OCS 처방' 화면은 만들지 않음(사용자: 검사실 [처방 전]/처방 완료로 충분). 명단 모드의 교수·접수 조건은 도우미 창에서 고름.
 
 ## 6. 남은 일·보류
 - `server.js`의 `splitOldShardedFiles()`(예전 이전 시력 한 파일 → 100개로 나누기)는 이미 적용됨 → **다음에 server.js를 손볼 때 제거**(사용자 요청).
 - GitHub: 작업 브랜치를 main에 병합, 저장소 비공개 전환(사용자가 직접), 테스트의 교수님 이름을 가상 이름으로 — 사용자가 “나중에” 하기로 함.
 - 명단 엑셀 읽기 `xlsx` 0.18.5 알려진 취약점 → 새 버전 교체 제안만 한 상태(미결정).
-- OCS 도우미: 사용자가 '화면 요소 확인'(UIA 시험) 결과를 주면 UIA로 환자번호·입력창·명단을 바로 읽는 방식 검토. 병원 PC에서 그림 찾기·화면 변화 감지 시험 결과 확인.
+- OCS 도우미: 병원 PC에서 UIA 방식·그림 찾기·화면 변화 감지 시험 결과 확인(기록 파일의 '확인 창까지 N초 (UIA)', '입력 N건 N초').
 
 ## 7. 용어
 - 시력방(시력/안압 검사실, 가장 먼저) · 검사실(31번방 등, 장비별 검사) · 처치실(진료 전 검사·검사 지정·예진·전공의 처치)

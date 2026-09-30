@@ -2,6 +2,8 @@
 #SingleInstance Force
 Persistent
 #Include <OCR>  ; Lib\OCR.ahk — 윈도우에 들어 있는 화면 글자 인식(OCR)을 쓰는 공개 라이브러리 (Descolada, MIT, Lib\OCR-LICENSE.txt)
+#Include <UIA>  ; Lib\UIA.ahk — 윈도우 접근성(UI Automation) 라이브러리 (Descolada/UIA-v2, MIT, Lib\UIA-LICENSE.txt). 처음 쓸 때 준비됨
+IUIAutomationActivateScreenReader := 0  ; 윈도우의 '화면 읽기 프로그램 사용 중' 표시는 켜지 않음 (OCS는 이것 없이도 알려 줌)
 
 /*
   OCS 처방 도우미 (ophthalmology flow → OCS)
@@ -12,7 +14,9 @@ Persistent
   - 서명(F2)과 Delete(D/C) 키는 누르지 않습니다.
 
   화면 위치를 외워 두지 않고, 매번 OCS 화면에서 찾습니다(창을 옮기거나 칸 크기가 바뀌어도 따라감).
-    · 처방 입력창 · 명단 여는 버튼 · 명단 머리글: 등록할 때(또는 처음 찾았을 때) 찍어 둔 작은 그림을 화면에서 찾음 (가장 빠름)
+    · 가장 먼저 UIA(윈도우 접근성): OCS가 알려 주는 칸 이름표로 처방 입력창·그 환자 칸의 환자번호·Patient List 버튼·
+      외래 명단이 열렸는지를 바로 알아냄. 안 되면 아래 방법으로
+    · 처방 입력창 · 명단 여는 버튼 · 명단 머리글: 등록할 때(또는 처음 찾았을 때) 찍어 둔 작은 그림을 화면에서 찾음
       그림으로 못 찾으면 그 근처 글자(예: '입력창')를 글자 인식으로 찾고, 명단 버튼은 마지막으로 등록한 위치
     · 환자번호: 화면에 여러 번 보이는 번호 (오더발행·EMR 제목의 [16318174] 등). 번호가 보이던 좁은 띠만 읽음
     · 명단의 환자: '환자번호' 머리글 아래에서 그 번호를 찾아 더블클릭 (안 보이면 휠로 내려 가며 찾음)
@@ -55,7 +59,8 @@ GENERAL_DEFAULTS := Map(
   "AdaptiveWait", "1",
   "StableMs", "300",
   "WaitMinAfterType", "500",
-  "WaitMinAfterEnter", "600"
+  "WaitMinAfterEnter", "600",
+  "UseUia", "1"
 )
 
 ; 설정 창에서 등록하는 항목 (순서대로 표시)
@@ -141,6 +146,8 @@ ListMaxPages=40
 ; 명단에서 더블클릭한 뒤 환자 화면이 열릴 때까지 기다림
 ChartOpenWait=2500
 
+; UIA(윈도우 접근성): 1 = OCS가 알려 주는 칸 이름표로 먼저 찾음(가장 빠름), 0 = 쓰지 않음
+UseUia=1
 ; 그림 찾기: 1 = 등록할 때 찍어 둔 그림으로 먼저 찾음(빠름), 0 = 글자 인식만. 허용 색 차이(0~255)
 ImageFind=1
 ImageVariation=30
@@ -744,7 +751,211 @@ Wheel(hwnd, col, gx, gy, dir, step) {
 }
 
 ; =====================================================================
-; 그림 찾기 (가장 빠름) · 화면 변화 감지
+; UIA (윈도우 접근성, 가장 빠름): OCS(HIS.exe, WPF)가 알려 주는 칸 이름표로 바로 찾음
+;   ('화면 요소 확인' 결과) 처방 입력창 = 'ucOrderSearchList' 안의 'txtSearch'
+;   그 입력창이 들어 있는 환자 칸(목록 항목)의 이름 = "… [환자번호] 이름 (F/45세)" → [ ] 안의 번호
+;   Patient List 버튼 = 'btnPatient', 외래 명단 = 'ucSavePatientManagement' 안의 'ListControlContainer'
+;   (명단 줄 내용은 알려 주지 않으므로 명단에서 번호 찾기는 글자 인식)
+; 못 찾거나 UIA를 쓸 수 없으면 ""를 돌려주고, 부르는 쪽이 그림 찾기·글자 인식으로 넘어감. UseUia=0 이면 쓰지 않음
+; =====================================================================
+UiaRoot(hwnd) {
+  static roots := Map(), logged := false
+  if Cfg["UseUia"] != "1" || gPractice || !hwnd
+    return ""
+  if roots.Has(hwnd)
+    return roots[hwnd]
+  try {
+    root := UIA.ElementFromHandle(hwnd, , 0)
+  } catch as e {
+    if !logged
+      Log("UIA를 쓰지 못해 그림·글자 인식으로 찾아요: " e.Message)
+    logged := true
+    return ""
+  }
+  roots[hwnd] := root
+  return root
+}
+
+UiaFindAll(el, id) {
+  try return el.FindAll({AutomationId: id})
+  return []
+}
+
+; 화면에 보이는 요소의 네모 {x, y, w, h, cx, cy} (안 보이면 "")
+UiaRect(el) {
+  try {
+    if el.IsOffscreen
+      return ""
+    r := el.BoundingRectangle
+    if r.r - r.l < 4 || r.b - r.t < 4
+      return ""
+    return {x: r.l, y: r.t, w: r.r - r.l, h: r.b - r.t, cx: (r.l + r.r) // 2, cy: (r.t + r.b) // 2}
+  }
+  return ""
+}
+
+UiaValue(el) {
+  try {
+    v := el.GetPropertyValue(UIA.Property.Value)
+    return IsObject(v) ? "" : Trim(v)
+  }
+  return ""
+}
+
+; 그 요소가 들어 있는 환자 칸의 환자번호 (칸 이름의 [ ] 안 번호). 모르면 ""
+UiaPatientOf(el) {
+  p := el
+  loop 15 {
+    try p := p.Parent
+    catch
+      return ""
+    try {
+      if RegExMatch(p.Name, "\[(\d{" Num("PatientIdMin") "," Num("PatientIdMax") "})\]", &m)
+        return m[1]
+    }
+  }
+  return ""
+}
+
+; 화면에 보이는 처방 입력창들 [{x, y (누를 곳), el, rect, id (그 환자 칸의 환자번호), how}]. UIA를 못 쓰면 ""
+UiaOrderInputs(hwnd) {
+  root := UiaRoot(hwnd)
+  if !IsObject(root)
+    return ""
+  out := []
+  for lst in UiaFindAll(root, "ucOrderSearchList") {
+    try box := lst.FindFirst({AutomationId: "txtSearch"})
+    catch
+      continue
+    r := UiaRect(box)
+    if !IsObject(r)
+      continue
+    ; 입력창 왼쪽 부분을 누름 (오른쪽 끝에는 지우기(X) 단추가 있음)
+    out.Push({x: r.x + Min(80, r.w // 3), y: r.cy, el: box, rect: r, id: UiaPatientOf(box), how: "uia"})
+  }
+  return out
+}
+
+; 지금 보이는 처방 입력창 하나 (환자번호까지 읽힌 것). 다른 환자 칸이 둘 이상 보이거나 못 찾으면 ""
+UiaCurrentInput(hwnd) {
+  ins := UiaOrderInputs(hwnd)
+  if !IsObject(ins)
+    return ""
+  found := ""
+  for x in ins {
+    if x.id = ""
+      continue
+    if !IsObject(found)
+      found := x
+    else if !SameId(found.id, x.id)
+      return ""
+  }
+  return found
+}
+
+; 명단에서 연 환자의 처방 입력창이 보일 때까지 (최대 ChartOpenWait + 3초)
+; UIA를 못 쓰거나 입력창이 하나도 안 보이면 "" (글자 인식으로 확인), 다른 환자만 보이면 멈춤
+UiaWaitPatient(hwnd, id) {
+  if !IsObject(UiaRoot(hwnd))
+    return ""
+  deadline := A_TickCount + Num("ChartOpenWait") + 3000, seen := ""
+  loop {
+    if WinActive("ahk_id " hwnd) {
+      ins := UiaOrderInputs(hwnd)
+      if IsObject(ins) {
+        for x in ins {
+          if SameId(x.id, id)
+            return x
+          if x.id != ""
+            seen := x.id
+        }
+      }
+    }
+    if A_TickCount > deadline
+      break
+    AbortableSleep(120)
+  }
+  if seen != ""
+    throw Error("OCS에 " id " 환자 화면이 열리지 않았어요 (지금 보이는 환자번호: " seen "). 처방은 넣지 않았어요.")
+  return ""
+}
+
+; Patient List 버튼 {x, y, rect, word, how} (못 찾으면 "")
+UiaButton(hwnd) {
+  root := UiaRoot(hwnd)
+  if !IsObject(root)
+    return ""
+  for el in UiaFindAll(root, "btnPatient")
+    if IsObject(r := UiaRect(el))
+      return {x: r.cx, y: r.cy, rect: r, word: "", how: "uia"}
+  return ""
+}
+
+; 외래 명단: {open: true, rect: 명단 칸 네모} / {open: false} / UIA로 알 수 없으면 ""
+UiaListState(hwnd) {
+  root := UiaRoot(hwnd)
+  if !IsObject(root)
+    return ""
+  for pm in UiaFindAll(root, "ucSavePatientManagement") {
+    if !IsObject(UiaRect(pm))
+      continue
+    for el in UiaFindAll(pm, "ListControlContainer")
+      if IsObject(r := UiaRect(el))
+        return {open: true, rect: r}
+  }
+  ; 명단 칸이 안 보이는데 Patient List 버튼은 보이면 '닫힘'. 버튼도 못 찾으면 이 화면 구성을 모르는 것
+  return IsObject(UiaButton(hwnd)) ? {open: false} : ""
+}
+
+; Patient List 버튼을 누른 뒤 명단 칸이 보일 때까지 (최대 ListOpenWait + 3초). 명단 칸 네모 또는 ""
+UiaWaitListOpen(hwnd) {
+  deadline := A_TickCount + Num("ListOpenWait") + 3000
+  loop {
+    ls := UiaListState(hwnd)
+    if IsObject(ls) && ls.open
+      return ls.rect
+    if A_TickCount > deadline
+      return ""
+    AbortableSleep(100)
+  }
+}
+
+; 입력창을 누른 뒤 글자 커서가 들어갔는지 (CaretCheck=0 이면 확인하지 않고 WaitAfterClick만 기다림)
+UiaWaitFocus(el) {
+  if Cfg["CaretCheck"] != "1" {
+    AbortableSleep(Num("WaitAfterClick"))
+    return
+  }
+  start := A_TickCount
+  AbortableSleep(50)
+  loop {
+    try {
+      if el.HasKeyboardFocus
+        return
+    }
+    if A_TickCount - start > Num("WaitAfterClick") + 700
+      throw Error("처방 입력창에 커서가 들어가지 않았어요 (다른 칸이 선택됐거나 창이 가려짐). 이 처방은 넣지 않았어요.`n(이 확인이 계속 잘못 걸리면 설정 파일에서 CaretCheck=0)")
+    AbortableSleep(30)
+  }
+}
+
+; 처방을 고른 뒤 입력창이 비워질 때까지 (최소 minMs). 최대 maxMs 안에 비워지면 true
+UiaWaitCleared(el, minMs, maxMs) {
+  start := A_TickCount
+  loop {
+    if gAbort
+      throw Error("Esc를 눌러 멈췄어요.")
+    empty := UiaValue(el) = ""
+    if empty && A_TickCount - start >= minMs
+      return true
+    if A_TickCount - start >= maxMs
+      return empty
+    Sleep 30
+  }
+}
+
+; =====================================================================
+; 그림 찾기 (UIA 다음으로 빠름) · 화면 변화 감지
 ; =====================================================================
 ; 사람이 아이콘 모양을 보고 바로 찾듯이, 등록할 때(또는 처음 글자로 찾았을 때) 찍어 둔 작은 그림을 화면에서 찾음
 ;   img\<항목>.bmp + 설정 파일 [Images] <항목>=가로|세로|누를 곳 x|y|창 왼쪽 위에서 x|y|창 안 비율 x|y
@@ -1157,10 +1368,18 @@ EnterOrders(hwnd, orders, pt) {
         AbortableSleep(300)
         continue
       }
+      byUia := pt.HasOwnProp("el")
       Click pt.x " " pt.y
-      AbortableSleep(Num("WaitAfterClick"))
-      if Cfg["CaretCheck"] = "1"
-        CheckCaretNear(pt)
+      if byUia {
+        ; UIA: 입력창에 커서가 들어갔는지 바로 확인하고, 비어 있는지도 확인 (지우는 키는 쓰지 않으므로 남은 글자가 있으면 멈춤)
+        UiaWaitFocus(pt.el)
+        if UiaValue(pt.el) != ""
+          throw Error("처방 입력창에 글자가 남아 있어요 (앞 처방이 들어가지 않았을 수 있어요). 입력창과 오더 목록을 확인해주세요.`n도우미는 입력창을 지우는 키를 쓰지 않아요. 이 처방은 넣지 않았어요.")
+      } else {
+        AbortableSleep(Num("WaitAfterClick"))
+        if Cfg["CaretCheck"] = "1"
+          CheckCaretNear(pt)
+      }
       StepCheck(hwnd)
       ImeOff(hwnd)
       watch := InputWatch(hwnd, pt)
@@ -1178,13 +1397,19 @@ EnterOrders(hwnd, orders, pt) {
         AbortableSleep(Num("DownDelay"))
       }
       StepCheck(hwnd)
-      watch := InputWatch(hwnd, pt)
+      watch := byUia ? "" : InputWatch(hwnd, pt)
       Send "{Enter}"
       done++
       Log("  처방 입력: " o.label)
-      WaitSettle(watch, Num("WaitMinAfterEnter"), Num("WaitAfterEnter"))
+      cleared := true
+      if byUia  ; UIA: 처방이 들어가면 입력창이 비워짐 → 비워지는 대로 다음으로 (최소 시간은 기다림)
+        cleared := UiaWaitCleared(pt.el, Num("WaitMinAfterEnter"), Num("WaitAfterEnter"))
+      else
+        WaitSettle(watch, Num("WaitMinAfterEnter"), Num("WaitAfterEnter"))
       if !WinActive("ahk_id " hwnd)
         throw Error("'" o.label "'을 넣은 뒤 새 창이 떴어요. 창 내용을 확인해주세요.")
+      if !cleared
+        throw Error("'" o.label "'을 고른 뒤 입력창이 비워지지 않았어요. 처방이 들어갔는지 오더 목록을 확인해주세요.")
     }
   } catch as e {
     MouseMove mx, my, 0
@@ -1206,16 +1431,33 @@ OpenFromList(hwnd, id) {
   }
   t0 := A_TickCount
   heads := [], byImage := false
-  ; 명단이 이미 열려 있는지: 머리글 그림(가장 빠름) → 지난번 '환자번호' 칸 자리만 글자로 읽기
-  hit := FindImage(hwnd, "ListHead")
-  if IsObject(hit)
-    heads := [HeadOfImage(hit)], byImage := true
-  else if IsObject(gListCol)
-    heads := HeadsIn(OcsScreen(hwnd, gListCol))
   full := OcsScreen(hwnd)  ; 창 전체 (글자는 필요할 때만 읽음)
-  ; 머리글 그림을 아직 모르면 창 전체를 읽어 명단이 열려 있는지 확인 (처음 한 번만 느림)
-  if !heads.Length && !HasImage("ListHead")
-    heads := ListHeads(full)
+  ls := UiaListState(hwnd)
+  if IsObject(ls) {
+    ; UIA로 명단이 열렸는지 바로 앎: 열려 있으면 머리글을 찾고, 닫혀 있거나 머리글이 안 보이면 Patient List를 눌러 엶
+    if ls.open
+      heads := WaitHeads(hwnd, ls.rect, 1000, &byImage)
+    if !heads.Length {
+      if !ClickListButton(hwnd, full)
+        throw Error("외래 명단이 열려 있지 않고, Patient List 버튼을 누르지 못했어요. 처방은 넣지 않았어요.")
+      lr := UiaWaitListOpen(hwnd)
+      if !IsObject(lr)
+        throw Error("Patient List 버튼을 눌렀는데 외래 명단이 열리지 않았어요. 처방은 넣지 않았어요.")
+      heads := WaitHeads(hwnd, lr, Num("ListOpenWait") + 3000, &byImage)
+      if !heads.Length
+        throw Error("외래 명단은 열렸는데 '환자번호' 칸을 읽지 못했어요. 처방은 넣지 않았어요.`n화면 글자 읽기 시험에서 명단의 파랑 네모가 잡히는지 확인해주세요.")
+    }
+  } else {
+    ; UIA로 모르면: 머리글 그림(가장 빠름) → 지난번 '환자번호' 칸 자리만 글자로 읽기
+    hit := FindImage(hwnd, "ListHead")
+    if IsObject(hit)
+      heads := [HeadOfImage(hit)], byImage := true
+    else if IsObject(gListCol)
+      heads := HeadsIn(OcsScreen(hwnd, gListCol))
+    ; 머리글 그림을 아직 모르면 창 전체를 읽어 명단이 열려 있는지 확인 (처음 한 번만 느림)
+    if !heads.Length && !HasImage("ListHead")
+      heads := ListHeads(full)
+  }
   if !heads.Length {
     ; 명단이 닫혀 있음 (다음 환자로 넘어갈 때는 보통 진료 화면) → Patient List 버튼을 눌러 엶
     watch := ChangeWatch([{x: full.wx, y: full.wy, w: full.ww, h: full.wh}])
@@ -1244,6 +1486,28 @@ OpenFromList(hwnd, id) {
 
 HeadsIn(scr) => HeadsFromWords(scr.Words(1))
 
+; 명단(UIA로 안 명단 칸 lr 안)의 '환자번호' 머리글: 그림 → 지난번 칸 자리 → 명단 칸 글자 인식, 최대 ms 동안 다시 봄
+WaitHeads(hwnd, lr, ms, &byImage) {
+  deadline := A_TickCount + ms
+  loop {
+    hit := FindImage(hwnd, "ListHead")
+    if IsObject(hit) {
+      byImage := true
+      return [HeadOfImage(hit)]
+    }
+    if IsObject(gListCol) {
+      heads := HeadsIn(OcsScreen(hwnd, gListCol))
+      if heads.Length
+        return heads
+    }
+    b := WinBox(hwnd)
+    heads := ListHeads(OcsScreen(hwnd, {x1: (lr.x - b.x) / b.w, y1: (lr.y - b.y) / b.h, x2: (lr.x + lr.w - b.x) / b.w, y2: (lr.y + lr.h - b.y) / b.h}))
+    if heads.Length || A_TickCount > deadline
+      return heads
+    AbortableSleep(200)
+  }
+}
+
 ; 버튼을 누른 뒤 명단이 뜰 때까지 확인 (최대 ListOpenWait + 3초)
 ; 머리글 그림을 알면 그림으로 자주 확인(빠름), 모르면 화면이 바뀌어 멈춘 뒤 글자로 읽음
 WaitListOpen(hwnd, watch, &byImage) {
@@ -1268,8 +1532,11 @@ WaitListOpen(hwnd, watch, &byImage) {
   }
 }
 
-; '외래 명단 여는 버튼'(Patient List)의 누를 곳: 그림(아이콘 모양) → 기준 글자(등록 자리 근처 → 창 전체) → 창 왼쪽 위 기준 위치
+; '외래 명단 여는 버튼'(Patient List)의 누를 곳: UIA(btnPatient) → 그림(아이콘 모양) → 기준 글자(등록 자리 근처 → 창 전체) → 창 왼쪽 위 기준 위치
 ListButtonPoint(hwnd, full := "") {
+  u := UiaButton(hwnd)
+  if IsObject(u)
+    return u
   hit := FindImage(hwnd, "ListButton")
   if IsObject(hit)
     return hit
@@ -1454,8 +1721,10 @@ RunCurrent() {
   try {
     CheckMainWindow(hwnd)
     t0 := A_TickCount
-    ShowTip("OCS 화면 글자 읽는 중… (멈춤: Esc)")
-    no := ReadPatientNo(hwnd)
+    ShowTip("OCS 화면 읽는 중… (멈춤: Esc)")
+    ; UIA로 처방 입력창과 그 환자 칸의 환자번호를 바로 (안 되면 화면 글자 인식)
+    u := gPractice ? "" : UiaCurrentInput(hwnd)
+    no := IsObject(u) ? u.id : ReadPatientNo(hwnd)
     if no = ""
       throw Error("OCS 화면에서 환자번호를 읽지 못했어요.`n환자 화면(오더발행)이 열려 있는지 확인하고, 트레이 아이콘 > 화면 글자 읽기 시험으로 확인해 보세요.")
     ShowTip("흐름 프로그램에서 " no " 처방을 가져오는 중…")
@@ -1468,15 +1737,22 @@ RunCurrent() {
       return
     }
     ; 처방 입력창은 확인 창을 띄우기 전에 미리 찾아 둠 ([예]를 누르면 바로 시작하도록)
-    pt := !gPractice && r.orders.Length ? FindOrderInput(hwnd) : ""
+    pt := !gPractice && r.orders.Length ? (IsObject(u) ? u : FindOrderInput(hwnd)) : ""
     ClearTip()
-    Log("  확인 창까지 " Round((A_TickCount - t0) / 1000, 1) "초")
+    Log("  확인 창까지 " Round((A_TickCount - t0) / 1000, 1) "초" (IsObject(u) ? " (UIA)" : ""))
     if MsgBox(ConfirmText(r), APP_NAME " · 처방 넣기", MB_YESNO | MB_QUESTION | MB_TOP) != "Yes"
       return
     ActivateOcs(hwnd)
     if !gPractice && r.orders.Length {
-      ; 확인 창을 보는 사이 OCS 환자가 바뀌지 않았는지 다시 읽음 (위쪽 띠만 읽어 빠름)
-      again := ReadPatientId(hwnd)
+      ; 확인 창을 보는 사이 OCS 환자가 바뀌지 않았는지 다시 읽음 (UIA면 입력창도 다시 찾음)
+      if IsObject(u) {
+        u2 := UiaCurrentInput(hwnd)
+        again := IsObject(u2) ? u2.id : ReadPatientId(hwnd)
+        if IsObject(u2)
+          pt := u2
+      } else {
+        again := ReadPatientId(hwnd)
+      }
       if !SameId(again, no)
         throw Error("확인하는 동안 OCS의 환자가 바뀌었어요 (지금: " (again = "" ? "읽지 못함" : again) "). 아무것도 넣지 않았어요.")
     }
@@ -1511,7 +1787,7 @@ BatchStart() {
   try {
     if !hwnd
       throw Error("OCS 창을 찾지 못했어요.")
-    if !gPractice && !HasAnchor("ListButton")
+    if !gPractice && !HasAnchor("ListButton") && !IsObject(UiaButton(hwnd))
       throw Error("명단 모드는 다음 환자로 넘어갈 때 Patient List 버튼을 눌러 외래 명단을 열어요.`n트레이 아이콘 > 설정에서 '외래 명단 여는 버튼'을 먼저 등록해주세요 (그 버튼 위에 마우스를 올리고 F8).")
     ShowTip("흐름 프로그램에서 오늘 처방 대기 명단을 가져오는 중…")
     r := Api("list")
@@ -1672,11 +1948,20 @@ BatchNext() {
     }
     ShowTip(item.name " 환자를 명단에서 찾는 중… 마우스·키보드를 만지지 마세요 (멈춤: Esc)")
     BatchGuiVisible(false)  ; 명단 모드 창이 OCS 화면을 가리지 않도록 일하는 동안 숨김
-    OpenFromList(hwnd, item.id)
-    pt := ""
-    if !gPractice {
-      WaitPatientScreen(hwnd, item.id)
-      pt := FindOrderInput(hwnd)
+    ; 이미 그 환자 화면이면(멈춘 뒤 다시 하기 등) 명단을 열지 않음 (UIA로 알 때만)
+    pt := gPractice ? "" : UiaCurrentInput(hwnd)
+    if IsObject(pt) && !SameId(pt.id, item.id)
+      pt := ""
+    if !IsObject(pt) {
+      OpenFromList(hwnd, item.id)
+      if !gPractice {
+        ; UIA: 그 환자 칸의 처방 입력창이 보이면 바로 (안 되면 화면 글자로 환자번호를 확인하고 입력창을 찾음)
+        pt := UiaWaitPatient(hwnd, item.id)
+        if !IsObject(pt) {
+          WaitPatientScreen(hwnd, item.id)
+          pt := FindOrderInput(hwnd)
+        }
+      }
     }
     Log((gPractice ? "[연습] " : "") "명단 모드 " item.id " 입력 시작 " r.orders.Length "건")
     ShowTip(item.name " 처방 입력 중… 마우스·키보드를 만지지 마세요 (멈춤: Esc)")
@@ -1782,7 +2067,15 @@ TestOcr() {
     if SetupGui
       SetupGui.Hide()
     ActivateOcs(main)
-    ; 1) 실제로 쓰는 빠른 방법: 그림 찾기, 환자번호가 보이던 좁은 띠
+    ; 0) UIA (가장 빠름): OCS가 알려 주는 칸 이름표
+    t := A_TickCount
+    uOn := IsObject(UiaRoot(main))
+    uIn := uOn ? UiaCurrentInput(main) : ""
+    uBtn := uOn ? UiaButton(main) : ""
+    uList := uOn ? UiaListState(main) : ""
+    tUia := A_TickCount - t
+    uIns := uOn ? UiaOrderInputs(main) : ""
+    ; 1) UIA로 못 찾을 때 쓰는 빠른 방법: 그림 찾기, 환자번호가 보이던 좁은 띠
     t := A_TickCount
     imgIn := FindImage(main, "OrderInput"), imgBtn := FindImage(main, "ListButton"), imgHead := FindImage(main, "ListHead")
     tImg := A_TickCount - t
@@ -1840,8 +2133,33 @@ TestOcr() {
     }
     for x in listHits
       ShowBox(x.word.x, x.word.y, x.word.w, x.word.h, 6000, "Blue")
+    for x in [uIn, uBtn]
+      if IsObject(x)
+        ShowBox(x.rect.x, x.rect.y, x.rect.w, x.rect.h, 6000, "Red")
+    if IsObject(uList) && uList.open
+      ShowBox(uList.rect.x, uList.rect.y, uList.rect.w, uList.rect.h, 6000, "Blue")
 
-    msg := "실제로 쓰는 빠른 방법 (찾은 곳을 6초 동안 네모로 표시)`n"
+    msg := "찾은 곳을 6초 동안 네모로 표시해요.`n`n"
+    if Cfg["UseUia"] != "1" {
+      msg .= "UIA: 쓰지 않음 (설정 파일 UseUia=0)`n`n"
+    } else if !uOn {
+      msg .= "UIA: 쓸 수 없음 (아래 그림·글자 인식으로 찾아요)`n`n"
+    } else {
+      if IsObject(uIn)
+        inState := "찾음"
+      else if IsObject(uIns) && uIns.Length > 1
+        inState := "환자 칸이 여러 개 보여 고르지 못함 (그림·글자 인식으로 찾아요)"
+      else if IsObject(uIns) && uIns.Length
+        inState := "입력창은 찾았는데 환자번호를 못 읽음"
+      else
+        inState := "못 찾음 (오더발행 화면이 보이는지 확인)"
+      msg .= "UIA — 가장 빠름, 실제로 먼저 씀 (" Sec(tUia) "초)`n"
+      msg .= "  · 환자번호: " (IsObject(uIn) ? uIn.id : "못 읽음") "`n"
+      msg .= "  · 처방 입력창 (빨강): " inState "`n"
+      msg .= "  · Patient List 버튼 (빨강): " (IsObject(uBtn) ? "찾음" : "못 찾음") "`n"
+      msg .= "  · 외래 명단 (파랑): " (!IsObject(uList) ? "모름" : uList.open ? "열려 있음" : "닫혀 있음") "`n`n"
+    }
+    msg .= "UIA로 못 찾을 때: 그림 찾기 · 좁은 띠`n"
     msg .= "  · 환자번호: " (fastNo != "" ? fastNo " — 좁은 띠만 읽어 " Sec(tBand) "초" : "좁은 띠에서 못 읽음 (아래처럼 창 전체를 읽어 찾고, 그 자리를 기억해요)") "`n"
     msg .= "  · 그림 찾기 3가지 모두 " Sec(tImg) "초`n"
     msg .= "      처방 입력창: " ImgState("OrderInput", imgIn) "`n"
