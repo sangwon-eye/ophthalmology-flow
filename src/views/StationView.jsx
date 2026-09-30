@@ -248,7 +248,8 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
         {isVision ? (
           <div className="self-center text-sm font-medium text-slate-500">검사 대기 · {roomList.length}명</div>
         ) : isExamRoom ? (
-          <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2" data-testid="exam-top">
+          <div className="flex-1 min-w-0 flex flex-col gap-2" data-testid="exam-top">
+            <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-slate-500">검사 대기</span>
             {groups.length >= 2 ? <>
               <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
@@ -256,18 +257,18 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 <FilterChip key={g.key} active={activeGroup?.key === g.key} onClick={() => setFilter(g.key)} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} />
               ))}
             </> : groups.map(g => <InfoChip key={g.key} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} />)}
-            {/* 같은 묶음의 다른 검사실: 보기만 */}
+            </div>
+            {/* 같은 묶음의 다른 검사실: 보기만, 방마다 줄을 바꿔서 */}
             {groupRooms.filter(r => r.id !== room.id).map(r => {
               const list = groupLists[r.id];
               // 다른 검사실은 짧게: 기다리는 환자가 있는(또는 검사 중인) 검사만
               const rGroups = machineGroups(roomTests(settings, r.id)).filter(g => list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p))));
               return (
-                <span key={r.id} data-room={r.id} className="inline-flex flex-wrap items-center gap-2">
-                  <span className="text-slate-300" aria-hidden="true">│</span>
+                <div key={r.id} data-room={r.id} className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-medium text-slate-500">{r.name}</span>
                   {rGroups.length ? rGroups.map(g => <InfoChip key={g.key} label={groupLabel(g, list)} dot={dotFor(r.id, g)} title={dotTitle} />)
                     : <span className="text-xs text-slate-400">대기 {list.length}명</span>}
-                </span>
+                </div>
               );
             })}
           </div>

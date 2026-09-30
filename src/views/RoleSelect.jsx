@@ -219,7 +219,8 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
       count: roomWaiting(patients, settings, r.id).length,
     })),
     { key: 'procedure', label: treatRoomOf(settings).name, sub: roomTests(settings, treatRoomOf(settings).id).length ? '진료 전 검사 · 예진 · 전공의 처치' : '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo', count: treatWorkCount(treatWork(patients, settings)) },
-    { key: 'consult', label: '진료실', sub: byDoctor.length ? byDoctor.map(([d, n]) => `${d} ${n}`).join(' · ') : '교수님별 진료 대기', icon: Stethoscope, color: 'amber', count: byDoctor.reduce((a, [, n]) => a + n, 0) },
+    { key: 'consult', label: '진료실', sub: '교수님별 진료 대기', icon: Stethoscope, color: 'amber', count: byDoctor.reduce((a, [, n]) => a + n, 0),
+      detail: byDoctor.length ? byDoctor.map(([d, n]) => `${d} ${n}`).join(' · ') : '' },
   ];
   const patientSide = [
     { key: 'board', label: '환자용 화면', sub: '대기 명단 모니터', icon: Monitor },
@@ -261,17 +262,23 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
         </div>
         {groupTitle('진료 흐름 · 직원 화면')}
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] mb-6">
-          {flow.map(({ key, label, sub, icon: Icon, color, count }) => {
+          {flow.map(({ key, label, sub, icon: Icon, color, count, detail }) => {
             const c = COLOR_MAP[color] || COLOR_MAP.slate;
             return (
-              <button key={key} type="button" onClick={() => onSelect(key)} className={`flex flex-col items-center gap-2 px-3 py-5 rounded-2xl border-2 ${c.border} ${c.bg} hover:shadow-md transition-shadow`}>
-                <Icon size={30} className={c.text} />
-                <div className="text-center min-w-0">
-                  <div className="t-tile font-medium text-slate-900">{label}</div>
-                  <div data-count={key} className={`text-lg font-semibold ${count ? 'text-slate-900' : 'text-slate-400'}`}>대기 {count}</div>
-                  <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{sub}</div>
+              <div key={key} className="flex flex-col">
+                <button type="button" data-tile={key} onClick={() => onSelect(key)} className={`flex-1 flex flex-col items-center gap-2 px-3 py-5 rounded-2xl border-2 ${c.border} ${c.bg} hover:shadow-md transition-shadow`}>
+                  <Icon size={30} className={c.text} />
+                  <div className="text-center min-w-0">
+                    <div className="t-tile font-medium text-slate-900">{label}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{sub}</div>
+                  </div>
+                </button>
+                {/* 대기 인원은 칸 밖 아래에 따로 */}
+                <div data-count={key} className="text-center mt-2">
+                  <div className={`text-lg font-semibold ${count ? 'text-slate-900' : 'text-slate-400'}`}>대기 {count}</div>
+                  {detail && <div data-count-detail={key} className="text-xs text-slate-500">{detail}</div>}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
