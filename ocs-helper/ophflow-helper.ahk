@@ -53,7 +53,7 @@ ITEMS := [
   {key: "ServerUrl",  kind: "server", label: "흐름 프로그램 서버 주소",         help: ""},
   {key: "OcsWindow",  kind: "ocs",    label: "OCS 창",                         help: "OCS 진료 화면(처방을 넣는 화면) 아무 곳에"},
   {key: "OrderInput", kind: "anchor", label: "처방 입력창",                    help: "오더발행의 처방 입력창 안('입력창' 글자 위)에"},
-  {key: "ListButton", kind: "anchor", label: "외래 명단 여는 버튼 (명단 모드)", help: "OCS 외래 명단을 여는 버튼 위에"}
+  {key: "ListButton", kind: "anchor", label: "외래 명단 여는 버튼 (명단 모드)", help: "외래 명단을 여는 Patient List 버튼(왼쪽 메뉴) 위에"}
 ]
 
 CoordMode "Mouse", "Screen"
@@ -491,7 +491,9 @@ ReadPatientId(hwnd, bandOnly := false) {
   return id
 }
 
-; 기준 글자 (설정 창에서 등록): "글자|가로비율|세로비율|dx|dy"
+; 기준 글자 (설정 창에서 등록): "글자|가로비율|세로비율|dx|dy|px|py"
+;   px·py = 창 왼쪽 위에서 누를 곳까지 거리(픽셀). 명단 버튼처럼 창 가장자리에 붙은 버튼은 글자를 못 읽어도 이 위치로 누름
+;   글자가 비어 있으면 위치로만 등록한 것
 HasAnchor(key) => Cfg.Has(key) && Cfg[key] != ""
 AnchorOf(key) {
   if !HasAnchor(key)
@@ -499,13 +501,18 @@ AnchorOf(key) {
   f := StrSplit(Cfg[key], "|")
   if f.Length < 5
     throw Error("'" ItemByKey(key).label "' 등록 값이 잘못됐어요. 설정에서 다시 등록해주세요.")
-  return {text: f[1], rx: Number(f[2]), ry: Number(f[3]), dx: Integer(f[4]), dy: Integer(f[5])}
+  a := {text: f[1], rx: Number(f[2]), ry: Number(f[3]), dx: Integer(f[4]), dy: Integer(f[5]), px: "", py: ""}
+  if f.Length >= 7 && IsInteger(f[6]) && IsInteger(f[7])
+    a.px := Integer(f[6]), a.py := Integer(f[7])
+  return a
 }
 SameWord(a, b) => StrReplace(a, " ") = StrReplace(b, " ")
 
 ; 기준 글자를 화면에서 찾아 누를 곳 {x, y, word}. 같은 글자가 여러 개면 등록할 때 자리와 가장 가까운 것. 못 찾으면 ""
 FindAnchor(scr, key) {
   a := AnchorOf(key)
+  if a.text = ""
+    return ""
   for v in [1, 2] {
     best := "", bestD := 1000000000
     for w in scr.Words(v) {
@@ -521,15 +528,43 @@ FindAnchor(scr, key) {
   return ""
 }
 
-; 외래 명단의 '환자번호' 머리글들 (명단이 열려 있지 않으면 빈 배열)
+; 외래 명단의 '환자번호' 칸 머리글들 (명단이 열려 있지 않으면 빈 배열)
 ListHeads(scr) {
   for v in [1, 2] {
-    heads := []
-    for w in scr.Words(v)
-      if InStr(w.text, "환자번호")
-        heads.Push(w)
+    heads := HeadsFromWords(scr.Words(v))
     if heads.Length
       return heads
+  }
+  return []
+}
+; 머리글 '환자번호'(띄어 읽히거나 한 글자 틀린 것도). 머리글을 못 읽어도 환자번호가 세로로 3개 이상
+; 늘어서 있으면 명단으로 보고, 맨 위 번호 두 줄 위를 머리글 자리로 씀
+HeadsFromWords(words) {
+  heads := []
+  for w in words
+    if RegExMatch(w.text, "자\s*번\s*호|환\s*자\s*번")
+      heads.Push(w)
+  if heads.Length
+    return heads
+  ids := []
+  for w in words
+    if IsPatientId(DigitsOf(w.text))
+      ids.Push(w)
+  for a in ids {
+    col := [], ys := Map()
+    for b in ids {
+      if Abs(b.cx - a.cx) < 30 && !ys.Has(b.cy // 5) {
+        col.Push(b)
+        ys[b.cy // 5] := true
+      }
+    }
+    if col.Length >= 3 {
+      top := col[1]
+      for b in col
+        if b.y < top.y
+          top := b
+      return [{text: "환자번호", x: top.x, y: top.y - top.h * 2, w: top.w, h: top.h, cx: top.cx, cy: top.cy - top.h * 2}]
+    }
   }
   return []
 }
@@ -566,10 +601,7 @@ ListColumn(scr, heads) {
 ListRead(hwnd, col, heads, id) {
   loop 3 {
     scr := OcsScreen(hwnd, col)
-    hs := []
-    for w in scr.Words(1)
-      if InStr(w.text, "환자번호")
-        hs.Push(w)
+    hs := HeadsFromWords(scr.Words(1))
     if !hs.Length
       hs := heads
     ids := ListIds(scr, hs, 1)
@@ -830,13 +862,9 @@ OpenFromList(hwnd, id) {
   }
   t0 := A_TickCount
   heads := [], col := ""
-  ; 지난번 '환자번호' 칸 자리만 먼저 읽어 봄. 명단이 닫혀 있으면 명단 버튼 근처만 읽어 눌러 열고 다시 봄
+  ; 명단이 이미 열려 있으면 지난번 '환자번호' 칸 자리만 읽어 바로 씀 (빠름)
   if IsObject(gListCol) {
     heads := HeadsIn(OcsScreen(hwnd, gListCol))
-    if !heads.Length && ClickListButton(hwnd) {
-      AbortableSleep(Num("ListOpenWait"))
-      heads := HeadsIn(OcsScreen(hwnd, gListCol))
-    }
     if heads.Length
       col := gListCol
   }
@@ -844,15 +872,12 @@ OpenFromList(hwnd, id) {
     full := OcsScreen(hwnd)
     heads := ListHeads(full)
     if !heads.Length {
-      btn := HasAnchor("ListButton") ? FindAnchor(full, "ListButton") : ""
-      if !IsObject(btn)
-        throw Error("외래 명단이 열려 있지 않고, '외래 명단 여는 버튼'도 화면에서 찾지 못했어요.`n외래 명단을 열어 두고 다시 해 보세요. 처방은 넣지 않았어요.")
-      Click btn.x " " btn.y
-      AbortableSleep(Num("ListOpenWait"))
-      full := OcsScreen(hwnd)
-      heads := ListHeads(full)
+      ; 명단이 닫혀 있음 (다음 환자로 넘어갈 때는 보통 진료 화면) → Patient List 버튼을 눌러 엶
+      if !ClickListButton(hwnd, full)
+        throw Error("외래 명단이 열려 있지 않고, '외래 명단 여는 버튼'(Patient List)을 누르지 못했어요.`n트레이 아이콘 > 설정에서 '외래 명단 여는 버튼'을 등록해주세요 (그 버튼 위에 마우스를 올리고 F8). 처방은 넣지 않았어요.")
+      heads := WaitListOpen(hwnd, &full)
       if !heads.Length
-        throw Error("외래 명단을 열지 못했어요 ('환자번호' 머리글을 찾지 못함). 처방은 넣지 않았어요.")
+        throw Error("Patient List 버튼을 눌렀는데 외래 명단이 보이지 않아요 (환자번호 칸을 읽지 못함). 처방은 넣지 않았어요.`n명단이 열렸다면 화면 글자 읽기 시험에서 파랑 네모가 잡히는지 확인해주세요.")
     }
     col := ListColumn(full, heads)
     gListCol := col
@@ -867,23 +892,43 @@ OpenFromList(hwnd, id) {
   Click w.cx " " w.cy " 2"
 }
 
-HeadsIn(scr) {
-  heads := []
-  for w in scr.Words(1)
-    if InStr(w.text, "환자번호")
-      heads.Push(w)
-  return heads
+HeadsIn(scr) => HeadsFromWords(scr.Words(1))
+
+; 버튼을 누른 뒤 명단이 뜰 때까지 확인 (최대 ListOpenWait + 3초). full에 마지막으로 읽은 화면
+WaitListOpen(hwnd, &full) {
+  AbortableSleep(500)
+  deadline := A_TickCount + Num("ListOpenWait") + 3000
+  loop {
+    full := OcsScreen(hwnd)
+    heads := ListHeads(full)
+    if heads.Length || A_TickCount > deadline
+      return heads
+    AbortableSleep(300)
+  }
 }
 
-; '외래 명단 여는 버튼'을 찾아 누름 (등록한 자리 근처만 먼저 읽음). 누르면 true
-ClickListButton(hwnd) {
+; '외래 명단 여는 버튼'(Patient List)의 누를 곳: 기준 글자(등록 자리 근처 → 창 전체) → 못 읽으면 창 왼쪽 위 기준 위치
+ListButtonPoint(hwnd, full := "") {
   if !HasAnchor("ListButton")
-    return false
+    return ""
   a := AnchorOf("ListButton")
-  btn := FindAnchor(OcsScreen(hwnd, {x1: a.rx - 0.15, y1: a.ry - 0.1, x2: a.rx + 0.15, y2: a.ry + 0.1}), "ListButton")
-  if !IsObject(btn)
+  if a.text != "" {
+    pt := FindAnchor(OcsScreen(hwnd, {x1: a.rx - 0.15, y1: a.ry - 0.1, x2: a.rx + 0.15, y2: a.ry + 0.1}), "ListButton")
+    if !IsObject(pt) && IsObject(full)
+      pt := FindAnchor(full, "ListButton")
+    if IsObject(pt)
+      return pt
+  }
+  if a.px = ""
+    return ""
+  WinGetPos(&wx, &wy, , , "ahk_id " hwnd)
+  return {x: wx + a.px, y: wy + a.py, word: ""}
+}
+ClickListButton(hwnd, full := "") {
+  pt := ListButtonPoint(hwnd, full)
+  if !IsObject(pt)
     return false
-  Click btn.x " " btn.y
+  Click pt.x " " pt.y
   return true
 }
 
@@ -1101,6 +1146,8 @@ BatchStart() {
   try {
     if !hwnd
       throw Error("OCS 창을 찾지 못했어요.")
+    if !gPractice && !HasAnchor("ListButton")
+      throw Error("명단 모드는 다음 환자로 넘어갈 때 Patient List 버튼을 눌러 외래 명단을 열어요.`n트레이 아이콘 > 설정에서 '외래 명단 여는 버튼'을 먼저 등록해주세요 (그 버튼 위에 마우스를 올리고 F8).")
     ShowTip("흐름 프로그램에서 오늘 처방 대기 명단을 가져오는 중…")
     r := Api("list")
     ClearTip()
@@ -1359,7 +1406,7 @@ TestOcr() {
     scr := OcsScreen(main)
     no := PatientIdFrom(scr)
     pt := HasAnchor("OrderInput") ? FindAnchor(scr, "OrderInput") : ""
-    btn := HasAnchor("ListButton") ? FindAnchor(scr, "ListButton") : ""
+    btn := ListButtonPoint(main, scr)
     heads := ListHeads(scr)
     listCount := heads.Length ? ListIds(scr, heads, 1).Length : 0
     sec := Round((A_TickCount - t0) / 1000, 1)
@@ -1379,8 +1426,8 @@ TestOcr() {
     msg := "화면 글자를 읽는 데 " sec "초 걸렸어요 (찾은 곳을 6초 동안 네모로 표시).`n`n"
     msg .= "환자번호 (초록): " (no != "" ? no : "읽지 못함 — 환자 화면이 열려 있는지 확인") "`n"
     msg .= "처방 입력창 (빨강): " (!HasAnchor("OrderInput") ? "아직 등록 안 함" : IsObject(pt) ? "찾음" : "못 찾음 (입력창이 비어 있는지 확인)") "`n"
-    msg .= "외래 명단 여는 버튼 (빨강): " (!HasAnchor("ListButton") ? "등록 안 함" : IsObject(btn) ? "찾음" : "못 찾음") "`n"
-    msg .= "외래 명단 (파랑): " (heads.Length ? "열려 있음 · 환자번호 " listCount "개 읽음" : "열려 있지 않음") "`n`n"
+    msg .= "외래 명단 여는 버튼 (빨강): " (!HasAnchor("ListButton") ? "등록 안 함" : !IsObject(btn) ? "못 찾음" : btn.word = "" ? "글자를 못 읽어 등록한 위치로 누름" : "찾음") "`n"
+    msg .= "외래 명단 (파랑): " (heads.Length ? "열려 있음 · 환자번호 " listCount "개 읽음" : "열려 있지 않음 (명단을 연 상태에서도 한 번 시험해 보세요)") "`n`n"
     msg .= "네모가 엉뚱한 곳에 있으면 그 항목을 다시 등록하거나, 설정 파일의 OcrScale(확대 배율)을 3으로 올려 보세요."
     MsgBox msg, APP_NAME " · 화면 글자 읽기 시험", MB_INFO | MB_TOP
   } catch as e {
@@ -1425,7 +1472,7 @@ RefreshSetup() {
       case "ocs":
         v := Cfg["OcsExe"] = "" ? "" : Cfg["OcsExe"]
       default:
-        v := HasAnchor(it.key) ? "기준 글자 '" StrSplit(Cfg[it.key], "|")[1] "'" : ""
+        v := !HasAnchor(it.key) ? "" : StrSplit(Cfg[it.key], "|")[1] = "" ? "위치로 등록 (창 왼쪽 위 기준)" : "기준 글자 '" StrSplit(Cfg[it.key], "|")[1] "'"
     }
     SetupLv.Add("", it.label, v = "" ? "— 미등록" : v)
   }
@@ -1514,14 +1561,26 @@ RecordNow(*) {
           break
       }
       ClearTip()
-      if !IsObject(best) || bestD > 150 * 150
-        throw Error("마우스 근처에서 글자를 찾지 못했어요. 글자(예: '입력창', 버튼 이름) 위나 바로 옆에 마우스를 올리고 다시 등록해주세요.")
-      rx := Round((best.cx - scr.wx) / scr.ww, 4), ry := Round((best.cy - scr.wy) / scr.wh, 4)
-      IniWrite(StrReplace(best.text, "|") "|" rx "|" ry "|" (mx - best.cx) "|" (my - best.cy), INI_PATH, "Anchors", it.key)
-      ShowBox(best.x, best.y, best.w, best.h, 4000, "Red")
-      note := "'" it.label "'의 기준 글자를 '" best.text "'(으)로 등록했어요 (빨간 네모).`n앞으로 이 글자를 찾아서, 지금 마우스가 있던 자리를 누릅니다."
-      if Sqrt(bestD) > 40
-        note .= "`n`n⚠ 기준 글자가 마우스에서 조금 떨어져 있어요. 더 가까운 글자가 있으면 그 위에서 다시 등록해 보세요."
+      ; 창 왼쪽 위에서 마우스까지 거리 (명단 버튼은 창 가장자리 메뉴에 붙어 있어 글자를 못 읽으면 이 위치로 누름)
+      WinGetPos(&wx, &wy, , , "ahk_id " main)
+      pos := (mx - wx) "|" (my - wy)
+      isButton := it.key = "ListButton"
+      if !IsObject(best) || bestD > (isButton ? 40 * 40 : 150 * 150) {
+        if !isButton
+          throw Error("마우스 근처에서 글자를 찾지 못했어요. 글자(예: '입력창') 위나 바로 옆에 마우스를 올리고 다시 등록해주세요.")
+        IniWrite("|0|0|0|0|" pos, INI_PATH, "Anchors", it.key)
+        ShowBox(mx - 12, my - 12, 24, 24, 4000, "Red")
+        note := "'" it.label "'은(는) 글자를 읽지 못해 위치로 등록했어요 (빨간 네모).`n창 왼쪽 위에서의 거리로 기억하므로, 창을 옮겨도 따라갑니다. 창 왼쪽 메뉴 줄의 배치가 바뀌면 다시 등록해주세요."
+      } else {
+        rx := Round((best.cx - scr.wx) / scr.ww, 4), ry := Round((best.cy - scr.wy) / scr.wh, 4)
+        IniWrite(StrReplace(best.text, "|") "|" rx "|" ry "|" (mx - best.cx) "|" (my - best.cy) (isButton ? "|" pos : ""), INI_PATH, "Anchors", it.key)
+        ShowBox(best.x, best.y, best.w, best.h, 4000, "Red")
+        note := "'" it.label "'의 기준 글자를 '" best.text "'(으)로 등록했어요 (빨간 네모).`n앞으로 이 글자를 찾아서, 지금 마우스가 있던 자리를 누릅니다."
+        if isButton
+          note .= "`n글자를 못 읽을 때는 창 왼쪽 위에서의 위치로 누릅니다."
+        else if Sqrt(bestD) > 40
+          note .= "`n`n⚠ 기준 글자가 마우스에서 조금 떨어져 있어요. 더 가까운 글자가 있으면 그 위에서 다시 등록해 보세요."
+      }
     }
     LoadConfig()
     ShowSetup()
