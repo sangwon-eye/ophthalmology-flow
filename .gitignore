@@ -4,3 +4,6 @@ data/
 node/
 tests/output/
 tests/.tmp*/
+ocs-helper/img/
+ocs-helper/*.ini
+ocs-helper/*.log

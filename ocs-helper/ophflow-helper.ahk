@@ -11,10 +11,12 @@ Persistent
           환자마다 멈춥니다. 확인·서명한 뒤 F9를 누르면 다음 환자로 갑니다.
   - 서명(F2)과 Delete(D/C) 키는 누르지 않습니다.
 
-  화면 위치를 외워 두지 않고, 매번 OCS 화면의 글자를 읽어서 찾습니다(창을 옮기거나 칸 크기가 바뀌어도 따라감).
-    · 환자번호: 화면에 여러 번 보이는 번호 (오더발행·EMR 제목의 [16318174] 등)
-    · 처방 입력창 · 명단 여는 버튼: 등록할 때 그 근처 글자(예: '입력창')를 기억해 두고 그 글자를 찾아 누름
+  화면 위치를 외워 두지 않고, 매번 OCS 화면에서 찾습니다(창을 옮기거나 칸 크기가 바뀌어도 따라감).
+    · 처방 입력창 · 명단 여는 버튼 · 명단 머리글: 등록할 때(또는 처음 찾았을 때) 찍어 둔 작은 그림을 화면에서 찾음 (가장 빠름)
+      그림으로 못 찾으면 그 근처 글자(예: '입력창')를 글자 인식으로 찾고, 명단 버튼은 마지막으로 등록한 위치
+    · 환자번호: 화면에 여러 번 보이는 번호 (오더발행·EMR 제목의 [16318174] 등). 번호가 보이던 좁은 띠만 읽음
     · 명단의 환자: '환자번호' 머리글 아래에서 그 번호를 찾아 더블클릭 (안 보이면 휠로 내려 가며 찾음)
+    · 기다리는 시간: 정해진 시간을 다 기다리지 않고, 화면이 바뀌고 멈추면 바로 다음으로 (최대는 설정값)
   흐름 프로그램 서버(server.js)의 /api/ocs/… 주소로 오늘 처방을 받고, 넣은 검사를 '처방 완료'로 표시합니다.
   (서버 쪽: scripts/ocs-api.js, src/core/ocs.js) 자세한 사용법은 같은 폴더의 README.md.
 */
@@ -22,7 +24,9 @@ Persistent
 APP_NAME := "OCS 처방 도우미"
 INI_PATH := A_ScriptDir "\ophflow-helper.ini"
 LOG_PATH := A_ScriptDir "\ophflow-helper.log"
+IMG_DIR := A_ScriptDir "\img"
 TAG := "OPHFLOW1"
+HEAD_PAD := 3  ; 명단 머리글 그림: 글자 둘레 여백 (픽셀)
 
 MB_YESNO := 4, MB_QUESTION := 32, MB_WARN := 48, MB_INFO := 64, MB_DEF2 := 256, MB_TOP := 0x40000
 
@@ -45,7 +49,13 @@ GENERAL_DEFAULTS := Map(
   "ListOpenWait", "1500",
   "ListScroll", "5",
   "ListMaxPages", "40",
-  "ChartOpenWait", "2500"
+  "ChartOpenWait", "2500",
+  "ImageFind", "1",
+  "ImageVariation", "30",
+  "AdaptiveWait", "1",
+  "StableMs", "300",
+  "WaitMinAfterType", "500",
+  "WaitMinAfterEnter", "600"
 )
 
 ; 설정 창에서 등록하는 항목 (순서대로 표시)
@@ -70,8 +80,8 @@ gRecording := ""
 gPractice := false
 ; 한 검사의 처방 줄(예: OCT와 OCTA)을 일부만 넣고 멈췄을 때 이미 넣은 줄. 다음에 같은 환자를 하면 건너뜀 (도우미를 끄면 지워짐)
 gPartial := Map()
-; 빨리 읽으려고 기억해 두는 자리 (창 안 비율): 환자번호가 보이는 높이, 외래 명단 '환자번호' 칸
-gIdBand := {y1: 0, y2: 0.3}
+; 빨리 읽으려고 기억해 두는 자리 (창 안 비율, 설정 파일 [Learned]에도 적어 둠): 환자번호가 보이는 띠, 외래 명단 '환자번호' 칸
+gIdBand := {x1: 0, y1: 0, x2: 1, y2: 0.3}
 gListCol := ""
 OCR.PerformanceMode := 1
 SetupGui := 0
@@ -131,6 +141,16 @@ ListMaxPages=40
 ; 명단에서 더블클릭한 뒤 환자 화면이 열릴 때까지 기다림
 ChartOpenWait=2500
 
+; 그림 찾기: 1 = 등록할 때 찍어 둔 그림으로 먼저 찾음(빠름), 0 = 글자 인식만. 허용 색 차이(0~255)
+ImageFind=1
+ImageVariation=30
+; 화면 변화 감지: 1 = 위의 기다리는 시간을 '최대'로 보고, 화면이 바뀐 뒤 StableMs 동안 그대로면 바로 다음으로
+;   (아래 두 값은 그래도 꼭 기다리는 최소 시간) / 0 = 늘 위의 시간을 다 기다림(예전 방식)
+AdaptiveWait=1
+StableMs=300
+WaitMinAfterType=500
+WaitMinAfterEnter=600
+
 [Server]
 ; 흐름 프로그램 주소 (브라우저 주소창에 쓰는 것과 같음. 예: http://192.168.0.10:3000)
 Url=
@@ -139,6 +159,12 @@ Url=
 
 [Anchors]
 ; 기준 글자|창 안 가로 위치(0~1)|세로 위치(0~1)|누를 곳까지 가로 거리|세로 거리  (설정 창에서 등록)
+
+[Images]
+; 그림 찾기용 (img 폴더의 그림): 가로|세로|누를 곳 x|y|창 왼쪽 위에서 x|y|창 안 비율 x|y  (자동으로 적음)
+
+[Learned]
+; 도우미가 스스로 기억한 자리 (환자번호가 보이는 띠, 외래 명단 '환자번호' 칸). 지워도 다시 배움
   )"
   FileAppend StrReplace(text, "`n", "`r`n"), INI_PATH, "UTF-16"
 }
@@ -154,6 +180,26 @@ LoadConfig() {
   for it in ITEMS
     if it.kind = "anchor"
       Cfg[it.key] := Trim(IniRead(INI_PATH, "Anchors", it.key, ""))
+  LoadLearned()
+}
+
+; 스스로 기억한 자리 (창 안 비율 x1|y1|x2|y2)
+LoadLearned() {
+  global gIdBand, gListCol
+  gIdBand := RelOf(IniRead(INI_PATH, "Learned", "IdBand", ""), {x1: 0, y1: 0, x2: 1, y2: 0.3})
+  gListCol := RelOf(IniRead(INI_PATH, "Learned", "ListCol", ""), "")
+}
+RelOf(s, def) {
+  f := StrSplit(Trim(s), "|")
+  if f.Length != 4
+    return def
+  for v in f
+    if !IsNumber(v)
+      return def
+  return {x1: Number(f[1]), y1: Number(f[2]), x2: Number(f[3]), y2: Number(f[4])}
+}
+SaveRel(key, r) {
+  try IniWrite(Round(r.x1, 4) "|" Round(r.y1, 4) "|" Round(r.x2, 4) "|" Round(r.y2, 4), INI_PATH, "Learned", key)
 }
 
 Num(key) {
@@ -171,6 +217,7 @@ BuildTray() {
   tray.Add("설정 (등록)", ShowSetup)
   tray.Add("화면 글자 읽기 시험", (*) => TestOcr())
   tray.Add("흐름 연결 시험", TestFlow)
+  tray.Add("화면 요소 확인 (UIA 시험)", (*) => RunUiaCheck())
   tray.Add("연습 모드 (메모장)", TogglePractice)
   tray.Add()
   tray.Add("사용법 열기", (*) => OpenReadme())
@@ -369,6 +416,34 @@ OpenReadme() {
   try Run('notepad.exe "' path '"')
 }
 
+; 화면 요소 확인 (UIA 시험): 따로 된 작은 프로그램(uia-check.ahk)을 엶. OCS가 화면 글자를 윈도우 접근성으로 알려 주는지 알아봄
+RunUiaCheck() {
+  path := A_ScriptDir "\uia-check.ahk"
+  if !FileExist(path) {
+    MsgBox "uia-check.ahk 파일이 도우미와 같은 폴더에 없어요.", APP_NAME, MB_INFO | MB_TOP
+    return
+  }
+  try {
+    Run('"' A_AhkPath '" "' path '"')
+  } catch as e {
+    MsgBox "화면 요소 확인을 열지 못했어요: " e.Message, APP_NAME, MB_WARN | MB_TOP
+  }
+}
+
+; 창에서 화면에 보이는 부분 {x, y, w, h}와 창 왼쪽 위 {ox, oy} (최대화 창은 테두리가 화면 밖으로 조금 나감)
+WinBox(hwnd) {
+  WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+  vx := SysGet(76), vy := SysGet(77), vw := SysGet(78), vh := SysGet(79)
+  x1 := Max(x, vx), y1 := Max(y, vy), x2 := Min(x + w, vx + vw), y2 := Min(y + h, vy + vh)
+  return {x: x1, y: y1, w: x2 - x1, h: y2 - y1, ox: x, oy: y}
+}
+
+; 마우스가 그 네모에서 떨어져 있는지 (마우스가 올라가 있으면 강조된 모양이 찍힐 수 있어 그림으로 기억하지 않음)
+MouseFar(x, y, w, h, gap := 60) {
+  MouseGetPos &mx, &my
+  return mx < x - gap || mx > x + w + gap || my < y - gap || my > y + h + gap
+}
+
 ; =====================================================================
 ; 화면 글자 인식 (OCR)
 ; =====================================================================
@@ -378,13 +453,11 @@ OpenReadme() {
 ;   wx·wy·ww·wh = 창(화면에 보이는 부분), x·y·w·h = 실제로 읽은 부분
 class OcsScreen {
   __New(hwnd, rel := "") {
-    WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
-    ; 최대화 창은 테두리가 화면 밖으로 조금 나가므로 화면 안쪽만
-    vx := SysGet(76), vy := SysGet(77), vw := SysGet(78), vh := SysGet(79)
-    x1 := Max(x, vx), y1 := Max(y, vy), x2 := Min(x + w, vx + vw), y2 := Min(y + h, vy + vh)
-    if x2 - x1 < 40 || y2 - y1 < 40
+    b := WinBox(hwnd)
+    if b.w < 40 || b.h < 40
       throw Error("OCS 창이 화면에 보이지 않아요.")
-    this.hwnd := hwnd, this.wx := x1, this.wy := y1, this.ww := x2 - x1, this.wh := y2 - y1
+    x1 := b.x, y1 := b.y, x2 := b.x + b.w, y2 := b.y + b.h
+    this.hwnd := hwnd, this.wx := x1, this.wy := y1, this.ww := b.w, this.wh := b.h
     this.x := x1, this.y := y1, this.w := x2 - x1, this.h := y2 - y1
     if IsObject(rel) {
       cx1 := x1 + Round(this.ww * Max(0, rel.x1)), cy1 := y1 + Round(this.wh * Max(0, rel.y1))
@@ -464,31 +537,38 @@ PatientIdFrom(scr) {
   return ""
 }
 
-; 환자번호를 빨리 읽기: 먼저 창 위쪽 띠(패널 제목이 있는 곳, 지난번에 번호가 보인 높이)만 읽고, 없으면 창 전체
+; 환자번호를 빨리 읽기: 먼저 지난번에 번호가 보인 좁은 띠만 읽고(처음에는 창 위쪽), 없으면 창 전체
 ReadPatientId(hwnd, bandOnly := false) {
-  global gIdBand
-  id := PatientIdFrom(OcsScreen(hwnd, {x1: 0, y1: gIdBand.y1, x2: 1, y2: gIdBand.y2}))
+  id := PatientIdFrom(OcsScreen(hwnd, gIdBand))
   if id != "" || bandOnly
     return id
   full := OcsScreen(hwnd)
   id := PatientIdFrom(full)
-  if id = ""
-    return ""
-  ; 번호가 보인 높이를 기억해 두고 다음부터는 그 띠만 읽음
-  y1 := 1, y2 := 0
+  if id != ""
+    LearnIdBand(full, id)
+  return id
+}
+
+; 번호가 보인 곳들을 둘러싼 띠를 기억 (위아래는 글자 높이 두 배, 좌우는 이름 길이가 달라도 들어오도록 넉넉히)
+LearnIdBand(full, id) {
+  global gIdBand
+  x1 := 1000000000, y1 := 1000000000, x2 := -1000000000, y2 := -1000000000, hmax := 0
   for v in [1, 2] {
     for w in full.Words(v) {
       if DigitsOf(w.text) != id
         continue
-      ry := (w.cy - full.wy) / full.wh
-      y1 := Min(y1, ry), y2 := Max(y2, ry)
+      x1 := Min(x1, w.x), y1 := Min(y1, w.y), x2 := Max(x2, w.x + w.w), y2 := Max(y2, w.y + w.h), hmax := Max(hmax, w.h)
     }
-    if y2 >= y1
+    if hmax
       break
   }
-  if y2 >= y1
-    gIdBand := {y1: Max(0, y1 - 0.05), y2: Min(1, y2 + 0.05)}
-  return id
+  if !hmax
+    return
+  padY := Max(12, hmax * 2), padX := Max(200, hmax * 12)
+  rx1 := Max(0, (x1 - padX - full.wx) / full.ww), ry1 := Max(0, (y1 - padY - full.wy) / full.wh)
+  rx2 := Min(1, (x2 + padX - full.wx) / full.ww), ry2 := Min(1, (y2 + padY - full.wy) / full.wh)
+  gIdBand := {x1: rx1, y1: ry1, x2: rx2, y2: ry2}
+  SaveRel("IdBand", gIdBand)
 }
 
 ; 기준 글자 (설정 창에서 등록): "글자|가로비율|세로비율|dx|dy|px|py"
@@ -523,7 +603,7 @@ FindAnchor(scr, key) {
         best := w, bestD := d
     }
     if IsObject(best)
-      return {x: best.cx + a.dx, y: best.cy + a.dy, word: best}
+      return {x: best.cx + a.dx, y: best.cy + a.dy, word: best, how: "text"}
   }
   return ""
 }
@@ -563,7 +643,7 @@ HeadsFromWords(words) {
       for b in col
         if b.y < top.y
           top := b
-      return [{text: "환자번호", x: top.x, y: top.y - top.h * 2, w: top.w, h: top.h, cx: top.cx, cy: top.cy - top.h * 2}]
+      return [{text: "환자번호", x: top.x, y: top.y - top.h * 2, w: top.w, h: top.h, cx: top.cx, cy: top.cy - top.h * 2, fake: true}]
     }
   }
   return []
@@ -636,18 +716,14 @@ ScrollFind(hwnd, col, heads, id, gx, gy, first) {
   for dir in ["Down", "Up"] {
     prev := first, step := Max(1, Num("ListScroll")), pages := 0
     while ++pages <= Num("ListMaxPages") {
-      MouseMove gx, gy, 0
-      Send "{Wheel" dir " " step "}"
-      AbortableSleep(250)
+      Wheel(hwnd, col, gx, gy, dir, step)
       cur := ListRead(hwnd, col, heads, id)
       if IsObject(cur.found)
         return cur.found
       if cur.sig = prev.sig  ; 더 움직이지 않음 = 목록 끝
         break
       if step > 1 && prev.ids.Length >= 3 && !Overlaps(prev.ids, cur.ids) {
-        MouseMove gx, gy, 0
-        Send "{Wheel" (dir = "Down" ? "Up" : "Down") " " step "}"
-        AbortableSleep(250)
+        Wheel(hwnd, col, gx, gy, dir = "Down" ? "Up" : "Down", step)
         step := Max(1, step // 2)
         cur := ListRead(hwnd, col, heads, id)
         if IsObject(cur.found)
@@ -658,6 +734,261 @@ ScrollFind(hwnd, col, heads, id, gx, gy, first) {
     first := prev
   }
   return ""
+}
+; 휠을 굴리고 명단 칸이 바뀌어 멈출 때까지 (끝이라 안 바뀌면 0.35초)
+Wheel(hwnd, col, gx, gy, dir, step) {
+  watch := ChangeWatch([RelRect(hwnd, col)])
+  MouseMove gx, gy, 0
+  Send "{Wheel" dir " " step "}"
+  WaitSettle(watch, 60, 350, 100)
+}
+
+; =====================================================================
+; 그림 찾기 (가장 빠름) · 화면 변화 감지
+; =====================================================================
+; 사람이 아이콘 모양을 보고 바로 찾듯이, 등록할 때(또는 처음 글자로 찾았을 때) 찍어 둔 작은 그림을 화면에서 찾음
+;   img\<항목>.bmp + 설정 파일 [Images] <항목>=가로|세로|누를 곳 x|y|창 왼쪽 위에서 x|y|창 안 비율 x|y
+;   항목: OrderInput(처방 입력창의 기준 글자), ListButton(Patient List 버튼), ListHead(외래 명단 '환자번호' 머리글)
+
+; 화면 (x, y, w, h)를 복사해 fn(bits, stride)에 넘김. bits는 아래 줄부터(BMP 파일과 같은 순서), fn이 끝나면 지워짐
+WithScreenBits(x, y, w, h, bpp, fn) {
+  bi := Buffer(40, 0)
+  NumPut("UInt", 40, "Int", w, "Int", h, "UShort", 1, "UShort", bpp, bi)
+  sdc := DllCall("GetDC", "Ptr", 0, "Ptr")
+  mdc := DllCall("CreateCompatibleDC", "Ptr", sdc, "Ptr")
+  bits := 0
+  hbm := DllCall("CreateDIBSection", "Ptr", mdc, "Ptr", bi, "UInt", 0, "Ptr*", &bits, "Ptr", 0, "UInt", 0, "Ptr")
+  old := hbm ? DllCall("SelectObject", "Ptr", mdc, "Ptr", hbm, "Ptr") : 0
+  try {
+    if !hbm || !bits
+      throw Error("화면을 복사하지 못했어요.")
+    DllCall("BitBlt", "Ptr", mdc, "Int", 0, "Int", 0, "Int", w, "Int", h, "Ptr", sdc, "Int", x, "Int", y, "UInt", 0x00CC0020)
+    return fn(bits, (w * bpp // 8 + 3) & ~3)
+  } finally {
+    if old
+      DllCall("SelectObject", "Ptr", mdc, "Ptr", old, "Ptr")
+    if hbm
+      DllCall("DeleteObject", "Ptr", hbm)
+    DllCall("DeleteDC", "Ptr", mdc)
+    DllCall("ReleaseDC", "Ptr", 0, "Ptr", sdc)
+  }
+}
+
+; 화면 (x, y, w, h)의 모양 요약값 (조금이라도 바뀌면 달라짐)
+RegionCrc(x, y, w, h) => WithScreenBits(x, y, w, h, 32, (bits, stride) => DllCall("ntdll\RtlComputeCrc32", "UInt", 0, "Ptr", bits, "UInt", stride * h, "UInt"))
+
+; 화면 (x, y, w, h)를 BMP 그림 파일로 저장. 거의 한 가지 색이면(찾을 수 없는 그림) 저장하지 않고 false
+SaveScreenBmp(path, x, y, w, h) {
+  return WithScreenBits(x, y, w, h, 24, SaveBits)
+  SaveBits(bits, stride) {
+    lo := 255, hi := 0
+    loop h {
+      row := bits + (A_Index - 1) * stride
+      loop w * 3 {
+        v := NumGet(row, A_Index - 1, "UChar")
+        lo := Min(lo, v), hi := Max(hi, v)
+      }
+    }
+    if hi - lo < 60
+      return false
+    size := stride * h
+    buf := Buffer(54 + size, 0)
+    NumPut("UShort", 0x4D42, "UInt", 54 + size, "UInt", 0, "UInt", 54, buf, 0)
+    NumPut("UInt", 40, "Int", w, "Int", h, "UShort", 1, "UShort", 24, "UInt", 0, "UInt", size, "Int", 2835, "Int", 2835, buf, 14)
+    DllCall("RtlMoveMemory", "Ptr", buf.Ptr + 54, "Ptr", bits, "UPtr", size)
+    f := FileOpen(path, "w", "CP0")
+    f.RawWrite(buf)
+    f.Close()
+    return true
+  }
+}
+
+ImgPath(key) => IMG_DIR "\" key ".bmp"
+HasImage(key) => IsObject(ImageOf(key))
+
+; 등록된 그림 정보 (없거나 그림 찾기를 끈 경우 "")
+ImageOf(key) {
+  if Cfg["ImageFind"] != "1" || !FileExist(ImgPath(key))
+    return ""
+  f := StrSplit(Trim(IniRead(INI_PATH, "Images", key, "")), "|")
+  if f.Length < 8
+    return ""
+  for v in f
+    if !IsNumber(v)
+      return ""
+  im := {key: key, file: ImgPath(key), w: Integer(f[1]), h: Integer(f[2]), ox: Integer(f[3]), oy: Integer(f[4])}
+  im.px := Integer(f[5]), im.py := Integer(f[6]), im.rx := Number(f[7]), im.ry := Number(f[8])
+  return im
+}
+
+ForgetImage(key) {
+  try IniDelete(INI_PATH, "Images", key)
+  try FileDelete(ImgPath(key))
+}
+
+; 네모 r = [x1, y1, x2, y2](화면 좌표) 안에서 그림이 보이는 곳들 (반 넘게 겹치는 곳은 하나로, 최대 4곳)
+ImageAll(im, r) {
+  hits := [], todo := [r], hw := Max(1, im.w // 2), hh := Max(1, im.h // 2), tries := 0
+  opt := "*" Num("ImageVariation") " " im.file
+  while todo.Length && hits.Length < 4 && ++tries <= 20 {
+    q := todo.RemoveAt(1)
+    x1 := Round(q[1]), y1 := Round(q[2]), x2 := Round(q[3]), y2 := Round(q[4])
+    if x2 - x1 + 1 < im.w || y2 - y1 + 1 < im.h
+      continue
+    try {
+      found := ImageSearch(&fx, &fy, x1, y1, x2, y2, opt)
+    } catch as e {
+      Log("그림 찾기 오류 (" im.key "): " e.Message)
+      return []
+    }
+    if !found
+      continue
+    hits.Push({x: fx, y: fy})
+    ; 남은 자리: 같은 줄 오른쪽, 조금 아래 줄 왼쪽, 그 아래 전체 (찾은 곳과 반 넘게 겹치는 자리는 뺌)
+    todo.Push([fx + hw, fy, x2, Min(y2, fy + hh + im.h - 2)])
+    todo.Push([x1, fy + 1, Min(x2, fx - hw + im.w - 1), Min(y2, fy + hh + im.h - 2)])
+    todo.Push([x1, fy + hh, x2, y2])
+  }
+  return hits
+}
+
+; 그림을 OCS 창에서 찾기: 등록 자리 근처 → 창 안 비율로 본 자리 근처 → 창 전체. 여러 곳이면 등록 자리와 가장 가까운 곳
+; 찾으면 {x, y: 누를 곳, ix, iy: 그림 왼쪽 위, im, how: "image"}. 없거나 비슷한 곳이 너무 많으면 ""
+FindImage(hwnd, key) {
+  im := ImageOf(key)
+  if !IsObject(im)
+    return ""
+  b := WinBox(hwnd)
+  if b.w < 40 || b.h < 40
+    return ""
+  ex := b.ox + im.px, ey := b.oy + im.py
+  fx := b.x + Round(im.rx * b.w), fy := b.y + Round(im.ry * b.h)
+  mx := Round(b.w * 0.15), my := Round(b.h * 0.1)
+  for q in [[ex - 60, ey - 40, ex + im.w + 60, ey + im.h + 40], [fx - mx, fy - my, fx + im.w + mx, fy + im.h + my], [b.x, b.y, b.x + b.w - 1, b.y + b.h - 1]] {
+    hits := ImageAll(im, [Max(q[1], b.x), Max(q[2], b.y), Min(q[3], b.x + b.w - 1), Min(q[4], b.y + b.h - 1)])
+    if !hits.Length
+      continue
+    if hits.Length >= 4
+      return ""
+    best := hits[1], bestD := 1000000000
+    for p in hits {
+      d := Min((p.x - ex) ** 2 + (p.y - ey) ** 2, (p.x - fx) ** 2 + (p.y - fy) ** 2)
+      if d < bestD
+        best := p, bestD := d
+    }
+    return {x: best.x + im.ox, y: best.y + im.oy, ix: best.x, iy: best.y, im: im, how: "image"}
+  }
+  return ""
+}
+
+; 지금 화면의 (x, y, w, h)를 그 항목의 그림으로 기억. (cx, cy) = 누를 곳
+; 창 전체에서 1~3곳에만 보이는 그림만 기억 (너무 흔하면 버림). 돌려주는 값: 보이는 곳 수 (0 = 기억하지 않음)
+LearnImage(hwnd, key, x, y, w, h, cx, cy) {
+  if Cfg["ImageFind"] != "1"
+    return 0
+  x := Round(x), y := Round(y), w := Round(w), h := Round(h)
+  b := WinBox(hwnd)
+  if w < 8 || h < 8 || x < b.x || y < b.y || x + w > b.x + b.w || y + h > b.y + b.h
+    return 0
+  tmp := IMG_DIR "\" key "-new.bmp"
+  try {
+    DirCreate IMG_DIR
+    if !SaveScreenBmp(tmp, x, y, w, h)
+      return 0
+    im := {key: key, file: tmp, w: w, h: h, ox: Round(cx) - x, oy: Round(cy) - y, px: x - b.ox, py: y - b.oy}
+    im.rx := Round((x - b.x) / b.w, 4), im.ry := Round((y - b.y) / b.h, 4)
+    n := ImageAll(im, [b.x, b.y, b.x + b.w - 1, b.y + b.h - 1]).Length
+    if n < 1 || n > 3 {
+      FileDelete tmp
+      return 0
+    }
+    FileMove tmp, ImgPath(key), 1
+    IniWrite(Join([w, h, im.ox, im.oy, im.px, im.py, im.rx, im.ry], "|"), INI_PATH, "Images", key)
+    Log("그림 기억: " key)
+    return n
+  } catch as e {
+    Log("그림 기억 못 함 (" key "): " e.Message)
+    try FileDelete tmp
+    return 0
+  }
+}
+
+; 명단 머리글을 그림으로 찾았을 때 머리글 글자 자리 (글자 인식 결과와 같은 모양)
+HeadOfImage(hit) {
+  x := hit.ix + HEAD_PAD, y := hit.iy + HEAD_PAD, w := hit.im.w - HEAD_PAD * 2, h := hit.im.h - HEAD_PAD * 2
+  return {text: "환자번호", x: x, y: y, w: w, h: h, cx: x + w // 2, cy: y + h // 2}
+}
+; 글자로 찾은 진짜 머리글이면 다음부터 그림으로 바로 찾도록 기억 (기억했으면 0이 아닌 값)
+LearnHead(hwnd, hd) {
+  if !IsObject(hd) || hd.HasOwnProp("fake") || !MouseFar(hd.x - HEAD_PAD, hd.y - HEAD_PAD, hd.w + HEAD_PAD * 2, hd.h + HEAD_PAD * 2, 10)
+    return 0
+  return LearnImage(hwnd, "ListHead", hd.x - HEAD_PAD, hd.y - HEAD_PAD, hd.w + HEAD_PAD * 2, hd.h + HEAD_PAD * 2, hd.cx, hd.cy)
+}
+; 찾은 환자번호 단어 바로 위의 머리글
+HeadAbove(heads, w) {
+  best := ""
+  for hd in heads
+    if hd.cy < w.cy && Abs(w.cx - hd.cx) < Max(hd.w, 60) * 1.5 && (!IsObject(best) || hd.cy > best.cy)
+      best := hd
+  return best
+}
+
+; 화면 변화 감시: 네모들({x, y, w, h}, 화면 좌표)의 모양 요약값을 처음과 비교
+class ChangeWatch {
+  __New(rects) {
+    this.rects := []
+    for r in rects
+      if r.w >= 4 && r.h >= 4
+        this.rects.Push({x: Round(r.x), y: Round(r.y), w: Round(r.w), h: Round(r.h)})
+    this.base := this.Hash()
+  }
+  Hash() {
+    s := ""
+    for r in this.rects {
+      try s .= RegionCrc(r.x, r.y, r.w, r.h) ","
+      catch
+        s .= "?,"
+    }
+    return s
+  }
+}
+
+; 처방 입력창 둘레 (입력창 줄은 뺌: 글자 커서가 깜박여서). 후보 목록이 입력창 아래나 위에 뜨고 닫히는 것을 봄
+InputWatch(hwnd, pt) {
+  b := WinBox(hwnd)
+  x1 := Max(b.x, pt.x - 350), x2 := Min(b.x + b.w, pt.x + 650)
+  up1 := Max(b.y, pt.y - 320), up2 := pt.y - 24
+  dn1 := pt.y + 24, dn2 := Min(b.y + b.h, pt.y + 420)
+  return ChangeWatch([{x: x1, y: up1, w: x2 - x1, h: up2 - up1}, {x: x1, y: dn1, w: x2 - x1, h: dn2 - dn1}])
+}
+; 창 안 비율 네모 → 화면 좌표 네모
+RelRect(hwnd, r) {
+  b := WinBox(hwnd)
+  return {x: b.x + b.w * r.x1, y: b.y + b.h * r.y1, w: b.w * (r.x2 - r.x1), h: b.h * (r.y2 - r.y1)}
+}
+
+; 화면이 바뀐 뒤 stable 밀리초 동안 그대로면 끝 (그래도 최소 minMs는 기다림).
+; 끝내 안 바뀌거나 계속 바뀌면 maxMs까지 기다림(예전의 정해진 기다림과 같음). AdaptiveWait=0 이면 늘 maxMs
+WaitSettle(watch, minMs, maxMs, stable := 0) {
+  if Cfg["AdaptiveWait"] != "1" || !IsObject(watch) {
+    AbortableSleep(maxMs)
+    return maxMs
+  }
+  stable := stable ? stable : Num("StableMs")
+  start := A_TickCount, last := watch.base, changedAt := 0
+  loop {
+    if gAbort
+      throw Error("Esc를 눌러 멈췄어요.")
+    h := watch.Hash()
+    now := A_TickCount
+    if h != last
+      last := h, changedAt := now
+    if changedAt && now - changedAt >= stable && now - start >= minMs
+      return now - start
+    if now - start >= maxMs
+      return now - start
+    Sleep 30
+  }
 }
 
 ; =====================================================================
@@ -793,21 +1124,29 @@ TypeSearch(text) {
 }
 
 ; 처방 입력창 찾기 (그 환자의 첫 처방 전에 한 번. 넣는 동안에는 화면 배치가 그대로이므로 같은 자리를 씀)
-; 등록한 자리 근처만 먼저 읽고(빠름), 없으면 창 전체
+; 그림으로 먼저(가장 빠름) → 기준 글자를 등록 자리 근처만 읽어서 → 창 전체
 FindOrderInput(hwnd) {
+  hit := FindImage(hwnd, "OrderInput")
+  if IsObject(hit)
+    return hit
   a := AnchorOf("OrderInput")
   pt := FindAnchor(OcsScreen(hwnd, {x1: a.rx - 0.15, y1: a.ry - 0.1, x2: a.rx + 0.15, y2: a.ry + 0.1}), "OrderInput")
   if !IsObject(pt)
     pt := FindAnchor(OcsScreen(hwnd), "OrderInput")
   if !IsObject(pt)
     throw Error("처방 입력창을 화면에서 찾지 못했어요 (기준 글자 '" a.text "').`n오더발행 화면이 보이는지, 입력창이 비어 있는지 확인해주세요. 아무것도 넣지 않았어요.")
+  ; 다음부터는 그림으로 바로 찾도록 기준 글자 모양을 기억 (마우스가 올라가 있지 않을 때만)
+  w := pt.word
+  if MouseFar(w.x - 3, w.y - 3, w.w + 6, w.h + 6)
+    LearnImage(hwnd, "OrderInput", w.x - 3, w.y - 3, w.w + 6, w.h + 6, pt.x, pt.y)
   return pt
 }
 
 ; 처방을 한 줄씩 입력: 입력창 클릭 → 검색어 → (Enter) → ↓ N번 → Enter
 ; 입력창을 지우려고 Ctrl+A나 Delete를 쓰지 않는다 (OCS에서 Delete는 D/C).
+; 기다리는 시간: 후보 목록이 뜨고(검색어 뒤) 닫히는(Enter 뒤) 화면 변화를 보고, 멈추면 바로 다음으로 (WaitSettle)
 EnterOrders(hwnd, orders, pt) {
-  done := 0
+  done := 0, t0 := A_TickCount
   MouseGetPos &mx, &my
   try {
     for o in orders {
@@ -824,12 +1163,14 @@ EnterOrders(hwnd, orders, pt) {
         CheckCaretNear(pt)
       StepCheck(hwnd)
       ImeOff(hwnd)
+      watch := InputWatch(hwnd, pt)
       TypeSearch(o.text)
-      AbortableSleep(Num("WaitAfterType"))
+      WaitSettle(watch, Num("WaitMinAfterType"), Num("WaitAfterType"))
       if Cfg["EnterToSearch"] = "1" {
         StepCheck(hwnd)
+        watch := InputWatch(hwnd, pt)
         Send "{Enter}"
-        AbortableSleep(Num("WaitAfterSearch"))
+        WaitSettle(watch, Num("WaitMinAfterType"), Num("WaitAfterSearch"))
       }
       loop o.down {
         StepCheck(hwnd)
@@ -837,10 +1178,11 @@ EnterOrders(hwnd, orders, pt) {
         AbortableSleep(Num("DownDelay"))
       }
       StepCheck(hwnd)
+      watch := InputWatch(hwnd, pt)
       Send "{Enter}"
       done++
       Log("  처방 입력: " o.label)
-      AbortableSleep(Num("WaitAfterEnter"))
+      WaitSettle(watch, Num("WaitMinAfterEnter"), Num("WaitAfterEnter"))
       if !WinActive("ahk_id " hwnd)
         throw Error("'" o.label "'을 넣은 뒤 새 창이 떴어요. 창 내용을 확인해주세요.")
     }
@@ -849,6 +1191,8 @@ EnterOrders(hwnd, orders, pt) {
     return {count: done, error: e.Message}
   }
   MouseMove mx, my, 0
+  if done && !gPractice
+    Log("  입력 " done "건 " Round((A_TickCount - t0) / 1000, 1) "초")
   return {count: done, error: ""}
 }
 
@@ -861,26 +1205,30 @@ OpenFromList(hwnd, id) {
     return
   }
   t0 := A_TickCount
-  heads := [], col := ""
-  ; 명단이 이미 열려 있으면 지난번 '환자번호' 칸 자리만 읽어 바로 씀 (빠름)
-  if IsObject(gListCol) {
+  heads := [], byImage := false
+  ; 명단이 이미 열려 있는지: 머리글 그림(가장 빠름) → 지난번 '환자번호' 칸 자리만 글자로 읽기
+  hit := FindImage(hwnd, "ListHead")
+  if IsObject(hit)
+    heads := [HeadOfImage(hit)], byImage := true
+  else if IsObject(gListCol)
     heads := HeadsIn(OcsScreen(hwnd, gListCol))
-    if heads.Length
-      col := gListCol
-  }
-  if !heads.Length {
-    full := OcsScreen(hwnd)
+  full := OcsScreen(hwnd)  ; 창 전체 (글자는 필요할 때만 읽음)
+  ; 머리글 그림을 아직 모르면 창 전체를 읽어 명단이 열려 있는지 확인 (처음 한 번만 느림)
+  if !heads.Length && !HasImage("ListHead")
     heads := ListHeads(full)
-    if !heads.Length {
-      ; 명단이 닫혀 있음 (다음 환자로 넘어갈 때는 보통 진료 화면) → Patient List 버튼을 눌러 엶
-      if !ClickListButton(hwnd, full)
-        throw Error("외래 명단이 열려 있지 않고, '외래 명단 여는 버튼'(Patient List)을 누르지 못했어요.`n트레이 아이콘 > 설정에서 '외래 명단 여는 버튼'을 등록해주세요 (그 버튼 위에 마우스를 올리고 F8). 처방은 넣지 않았어요.")
-      heads := WaitListOpen(hwnd, &full)
-      if !heads.Length
-        throw Error("Patient List 버튼을 눌렀는데 외래 명단이 보이지 않아요 (환자번호 칸을 읽지 못함). 처방은 넣지 않았어요.`n명단이 열렸다면 화면 글자 읽기 시험에서 파랑 네모가 잡히는지 확인해주세요.")
-    }
-    col := ListColumn(full, heads)
+  if !heads.Length {
+    ; 명단이 닫혀 있음 (다음 환자로 넘어갈 때는 보통 진료 화면) → Patient List 버튼을 눌러 엶
+    watch := ChangeWatch([{x: full.wx, y: full.wy, w: full.ww, h: full.wh}])
+    if !ClickListButton(hwnd, full)
+      throw Error("외래 명단이 열려 있지 않고, '외래 명단 여는 버튼'(Patient List)을 누르지 못했어요.`n트레이 아이콘 > 설정에서 '외래 명단 여는 버튼'을 등록해주세요 (그 버튼 위에 마우스를 올리고 F8). 처방은 넣지 않았어요.")
+    heads := WaitListOpen(hwnd, watch, &byImage)
+    if !heads.Length
+      throw Error("Patient List 버튼을 눌렀는데 외래 명단이 보이지 않아요 (환자번호 칸을 읽지 못함). 처방은 넣지 않았어요.`n명단이 열렸다면 화면 글자 읽기 시험에서 파랑 네모가 잡히는지 확인해주세요.")
+  }
+  col := ListColumn(full, heads)
+  if !IsObject(gListCol) || Abs(col.x1 - gListCol.x1) + Abs(col.y1 - gListCol.y1) + Abs(col.x2 - gListCol.x2) > 0.01 {
     gListCol := col
+    SaveRel("ListCol", col)
   }
   ; 휠은 명단 줄 위(머리글 조금 아래)에서 굴림
   gx := heads[1].cx, gy := heads[1].cy + heads[1].h * 3
@@ -888,27 +1236,43 @@ OpenFromList(hwnd, id) {
   w := IsObject(cur.found) ? cur.found : ScrollFind(hwnd, col, heads, id, gx, gy, cur)
   if !IsObject(w)
     throw Error("OCS 외래 명단에서 " id " 환자를 찾지 못했어요 (명단 위아래 끝까지 찾아봄). 처방은 넣지 않았어요.`n명단 조건(날짜·진료의)이 맞는지 확인해주세요.")
-  Log("  명단에서 찾음 " Round((A_TickCount - t0) / 1000, 1) "초")
+  if !byImage
+    LearnHead(hwnd, HeadAbove(heads, w))
+  Log("  명단에서 찾음 " Round((A_TickCount - t0) / 1000, 1) "초" (byImage ? " (머리글 그림)" : ""))
   Click w.cx " " w.cy " 2"
 }
 
 HeadsIn(scr) => HeadsFromWords(scr.Words(1))
 
-; 버튼을 누른 뒤 명단이 뜰 때까지 확인 (최대 ListOpenWait + 3초). full에 마지막으로 읽은 화면
-WaitListOpen(hwnd, &full) {
-  AbortableSleep(500)
-  deadline := A_TickCount + Num("ListOpenWait") + 3000
+; 버튼을 누른 뒤 명단이 뜰 때까지 확인 (최대 ListOpenWait + 3초)
+; 머리글 그림을 알면 그림으로 자주 확인(빠름), 모르면 화면이 바뀌어 멈춘 뒤 글자로 읽음
+WaitListOpen(hwnd, watch, &byImage) {
+  start := A_TickCount, deadline := start + Num("ListOpenWait") + 3000
+  if HasImage("ListHead") {
+    while A_TickCount - start < Num("ListOpenWait") + 1000 {
+      hit := FindImage(hwnd, "ListHead")
+      if IsObject(hit) {
+        byImage := true
+        return [HeadOfImage(hit)]
+      }
+      AbortableSleep(80)
+    }
+  } else {
+    WaitSettle(watch, 200, Num("ListOpenWait"))
+  }
   loop {
-    full := OcsScreen(hwnd)
-    heads := ListHeads(full)
+    heads := ListHeads(OcsScreen(hwnd))
     if heads.Length || A_TickCount > deadline
       return heads
     AbortableSleep(300)
   }
 }
 
-; '외래 명단 여는 버튼'(Patient List)의 누를 곳: 기준 글자(등록 자리 근처 → 창 전체) → 못 읽으면 창 왼쪽 위 기준 위치
+; '외래 명단 여는 버튼'(Patient List)의 누를 곳: 그림(아이콘 모양) → 기준 글자(등록 자리 근처 → 창 전체) → 창 왼쪽 위 기준 위치
 ListButtonPoint(hwnd, full := "") {
+  hit := FindImage(hwnd, "ListButton")
+  if IsObject(hit)
+    return hit
   if !HasAnchor("ListButton")
     return ""
   a := AnchorOf("ListButton")
@@ -922,7 +1286,7 @@ ListButtonPoint(hwnd, full := "") {
   if a.px = ""
     return ""
   WinGetPos(&wx, &wy, , , "ahk_id " hwnd)
-  return {x: wx + a.px, y: wy + a.py, word: ""}
+  return {x: wx + a.px, y: wy + a.py, word: "", how: "pos"}
 }
 ClickListButton(hwnd, full := "") {
   pt := ListButtonPoint(hwnd, full)
@@ -934,16 +1298,17 @@ ClickListButton(hwnd, full := "") {
 
 ; 명단에서 연 뒤 그 환자 화면이 맞는지: 화면이 바뀌는 대로 바로 확인 (최대 ChartOpenWait + 3초)
 WaitPatientScreen(hwnd, id) {
-  AbortableSleep(400)
-  deadline := A_TickCount + Num("ChartOpenWait") + 3000
+  AbortableSleep(250)
+  start := A_TickCount, deadline := start + Num("ChartOpenWait") + 3000
   no := ""
   while A_TickCount < deadline {
     if WinActive("ahk_id " hwnd) {
-      no := ReadPatientId(hwnd, true)  ; 기다리는 동안은 위쪽 띠만 (빠름)
+      ; 처음에는 번호가 보이던 띠만(빠름), 그래도 안 보이면 창 전체도 (번호 자리가 바뀌었을 수 있음)
+      no := ReadPatientId(hwnd, A_TickCount - start < Num("ChartOpenWait"))
       if SameId(no, id)
         return
     }
-    AbortableSleep(300)
+    AbortableSleep(150)
   }
   if !WinActive("ahk_id " hwnd)
     throw Error("환자를 연 뒤 OCS 메인 화면이 앞에 오지 않았어요. 떠 있는 창을 확인해주세요. 처방은 넣지 않았어요.")
@@ -1306,6 +1671,7 @@ BatchNext() {
       return
     }
     ShowTip(item.name " 환자를 명단에서 찾는 중… 마우스·키보드를 만지지 마세요 (멈춤: Esc)")
+    BatchGuiVisible(false)  ; 명단 모드 창이 OCS 화면을 가리지 않도록 일하는 동안 숨김
     OpenFromList(hwnd, item.id)
     pt := ""
     if !gPractice {
@@ -1317,6 +1683,7 @@ BatchNext() {
     res := EnterOrders(hwnd, r.orders, pt)
     out := FinishPatient(hwnd, r, res)
     ClearTip()
+    BatchGuiVisible(true)
     if res.error = "" {
       SetItem(idx, "입력 " res.count "건", true)
       BatchSetStatus(out.msg NextText())
@@ -1333,11 +1700,24 @@ BatchNext() {
       SetItem(idx, "열기 실패")
     Log("오류(명단) " item.id ": " e.Message)
     BatchSetStatus(e.Message "`n`n" Cfg["HotkeyRun"] "로 다시 시도하거나 [이 환자 건너뛰기]를 눌러주세요.")
+    BatchGuiVisible(true)
     MsgBox e.Message, APP_NAME, MB_WARN | MB_TOP
   } finally {
+    BatchGuiVisible(true)
     Sleep 200
     A_Clipboard := saved
     gRunning := false
+  }
+}
+
+BatchGuiVisible(show) {
+  if !Batch.gui
+    return
+  try {
+    if show
+      Batch.gui.Show("NoActivate")
+    else
+      Batch.gui.Hide()
   }
 }
 
@@ -1402,38 +1782,100 @@ TestOcr() {
     if SetupGui
       SetupGui.Hide()
     ActivateOcs(main)
-    t0 := A_TickCount
+    ; 1) 실제로 쓰는 빠른 방법: 그림 찾기, 환자번호가 보이던 좁은 띠
+    t := A_TickCount
+    imgIn := FindImage(main, "OrderInput"), imgBtn := FindImage(main, "ListButton"), imgHead := FindImage(main, "ListHead")
+    tImg := A_TickCount - t
+    t := A_TickCount
+    fastNo := ReadPatientId(main, true)
+    tBand := A_TickCount - t
+    ; 2) 화면 전체 글자 읽기 (확인용, 느림 · 그림으로 못 찾을 때만 씀)
+    t := A_TickCount
     scr := OcsScreen(main)
     no := PatientIdFrom(scr)
-    pt := HasAnchor("OrderInput") ? FindAnchor(scr, "OrderInput") : ""
-    btn := ListButtonPoint(main, scr)
+    txtIn := HasAnchor("OrderInput") ? FindAnchor(scr, "OrderInput") : ""
+    a := HasAnchor("ListButton") ? AnchorOf("ListButton") : ""
+    txtBtn := IsObject(a) && a.text != "" ? FindAnchor(scr, "ListButton") : ""
     heads := ListHeads(scr)
-    listCount := heads.Length ? ListIds(scr, heads, 1).Length : 0
-    sec := Round((A_TickCount - t0) / 1000, 1)
+    listHits := heads.Length ? ListIds(scr, heads, 1) : []
+    tFull := A_TickCount - t
+
+    ; 이번에 찾은 것으로 배워 두기 (다음부터 빠르게)
+    learned := []
+    if no != ""
+      LearnIdBand(scr, no)
+    if !IsObject(imgIn) && IsObject(txtIn) {
+      w := txtIn.word
+      if MouseFar(w.x - 3, w.y - 3, w.w + 6, w.h + 6) && LearnImage(main, "OrderInput", w.x - 3, w.y - 3, w.w + 6, w.h + 6, txtIn.x, txtIn.y)
+        learned.Push("처방 입력창")
+    }
+    if !IsObject(imgHead) && listHits.Length >= 2 {
+      best := "", bestN := 1
+      for hd in heads {
+        n := ListIds(scr, [hd], 1).Length
+        if !hd.HasOwnProp("fake") && n > bestN
+          best := hd, bestN := n
+      }
+      if LearnHead(main, best)
+        learned.Push("외래 명단 머리글")
+    }
+
     ; 찾은 곳 표시: 환자번호(초록), 처방 입력창·명단 버튼(빨강), 명단 환자번호(파랑)
     if no != ""
       for v in [1, 2]
         for w in scr.Words(v)
           if DigitsOf(w.text) = no
             ShowBox(w.x, w.y, w.w, w.h, 6000, "Lime")
-    if IsObject(pt)
-      ShowBox(pt.x - 12, pt.y - 8, 24, 16, 6000, "Red")
-    if IsObject(btn)
-      ShowBox(btn.x - 12, btn.y - 8, 24, 16, 6000, "Red")
-    if heads.Length
-      for x in ListIds(scr, heads, 1)
-        ShowBox(x.word.x, x.word.y, x.word.w, x.word.h, 6000, "Blue")
-    msg := "화면 글자를 읽는 데 " sec "초 걸렸어요 (찾은 곳을 6초 동안 네모로 표시).`n`n"
-    msg .= "환자번호 (초록): " (no != "" ? no : "읽지 못함 — 환자 화면이 열려 있는지 확인") "`n"
-    msg .= "처방 입력창 (빨강): " (!HasAnchor("OrderInput") ? "아직 등록 안 함" : IsObject(pt) ? "찾음" : "못 찾음 (입력창이 비어 있는지 확인)") "`n"
-    msg .= "외래 명단 여는 버튼 (빨강): " (!HasAnchor("ListButton") ? "등록 안 함" : !IsObject(btn) ? "못 찾음" : btn.word = "" ? "글자를 못 읽어 등록한 위치로 누름" : "찾음") "`n"
-    msg .= "외래 명단 (파랑): " (heads.Length ? "열려 있음 · 환자번호 " listCount "개 읽음" : "열려 있지 않음 (명단을 연 상태에서도 한 번 시험해 보세요)") "`n`n"
-    msg .= "네모가 엉뚱한 곳에 있으면 그 항목을 다시 등록하거나, 설정 파일의 OcrScale(확대 배율)을 3으로 올려 보세요."
+    for hit in [imgIn, imgBtn, imgHead]
+      if IsObject(hit)
+        ShowBox(hit.ix, hit.iy, hit.im.w, hit.im.h, 6000, hit.im.key = "ListHead" ? "Blue" : "Red")
+    if !IsObject(imgIn) && IsObject(txtIn)
+      ShowBox(txtIn.x - 12, txtIn.y - 8, 24, 16, 6000, "Red")
+    btnPos := IsObject(a) && a.px != "" ? a : ""
+    if !IsObject(imgBtn) && IsObject(txtBtn)
+      ShowBox(txtBtn.x - 12, txtBtn.y - 8, 24, 16, 6000, "Red")
+    else if !IsObject(imgBtn) && IsObject(btnPos) {
+      WinGetPos(&wx, &wy, , , "ahk_id " main)
+      ShowBox(wx + a.px - 12, wy + a.py - 8, 24, 16, 6000, "Red")
+    }
+    for x in listHits
+      ShowBox(x.word.x, x.word.y, x.word.w, x.word.h, 6000, "Blue")
+
+    msg := "실제로 쓰는 빠른 방법 (찾은 곳을 6초 동안 네모로 표시)`n"
+    msg .= "  · 환자번호: " (fastNo != "" ? fastNo " — 좁은 띠만 읽어 " Sec(tBand) "초" : "좁은 띠에서 못 읽음 (아래처럼 창 전체를 읽어 찾고, 그 자리를 기억해요)") "`n"
+    msg .= "  · 그림 찾기 3가지 모두 " Sec(tImg) "초`n"
+    msg .= "      처방 입력창: " ImgState("OrderInput", imgIn) "`n"
+    msg .= "      Patient List 버튼: " ImgState("ListButton", imgBtn) "`n"
+    msg .= "      외래 명단 머리글: " ImgState("ListHead", imgHead) "`n`n"
+    msg .= "화면 전체 글자 읽기 " Sec(tFull) "초 (확인용 · 그림으로 못 찾을 때만 씀)`n"
+    msg .= "  · 환자번호 (초록): " (no != "" ? no : "읽지 못함 — 환자 화면이 열려 있는지 확인") "`n"
+    msg .= "  · 처방 입력창 (빨강): " (!HasAnchor("OrderInput") ? "아직 등록 안 함" : IsObject(txtIn) ? "글자로 찾음" : "글자로 못 찾음 (입력창이 비어 있는지 확인)") "`n"
+    msg .= "  · Patient List 버튼 (빨강): " (!IsObject(a) ? "등록 안 함" : IsObject(txtBtn) ? "글자로 찾음" : IsObject(btnPos) ? "글자는 못 읽어 등록한 위치로 누름" : "못 찾음") "`n"
+    msg .= "  · 외래 명단 (파랑): " (heads.Length ? "열려 있음 · 환자번호 " listHits.Length "개 읽음" : "열려 있지 않음 (명단을 연 상태에서도 한 번 시험해 보세요)") "`n"
+    if learned.Length
+      msg .= "`n이번에 그림으로 기억했어요: " Join(learned, ", ") " (다음부터 빨리 찾아요)`n"
+    msg .= "`n네모가 엉뚱한 곳에 있으면 그 항목을 다시 등록하세요. 글자를 잘 못 읽으면 설정 파일의 OcrScale을 3으로 올려 보세요."
     MsgBox msg, APP_NAME " · 화면 글자 읽기 시험", MB_INFO | MB_TOP
   } catch as e {
     MsgBox e.Message, APP_NAME, MB_WARN | MB_TOP
   } finally {
     gRunning := false
+  }
+}
+
+Sec(ms) => Round(ms / 1000, 2)
+
+ImgState(key, hit) {
+  if IsObject(hit)
+    return "그림으로 찾음"
+  if HasImage(key)
+    return "그림은 있는데 지금 화면에서 못 찾음 (가려졌거나 모양이 바뀜 → 글자로 찾아요)"
+  if Cfg["ImageFind"] != "1"
+    return "그림 찾기 꺼짐 (설정 파일 ImageFind=0)"
+  switch key {
+    case "OrderInput": return "그림 없음 (글자로 한 번 찾으면 기억해요)"
+    case "ListButton": return "그림 없음 (설정에서 이 버튼을 다시 등록하면 모양을 찍어 둬요)"
+    default: return "그림 없음 (명단이 열린 화면에서 이 시험을 하거나 명단 모드로 한 번 찾으면 기억해요)"
   }
 }
 
@@ -1446,7 +1888,7 @@ ShowSetup(*) {
     g := Gui("+AlwaysOnTop", APP_NAME " · 설정")
     g.SetFont("s10", "Malgun Gothic")
     g.AddText("w640", "항목을 고르고 [선택 항목 등록]을 누르세요. 서버 주소는 직접 적고, 나머지는 이 창이 잠시 숨겨진 뒤 안내대로 마우스를 올리고 F8을 누르세요 (취소: Esc).`n"
-      . "처방 입력창·명단 버튼은 위치가 아니라 그 근처 글자를 기억해요. 창을 옮기거나 칸 크기가 바뀌어도 그 글자를 찾아 누릅니다.`n"
+      . "처방 입력창·명단 버튼은 위치가 아니라 모양(작은 그림)과 근처 글자를 기억해요. 창을 옮기거나 칸 크기가 바뀌어도 찾아 누릅니다.`n"
       . "등록한 뒤 [화면 글자 읽기 시험]으로 제대로 찾는지 확인하세요.")
     lv := g.AddListView("w640 r6 -Multi NoSortHdr", ["항목", "등록된 값"])
     lv.OnEvent("DoubleClick", (*) => StartRecord())
@@ -1473,6 +1915,8 @@ RefreshSetup() {
         v := Cfg["OcsExe"] = "" ? "" : Cfg["OcsExe"]
       default:
         v := !HasAnchor(it.key) ? "" : StrSplit(Cfg[it.key], "|")[1] = "" ? "위치로 등록 (창 왼쪽 위 기준)" : "기준 글자 '" StrSplit(Cfg[it.key], "|")[1] "'"
+        if v != "" && HasImage(it.key)
+          v .= " + 모양(그림)"
     }
     SetupLv.Add("", it.label, v = "" ? "— 미등록" : v)
   }
@@ -1516,6 +1960,13 @@ AskServerUrl() {
     TestFlow()
 }
 
+; 마우스를 위(또는 아래)로 300픽셀 치우고 잠깐 기다림 (마우스가 올라가 있던 곳의 강조·풍선 도움말이 사라지도록)
+AwayMouse(mx, my) {
+  vy := SysGet(77), vh := SysGet(79)
+  MouseMove mx, my + 300 < vy + vh - 20 ? my + 300 : my - 300, 0
+  Sleep 300
+}
+
 CancelRecord(*) {
   global gRecording
   gRecording := ""
@@ -1544,33 +1995,54 @@ RecordNow(*) {
       main := MainOcsWindow()
       if !main
         throw Error("OCS 창을 찾지 못했어요.")
-      ShowTip("화면 글자 읽는 중…")
-      scr := OcsScreen(main)
-      ; 마우스와 가장 가까운 글자(두 글자 이상, 숫자만 있는 것은 뺌)를 기준으로
-      best := "", bestD := 1000000000
-      for v in [1, 2] {
-        for w in scr.Words(v) {
-          if StrLen(w.text) < 2 || RegExMatch(w.text, "^[0-9\s\[\]\(\)\.,:;/|_-]+$")
-            continue
-          ddx := Max(w.x - mx, 0, mx - (w.x + w.w)), ddy := Max(w.y - my, 0, my - (w.y + w.h))
-          d := ddx * ddx + ddy * ddy
-          if d < bestD
-            best := w, bestD := d
+      isButton := it.key = "ListButton"
+      ForgetImage(it.key)
+      ; 마우스를 잠깐 치워 둠 (버튼이 마우스에 반응해 강조되거나 풍선 도움말이 뜬 모양이 찍히지 않도록)
+      AwayMouse(mx, my)
+      try {
+        ShowTip("화면 글자 읽는 중…")
+        scr := OcsScreen(main)
+        ; 마우스와 가장 가까운 글자(두 글자 이상, 숫자만 있는 것은 뺌)를 기준으로
+        best := "", bestD := 1000000000
+        for v in [1, 2] {
+          for w in scr.Words(v) {
+            if StrLen(w.text) < 2 || RegExMatch(w.text, "^[0-9\s\[\]\(\)\.,:;/|_-]+$")
+              continue
+            ddx := Max(w.x - mx, 0, mx - (w.x + w.w)), ddy := Max(w.y - my, 0, my - (w.y + w.h))
+            d := ddx * ddx + ddy * ddy
+            if d < bestD
+              best := w, bestD := d
+          }
+          if IsObject(best) && bestD = 0
+            break
         }
-        if IsObject(best) && bestD = 0
-          break
+        ClearTip()
+        near := IsObject(best) && bestD <= (isButton ? 40 * 40 : 150 * 150)
+        ; 모양도 그림으로 기억 (가장 빨리 찾는 방법): 버튼은 마우스 둘레 40×40(아이콘), 입력창은 기준 글자 둘레
+        imgN := 0
+        if isButton {
+          b := WinBox(main)
+          ix := Max(b.x, Min(mx - 20, b.x + b.w - 40)), iy := Max(b.y, Min(my - 20, b.y + b.h - 40))
+          imgN := LearnImage(main, it.key, ix, iy, 40, 40, mx, my)
+        } else if near {
+          imgN := LearnImage(main, it.key, best.x - 3, best.y - 3, best.w + 6, best.h + 6, mx, my)
+        }
+      } finally {
+        MouseMove mx, my, 0
       }
-      ClearTip()
+      if imgN
+        imgNote := "`n`n모양도 그림으로 기억했어요 (가장 빨리 찾는 방법)." (imgN > 1 ? " 비슷한 모양이 " imgN "곳 있어 등록한 자리와 가장 가까운 곳을 눌러요." : "")
+      else
+        imgNote := "`n`n(모양을 그림으로는 기억하지 못했어요: 둘레가 거의 한 가지 색이거나 비슷한 모양이 너무 많음. 글자·위치로 찾아요.)"
       ; 창 왼쪽 위에서 마우스까지 거리 (명단 버튼은 창 가장자리 메뉴에 붙어 있어 글자를 못 읽으면 이 위치로 누름)
       WinGetPos(&wx, &wy, , , "ahk_id " main)
       pos := (mx - wx) "|" (my - wy)
-      isButton := it.key = "ListButton"
-      if !IsObject(best) || bestD > (isButton ? 40 * 40 : 150 * 150) {
+      if !near {
         if !isButton
           throw Error("마우스 근처에서 글자를 찾지 못했어요. 글자(예: '입력창') 위나 바로 옆에 마우스를 올리고 다시 등록해주세요.")
         IniWrite("|0|0|0|0|" pos, INI_PATH, "Anchors", it.key)
         ShowBox(mx - 12, my - 12, 24, 24, 4000, "Red")
-        note := "'" it.label "'은(는) 글자를 읽지 못해 위치로 등록했어요 (빨간 네모).`n창 왼쪽 위에서의 거리로 기억하므로, 창을 옮겨도 따라갑니다. 창 왼쪽 메뉴 줄의 배치가 바뀌면 다시 등록해주세요."
+        note := "'" it.label "'은(는) 글자를 읽지 못해 위치로 등록했어요 (빨간 네모).`n창 왼쪽 위에서의 거리로 기억하므로, 창을 옮겨도 따라갑니다. 창 왼쪽 메뉴 줄의 배치가 바뀌면 다시 등록해주세요." imgNote
       } else {
         rx := Round((best.cx - scr.wx) / scr.ww, 4), ry := Round((best.cy - scr.wy) / scr.wh, 4)
         IniWrite(StrReplace(best.text, "|") "|" rx "|" ry "|" (mx - best.cx) "|" (my - best.cy) (isButton ? "|" pos : ""), INI_PATH, "Anchors", it.key)
@@ -1580,6 +2052,7 @@ RecordNow(*) {
           note .= "`n글자를 못 읽을 때는 창 왼쪽 위에서의 위치로 누릅니다."
         else if Sqrt(bestD) > 40
           note .= "`n`n⚠ 기준 글자가 마우스에서 조금 떨어져 있어요. 더 가까운 글자가 있으면 그 위에서 다시 등록해 보세요."
+        note .= imgNote
       }
     }
     LoadConfig()
