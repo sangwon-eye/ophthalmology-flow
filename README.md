@@ -13,5 +13,6 @@
 - `CLAUDE.md` : 작업 방식·정해진 결정 기록 (Claude가 작업 전에 읽음)
 - `src/main.jsx` : 서버 저장소 연결, 연결 끊김/새 버전 알림
 - `server.js` : 공유 서버 (Node.js 기본 기능만 사용, 데이터는 `data/keys/`)
-- `scripts/` : 서버 켜기(창 없이)·끄기·상태 확인 도구
+- `scripts/` : 서버 켜기(창 없이)·끄기·상태 확인 도구, OCS 처방 도우미용 서버 주소(`ocs-api.js`)
+- `ocs-helper/` : OCS 처방 도우미 (의사 PC에서 OCS에 검사 처방을 넣는 AutoHotkey 프로그램, [사용법](ocs-helper/README.md))
 - `서버설정.txt` : 공유폴더 백업 위치, 포트

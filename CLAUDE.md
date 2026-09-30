@@ -51,6 +51,9 @@
 - `src/ui/common.jsx` 공용 카드·버튼·창, `src/views/*` 화면별(시력방·검사실=StationView, 진료실, 처치실, 관리자, 설정, 환자용, 메인)
 - `src/App.jsx` 최상위(동기화·화면 전환), `src/main.jsx` 서버 연결·새 버전 알림
 - `tests/`: Playwright 시나리오(`tests/README.md`), `tests/seed.cjs` 가상 명단
+- OCS 처방 도우미: `ocs-helper/`(의사 PC의 AutoHotkey v2 프로그램·README) ↔ 서버 `/api/ocs/*`(`scripts/ocs-api.js`, 요청 때만 import)
+  - 규칙 `src/core/ocs.js`(import 없음, 서버·화면 공용). flow.jsx의 cleanDetail·octEyeGroups·orderedOptions 등을 **복사**해 둠 → 그쪽을 바꾸면 같이 바꾸기
+  - 설정 칸 `src/ui/ocs.jsx`(설정 > 검사 [자세히] 안), 테스트 `tests/scenarios/ocs.mjs`
 
 ## 5. 정해진 결정과 이유 (다시 제안하거나 “버그”로 고치지 말 것)
 **검사·시간**
@@ -89,6 +92,13 @@
   윗줄 아래에 다른 검사실 대기를 **방마다 줄 바꿈**(보기만, 대기 있는 검사만). 검사실 묶음 설정 기능은 만들지 않기로 함(사용자: 그대로 둠). 빨간 점 = 묶음에서 대기 순서 1번(검사 중 제외)의 남은 검사 칩 **모두**.
 **화면·기타**
 - 화면 버전 표시: 메인 화면 아래 + 직원 화면 맨 아래 “버전 MM-DD HH:MM”(빌드 시각, 한국 시간).
+**OCS 처방 도우미**
+- 도우미는 서버에 직접 HTTP로 묻고(흐름 화면을 띄워 둘 필요 없음), 답은 AutoHotkey가 읽기 쉬운 탭 구분 글(`OPHFLOW1 <종류>` … `END`).
+- 검사 설정 `test.ocs`: 검색어 + ↓ 횟수를 **양측/편측** 따로. OCT처럼 M,D OCT·OCTA 그룹이 있으면 `md`·`angio` 따로(사용자: OCT 하나 + OCTA 따로).
+- 처방 완료는 기존 [처방 전]과 **같은 `p.orders`**(검사 id). 한 검사의 처방 줄 중 입력법이 하나라도 없으면 그 검사는 통째로 직접 입력.
+  일부만 넣고 멈춘 줄은 도우미가 기억했다가 남은 것만 넣음. [처방 없음](noOrder) 검사는 건너뜀.
+- 명단 모드(F10)는 **환자마다 멈춤**(사용자 선택): 서명은 사람이. 도우미는 F2(서명)·Delete(D/C)·입력창 지우기 키를 쓰지 않음.
+- 별도 'OCS 처방' 화면은 만들지 않음(사용자: 검사실 [처방 전]/처방 완료로 충분). 명단 모드의 교수·접수 조건은 도우미 창에서 고름.
 
 ## 6. 남은 일·보류
 - `server.js`의 `splitOldShardedFiles()`(예전 이전 시력 한 파일 → 100개로 나누기)는 이미 적용됨 → **다음에 server.js를 손볼 때 제거**(사용자 요청).

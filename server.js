@@ -351,6 +351,11 @@ async function handleApi(req, res, pathname) {
   if (pathname.startsWith('/api/settings-lock')) return handleLock(req, res, pathname);
   if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId() });
   if (pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res);
+  // OCS 처방 도우미(ocs-helper 폴더의 PC 프로그램)용. 요청이 올 때만 불러오므로 이 부분에 문제가 있어도 서버 시작에는 영향이 없습니다.
+  if (pathname.startsWith('/api/ocs/')) {
+    const { handleOcs } = await import('./scripts/ocs-api.js');
+    return handleOcs(req, res, pathname, { readItem, writeItem, readBody });
+  }
 
   // 서버끄기.bat 에서 사용. 서버 PC 자신에서만 끌 수 있습니다.
   if (pathname === '/api/shutdown') {

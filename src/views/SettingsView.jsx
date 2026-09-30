@@ -4,6 +4,7 @@ import { Plus, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-
 import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, renameTestOptions, sortedTests, toDraft, holdCallOf } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
+import { OcsRecipeEditor } from '../ui/ocs.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';
 import { DoctorRoomInput } from './BoardView.jsx';
 
@@ -242,6 +243,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                       </select>
                     </div>
                   )}
+                  {!t.noOrder && <OcsRecipeEditor test={t} onChange={ocs => updateTest(t.id, { ocs })} />}
                   <div className="flex items-center justify-end">
                     {t.builtin === 'gat' ? (
                       <span className="text-xs text-slate-400">GAT 값을 이 검사실에서 입력해요. 기본 항목이라 삭제할 수 없어요.</span>
