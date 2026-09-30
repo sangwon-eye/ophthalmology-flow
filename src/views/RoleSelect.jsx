@@ -204,10 +204,34 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
   );
 }
 
+const PREVIEW = typeof window !== 'undefined' ? window.localStorage.getItem('oph-preview') || 'A' : 'A';
+function WaitBelow({ k, count, detail, c }) {
+  if (PREVIEW === 'A') return (
+    <div data-count={k} className="flex flex-col items-center gap-1.5 mt-2.5">
+      <span className={`inline-flex items-baseline gap-1.5 px-4 py-1 rounded-full shadow-sm ${count ? `${c.solid} text-white` : 'bg-slate-100 text-slate-400'}`}>
+        <span className="text-xs font-medium opacity-90">대기</span><span className="text-xl font-bold leading-none">{count}</span>
+      </span>
+      {detail && <div data-count-detail={k} className="flex flex-wrap justify-center gap-1">{detail.map(([d, n]) => (
+        <span key={d} className={`text-xs px-2 py-0.5 rounded-full border ${n ? 'bg-white border-amber-300 text-slate-700' : 'bg-white border-slate-200 text-slate-400'}`}>{d} <b>{n}</b></span>))}</div>}
+    </div>
+  );
+  return (
+    <div data-count={k} className="text-center mt-2">
+      <div className="flex items-baseline justify-center gap-1">
+        <span className={`text-3xl font-bold tabular-nums ${count ? c.text : 'text-slate-300'}`}>{count}</span>
+        <span className="text-sm text-slate-500">명 대기</span>
+      </div>
+      {detail && <div data-count-detail={k} className="text-xs text-slate-500">{detail.map(([d, n], i) => <span key={d}>{i ? ' · ' : ''}{d} <b className={n ? 'text-slate-800' : 'text-slate-400'}>{n}</b></span>)}</div>}
+    </div>
+  );
+}
+
 export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doctors = [] }) {
   // 메인 화면: 매일 쓰는 직원 화면(진료 흐름)은 크게, 환자용 화면·관리는 작게 묶어서 한 화면에 모두
   // 방마다 대기 인원(각 화면 위쪽 '대기 N명'과 같은 숫자). 진료실은 교수님별로 한 줄
-  const byDoctor = doctors.map(d => [d, patients.filter(p => p.doctor === d && consultWaiting(p, settings)).length]);
+  // 오늘 명단에 환자가 없는 교수님은 빼기
+  const byDoctor = doctors.filter(d => patients.some(p => p.doctor === d))
+    .map(d => [d, patients.filter(p => p.doctor === d && consultWaiting(p, settings)).length]);
   const flow = [
     { key: 'vision', label: visionNames(settings).name, sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue', count: visionWaiting(patients).length },
     ...settings.rooms.filter(r => r.builtin !== 'treat').map(r => ({
@@ -220,7 +244,7 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
     })),
     { key: 'procedure', label: treatRoomOf(settings).name, sub: roomTests(settings, treatRoomOf(settings).id).length ? '진료 전 검사 · 예진 · 전공의 처치' : '초진 예진 · 전공의 처치', icon: Syringe, color: 'indigo', count: treatWorkCount(treatWork(patients, settings)) },
     { key: 'consult', label: '진료실', sub: '교수님별 진료 대기', icon: Stethoscope, color: 'amber', count: byDoctor.reduce((a, [, n]) => a + n, 0),
-      detail: byDoctor.length ? byDoctor.map(([d, n]) => `${d} ${n}`).join(' · ') : '' },
+      detail: byDoctor.length ? byDoctor : null },
   ];
   const patientSide = [
     { key: 'board', label: '환자용 화면', sub: '대기 명단 모니터', icon: Monitor },
@@ -274,10 +298,7 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
                   </div>
                 </button>
                 {/* 대기 인원은 칸 밖 아래에 따로 */}
-                <div data-count={key} className="text-center mt-2">
-                  <div className={`text-lg font-semibold ${count ? 'text-slate-900' : 'text-slate-400'}`}>대기 {count}</div>
-                  {detail && <div data-count-detail={key} className="text-xs text-slate-500">{detail}</div>}
-                </div>
+                <WaitBelow k={key} count={count} detail={detail} c={c} />
               </div>
             );
           })}
