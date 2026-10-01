@@ -1699,7 +1699,7 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
         {/* 관리자 FU 지정: FU를 잡지 않고 FU 명단에서 지움 (한 번 더 눌러야 삭제) */}
         {onDelete && (
           <div className="mt-3 text-center">
-            <button type="button" onClick={() => (delArmed ? onDelete() : setDelArmed(true))} className="text-sm text-rose-700 underline">
+            <button type="button" onClick={() => (delArmed ? onDelete(followupDoctor) : setDelArmed(true))} className="text-sm text-rose-700 underline">
               {delArmed ? '한 번 더 누르면 FU 명단에서 삭제' : 'FU 없음 · FU 명단에서 삭제'}
             </button>
           </div>

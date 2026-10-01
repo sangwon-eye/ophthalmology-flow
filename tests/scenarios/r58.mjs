@@ -6,8 +6,10 @@ const jid = pts0.find(p => p.name === '신종희').id;
 await editKey('daily-patients', list => list.map(p => (p.name === '서준호' ? { ...p, seen: true, seenAt: Date.now(), calledRoom: null } : p)));
 await editKey('fu-designations', fu => ({
   ...(fu || {}),
-  [sid]: { oct: true, doctor: '김선웅', name: '서준호', byDoctor: { 김선웅: { oct: true, doctor: '김선웅' } } },
-  [jid]: { wfp: true, doctor: '나상훈', name: '신종희', byDoctor: { 나상훈: { wfp: true, doctor: '나상훈' } } },
+  // 서준호: 김선웅 FU + 나상훈 예전 형식 FU(byDoctor 없음) + 나상훈 'FU 나중에' → 김선웅 회송 뒤에도 나상훈 것은 그대로
+  [sid]: { wfp: true, doctor: '나상훈', name: '서준호', byDoctor: { 김선웅: { oct: true, doctor: '김선웅' } }, fuLater: { doctor: '나상훈', date: '2026-09-01', at: 1 } },
+  // 신종희: 나상훈 + 김선웅 → 관리자에서 나상훈 것만 삭제
+  [jid]: { wfp: true, doctor: '나상훈', name: '신종희', updatedAt: 2, byDoctor: { 나상훈: { wfp: true, doctor: '나상훈', updatedAt: 2 }, 김선웅: { oct: true, doctor: '김선웅', updatedAt: 1 } } },
 }));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
@@ -26,7 +28,9 @@ await modal().getByRole('button', { name: '설명 완료 · FU 없음 (회송)' 
 const s = (await getKey('daily-patients')).value.find(p => p.name === '서준호');
 const fu = (await getKey('fu-designations')).value;
 ok(s.consultDone && s.referred, '설명 완료 + 회송 표시');
-ok(!fu[sid], '예전 FU 지정도 지움, FU 나중에 명단에도 없음');
+ok(fu[sid] && !fu[sid].byDoctor?.김선웅 && !fu[sid].oct, '김선웅 FU 지정은 지움');
+ok(fu[sid]?.byDoctor?.나상훈?.wfp && fu[sid].doctor === '나상훈' && fu[sid].wfp, '다른 교수님(나상훈, 예전 형식) FU는 그대로');
+ok(fu[sid]?.fuLater?.doctor === '나상훈', '다른 교수님 FU 나중에 표시도 그대로');
 await back();
 await pick('전체 환자 명단');
 ok(await page.getByText('진료 완료 · 회송', { exact: true }).count() === 1, '전체 환자 명단: 진료 완료 · 회송');
@@ -35,13 +39,15 @@ await back();
 await pick('관리자');
 await page.getByRole('button', { name: 'FU 지정 관리', exact: true }).click(); await W();
 await page.getByPlaceholder('환자번호 또는 이름으로 찾기').fill(jid); await W(500);
-await page.getByRole('button', { name: '수정', exact: true }).first().click(); await W(400);
+await page.locator('div.bg-white').filter({ hasText: '다음 내원 나상훈' }).filter({ hasText: jid }).last().getByRole('button', { name: '수정', exact: true }).click(); await W(400);
 ok(/다음 내원 담당: 나상훈/.test(await modal().innerText()), '관리자 FU 창에 다음 내원 담당');
 ok(await modal().getByRole('button', { name: /^나머지 검사 보기/ }).count() === 1, '관리자 FU 창도 나머지 검사 접기');
 await modal().getByRole('button', { name: 'FU 없음 · FU 명단에서 삭제' }).click(); await W(200);
 ok(!!(await getKey('fu-designations')).value[jid], '한 번 누르면 아직 안 지움');
 await modal().getByRole('button', { name: '한 번 더 누르면 FU 명단에서 삭제' }).click(); await W(1000);
-ok(!(await getKey('fu-designations')).value[jid], '한 번 더 누르면 FU 명단에서 삭제');
+const jf = (await getKey('fu-designations')).value[jid];
+ok(jf && !jf.byDoctor?.나상훈 && !jf.wfp, '한 번 더 누르면 나상훈 FU 삭제');
+ok(jf?.byDoctor?.김선웅?.oct && jf.doctor === '김선웅' && jf.oct, '같은 환자 김선웅 FU는 그대로');
 ok(await page.locator('.fixed.inset-0').count() === 0, '창 닫힘');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

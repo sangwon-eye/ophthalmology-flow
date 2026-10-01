@@ -201,7 +201,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     setExplainFor(null);
     // FU 없음(회송): 이 교수님 FU 지정과 'FU 나중에' 표시를 지움. 되돌리기용으로 지우기 전 기록을 보관
     let savedFu;
-    if (noFu) mutateFu(prev => { savedFu = prev[p.id]; return unmarkFollowupLater(deleteFollowup(prev, p.id, p.doctor), p.id); });
+    if (noFu) mutateFu(prev => { savedFu = prev[p.id]; return unmarkFollowupLater(deleteFollowup(prev, p.id, p.doctor), p.id, p.doctor); });
     const restoreFu = () => { if (noFu) mutateFu(prev => { const n = { ...prev }; if (savedFu) n[p.id] = savedFu; else delete n[p.id]; return n; }); };
     if (noFu) { /* FU 저장 안 함 */ } else if (later) mutateFu(prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
     else mutateFu(prev => saveFollowup(prev, p.id, dil?.doctor || p.doctor, {

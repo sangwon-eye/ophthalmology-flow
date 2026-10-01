@@ -516,23 +516,33 @@ export function markFollowupLater(prev, id, { doctor, name, date, at }) {
   const old = prev[id] || {};
   return { ...prev, [id]: { ...old, name: name || old.name, fuLater: { doctor, date, at } } };
 }
-export function unmarkFollowupLater(prev, id) {
+// doctor 를 주면 그 교수님의 '나중에' 표시만 지움 (다른 교수님 것은 그대로)
+export function unmarkFollowupLater(prev, id, doctor) {
   if (!prev[id]?.fuLater) return prev;
+  if (doctor && prev[id].fuLater.doctor && prev[id].fuLater.doctor !== doctor) return prev;
   const { fuLater, ...rest } = prev[id];
   return { ...prev, [id]: rest };
 }
 
 // 한 교수님의 FU 지정만 지웁니다. 다른 교수님 기록이 남아 있으면 그중 가장 최근 것이 대표 기록이 됩니다.
+// 예전 방식 기록(교수님별 칸 없이 저장된 것)도 그 교수님 칸으로 옮긴 뒤 지우므로, 다른 교수님 FU와 '나중에' 표시는 남습니다.
 export function deleteFollowup(prev, id, doctor) {
   const old = prev[id];
   if (!old) return prev;
   const next = { ...prev };
+  if (!doctor) { delete next[id]; return next; }
   const byDoctor = { ...old.byDoctor };
-  if (doctor) delete byDoctor[doctor];
+  if (old.doctor && !byDoctor[old.doctor]) { const { byDoctor: ignoredB, fuLater: ignoredL, name: ignoredN, ...legacy } = old; byDoctor[old.doctor] = legacy; }
+  delete byDoctor[doctor];
+  const keepLater = old.fuLater && old.fuLater.doctor !== doctor ? old.fuLater : null;
   const rest = Object.values(byDoctor);
-  if (!doctor || !rest.length) { delete next[id]; return next; }
+  if (!rest.length) {
+    if (keepLater) next[id] = { name: old.name, fuLater: keepLater };
+    else delete next[id];
+    return next;
+  }
   const latest = [...rest].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-  next[id] = { ...latest, name: old.name, byDoctor };
+  next[id] = { ...latest, name: old.name, byDoctor, ...(keepLater ? { fuLater: keepLater } : {}) };
   return next;
 }
 export function fuVisitDate(fu) {

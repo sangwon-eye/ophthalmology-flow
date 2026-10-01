@@ -592,10 +592,12 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
   };
 
   // FU 지정 창의 'FU 없음 · FU 명단에서 삭제': 그 교수님 FU 지정과 'FU 나중에' 표시, 다음 명단의 'FU 미지정' 표시를 지움
-  const deleteFuEdit = (e) => {
+  const deleteFuEdit = (e, chosenDoctor) => {
     const id = e.id;
+    const doctor = chosenDoctor || e.doctor || '';
     setFuEdit(null);
-    mutateFu(prev => unmarkFollowupLater(deleteFollowup(prev, id, e.doctor || ''), id));
+    // 그 교수님 것만 지움. 교수님을 모르면 '나중에' 표시만 지우고 저장된 FU는 그대로 (다른 교수님 FU 보호)
+    mutateFu(prev => (doctor ? unmarkFollowupLater(deleteFollowup(prev, id, doctor), id, doctor) : unmarkFollowupLater(prev, id)));
     if (patients.some(p => p.id === id && p.fuMissing)) mutatePatients(prev => prev.map(p => (p.id === id && p.fuMissing ? { ...p, fuMissing: false } : p)));
     setMessage(`${e.name || nameOf(id) || id} FU 없음 · FU 명단에서 삭제했습니다.`);
   };
@@ -945,7 +947,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
           title={`${fuEdit.name || nameOf(fuEdit.id) ? `${fuEdit.name || nameOf(fuEdit.id)}님 (${fuEdit.id})` : `환자 ${fuEdit.id}`} 다음 내원 검사`}
           subtitle="다음 내원 때 필요한 검사를 체크하고 저장을 누르세요"
           followup={{ doctor: fuEdit.doctor || fuMap[fuEdit.id]?.doctor || patients.find(p => p.id === fuEdit.id)?.doctor || '', doctors, prefs: doctorPrefs }}
-          onDelete={() => deleteFuEdit(fuEdit)}
+          onDelete={(d) => deleteFuEdit(fuEdit, d)}
           tests={allTests}
           settings={settings}
           initial={fuEdit}
