@@ -547,26 +547,32 @@ export function MeasureTable({ today, prev }) {
   );
 }
 
-export function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigned, onSave, onCancel }) {
+// part: 시력방에서 [시력]·[NCT]를 따로 누를 때 그 칸만 ('va' 시력 / 'nct' 안압 / 'all' 전부)
+export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailable, gatAssigned, onSave, onCancel }) {
   const initial = mode === 'prev' ? previous : patient.measure;
   const [m, setM] = useState(() => normalizeMeasure(initial));
   const [date, setDate] = useState(mode === 'prev' ? (previous?.date || '') : '');
   const [gat, setGat] = useState(!!gatAssigned);
+  const [noIopChk, setNoIopChk] = useState(!!patient.noIop);
   const [warned, setWarned] = useState(false);
 
   const setEye = (key, eye, v) => setM(s => ({ ...s, [key]: { ...s[key], [eye]: v } }));
   // '안압 안 잼' 환자(소아 등)는 시력만
-  const skipIop = mode === 'vision' && !!patient.noIop;
-  const fields = mode === 'gat' ? ['gat'] : mode === 'vision' ? (skipIop ? ['ucva', 'bcva'] : ['ucva', 'bcva', 'nct']) : ['ucva', 'bcva', 'nct', 'gat'];
-  const noIop = mode === 'vision' && !skipIop && !gat && !m.nct.od.trim() && !m.nct.os.trim();
+  const skipIop = mode === 'vision' && noIopChk;
+  const showVa = mode !== 'vision' || part !== 'nct';
+  const showIop = mode === 'vision' && part !== 'va';
+  const fields = mode === 'gat' ? ['gat'] : mode === 'vision'
+    ? [...(showVa ? ['ucva', 'bcva'] : []), ...(showIop && !skipIop && !gat ? ['nct'] : [])]
+    : ['ucva', 'bcva', 'nct', 'gat'];
+  const noIop = mode === 'vision' && showIop && !skipIop && !gat && !m.nct.od.trim() && !m.nct.os.trim();
   const prevCell = (k, e) => String(previous?.[k]?.[e] ?? '').trim();
-  const prevRows = mode === 'vision' ? fields.filter(k => prevCell(k, 'od') || prevCell(k, 'os')) : [];
-  const title = mode === 'prev' ? '이전 시력·안압' : mode === 'gat' ? 'GAT 안압' : '오늘 시력·안압';
+  const prevRows = mode === 'vision' ? [...(showVa ? ['ucva', 'bcva'] : []), ...(showIop ? ['nct'] : [])].filter(k => prevCell(k, 'od') || prevCell(k, 'os')) : [];
+  const title = mode === 'prev' ? '이전 시력·안압' : mode === 'gat' ? 'GAT 안압' : part === 'va' ? '오늘 시력' : part === 'nct' ? '오늘 안압 (NCT)' : '오늘 시력·안압';
   const completeLabel = mode === 'gat' ? 'GAT 완료' : '확인';
 
   const submit = (complete) => {
     if (complete && noIop && !warned) { setWarned(true); return; }
-    onSave({ measure: m, complete, gat, date });
+    onSave({ measure: m, complete, gat, date, part, noIop: noIopChk });
   };
 
   return (
@@ -580,7 +586,7 @@ export function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigne
             {mode === 'vision' ? (
               // 이전 값을 아래 입력 칸과 같은 세로줄(OD·OS)에 맞춰서
               <div data-prev-vision className="grid gap-x-2 gap-y-0.5 items-baseline" style={{ gridTemplateColumns: '4rem 1fr 1fr 4.5rem' }}>
-                <div className="col-span-4 text-xs font-semibold text-blue-700">이전 시력{previous?.date ? ` ${previous.date}` : ''}{!prevRows.length && <span className="ml-2 font-normal text-slate-400">없음</span>}</div>
+                <div className="col-span-4 text-xs font-semibold text-blue-700">{part === 'nct' ? '이전 안압' : '이전 시력'}{previous?.date ? ` ${previous.date}` : ''}{!prevRows.length && <span className="ml-2 font-normal text-slate-400">없음</span>}</div>
                 {prevRows.map(k => {
                   const big = k === 'ucva' || k === 'bcva';
                   const cls = `text-center tabular-nums ${big ? 'text-2xl font-bold text-slate-900' : 'text-base font-semibold text-slate-600'}`;
@@ -634,15 +640,23 @@ export function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigne
             </React.Fragment>
           ))}
         </div>
-        {fields.includes('ucva') && (
+        {fields.includes('ucva') && part !== 'va' && mode !== 'vision' && (
           <div className="text-xs text-slate-400 mt-2">시력은 0.1~1.5 같은 숫자나 FC, HM, LP, NLP처럼 적으면 됩니다. AutoV는 AR 값으로 trial lens를 넣고 잰 교정시력일 때 켜주세요.</div>
         )}
 
-        {mode === 'vision' && skipIop && <div className="mt-3 text-sm text-amber-800">안압 안 잼 (관리자 명단 관리에서 정함)</div>}
-        {mode === 'vision' && gatAvailable && !skipIop && (
+        {fields.includes('ucva') && mode === 'vision' && (
+          <div className="text-xs text-slate-400 mt-2">시력은 0.1~1.5 같은 숫자나 FC, HM, LP, NLP처럼 적으면 됩니다. AutoV는 AR 값으로 trial lens를 넣고 잰 교정시력일 때 켜주세요.</div>
+        )}
+        {showIop && gatAvailable && !skipIop && (
           <label className="flex items-center gap-2 mt-4 text-sm text-slate-700 cursor-pointer">
             <input type="checkbox" checked={gat} onChange={e => { setGat(e.target.checked); setWarned(false); }} className="w-4 h-4" />
             안압은 GAT로 측정 (정밀검사실에서 입력)
+          </label>
+        )}
+        {showIop && (
+          <label className="flex items-center gap-2 mt-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={noIopChk} onChange={e => { setNoIopChk(e.target.checked); setWarned(false); }} className="w-4 h-4" />
+            안압 안 잼 (소아 등)
           </label>
         )}
 
@@ -827,7 +841,7 @@ export function HistoryDetail({ p, editable = false, button = false }) {
   const modal = open && <HistoryModal p={p} onClose={() => setOpen(false)} />;
   // button: 처치실 카드의 한 줄 안에 들어가는 작은 [History 입력] 버튼
   if (button) return hxPending(p) ? <>
-    <button type="button" onClick={() => setOpen(true)} aria-label={`${p.name} History 입력`} className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium">History 입력</button>
+    <button type="button" onClick={() => setOpen(true)} aria-label={`${p.name} History 입력`} className="text-sm px-4 py-2 rounded-lg bg-orange-500 text-white font-medium">History 입력</button>
     {modal}
   </> : null;
   if (!p.hx) {

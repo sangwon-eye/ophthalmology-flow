@@ -127,7 +127,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   // 시력방: 할 일(측정값·History·시력방 검사·점안)을 모두 마치면 자동으로 시력/안압 완료.
   // 모든 시력방 컴퓨터에서 같은 결과를 쓰므로 여러 번 써도 괜찮고, 알림은 지금 누른 컴퓨터(포커스)에서만
   const undoVision = (pk) => patchPatient(mutatePatients, pk, x => ({
-    done: { ...x.done, [VISION_KEY]: false }, doneAt: { ...(x.doneAt || {}), [VISION_KEY]: null }, measureOk: null, dilateSkip: false,
+    done: { ...x.done, [VISION_KEY]: false }, doneAt: { ...(x.doneAt || {}), [VISION_KEY]: null }, measureOk: null, vaOk: null, nctOk: null, dilateSkip: false,
   }));
   const readyKeys = isVision ? roomList.filter(p => !p.done?.[VISION_KEY] && !activeVf(p) && visionTasksLeft(p, doctorPrefs).length === 0).map(patientKey).join(',') : '';
   useEffect(() => {
@@ -200,7 +200,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
       : x))));
   };
 
-  const handleMeasureSave = ({ measure, complete, gat, date }) => {
+  const handleMeasureSave = ({ measure, complete, gat, date, part = 'all', noIop }) => {
     const { key: pk, mode: mmode } = measureFor;
     const p = patients.find(x => patientKey(x) === pk);
     setMeasureFor(null);
@@ -214,18 +214,27 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
 
     const patch = mmode === 'gat'
       ? { gat: measure.gat }
-      : { ucva: measure.ucva, bcva: measure.bcva, autoV: measure.autoV, nct: measure.nct };
+      : {
+        ...(part !== 'nct' ? { ucva: measure.ucva, bcva: measure.bcva, autoV: measure.autoV } : {}),
+        ...(part !== 'va' ? { nct: measure.nct } : {}),
+      };
     const doneKey = mmode === 'gat' ? GAT_ID : VISION_KEY;
     const at = Date.now();
     mutatePatients(prev => prev.map(x => {
       if (patientKey(x) !== pk || activeVf(x)) return x;
       let nx = { ...x, measure: { ...normalizeMeasure(x.measure), ...patch } };
-      if (mmode === 'vision' && gatAvailable) {
+      if (mmode === 'vision' && part !== 'va') nx = { ...nx, noIop: !!noIop || undefined };
+      if (mmode === 'vision' && gatAvailable && part !== 'va') {
         nx = { ...nx, assigned: { ...nx.assigned, [GAT_ID]: gat } };
         if (!gat) nx = { ...nx, done: { ...nx.done, [GAT_ID]: false } };
       }
       // 시력방 [확인]은 측정 완료만 표시 (시력방 할 일이 다 끝나면 위의 자동 완료로 넘어감)
-      if (complete && mmode === 'vision') nx = { ...nx, measureOk: at };
+      // [시력]·[NCT]를 따로 저장: 둘 다 끝나면(NCT를 안 재는 환자는 시력만) 측정 완료
+      if (complete && mmode === 'vision') {
+        if (part !== 'nct') nx = { ...nx, vaOk: nx.vaOk || at };
+        if (part !== 'va') nx = { ...nx, nctOk: nx.nctOk || at };
+        if (!nx.measureOk && nx.vaOk && (nx.nctOk || !nctNeeded(nx))) nx = { ...nx, measureOk: at };
+      }
       else if (complete) {
         nx = { ...nx, done: { ...nx.done, [doneKey]: true }, doneAt: { ...(nx.doneAt || {}), [doneKey]: at } };
       }
@@ -388,15 +397,17 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                     </span>
                   );
                 })()}
-                {isVision && !p.measureOk && (
-                  <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision' })} className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium">
-                    {nctNeeded(p) ? '시력 + NCT 입력' : '시력 입력'}
-                  </button>
-                )}
-                {/* NCT를 재는지 바로 보이게: GAT 환자는 NCT 안 함 */}
-                {isVision && !p.measureOk && !nctNeeded(p) && (
-                  <span className="text-sm px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 font-semibold">{p.noIop ? '안압 안 잼' : 'NCT 안 함 · 검사실 GAT'}</span>
-                )}
+                {/* 시력과 NCT를 따로: 각각 누르면 그 칸만 입력, 끝나면 초록 ✓. NCT를 안 재는 환자는 노란 표시(누르면 바꿀 수 있음) */}
+                {isVision && !p.measureOk && <>
+                  {p.vaOk
+                    ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'va' })} className="text-sm px-3 py-1.5 rounded-lg border border-green-300 bg-green-50 text-green-800 font-medium">✓ 시력</button>
+                    : <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'va' })} className="text-sm px-4 py-1.5 rounded-lg bg-blue-600 text-white font-medium">시력</button>}
+                  {!nctNeeded(p)
+                    ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} title="누르면 바꿀 수 있어요" className="text-sm px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 font-semibold">{p.noIop ? '안압 안 잼' : 'NCT 안 함 · 검사실 GAT'}</button>
+                    : p.nctOk
+                      ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} className="text-sm px-3 py-1.5 rounded-lg border border-green-300 bg-green-50 text-green-800 font-medium">✓ NCT</button>
+                      : <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} className="text-sm px-4 py-1.5 rounded-lg bg-teal-600 text-white font-medium">NCT</button>}
+                </>}
                 {/* 초진: History 설문지를 드렸는지 (입력은 처치실에서) */}
                 {isVision && hxNeeded(p) && !p.hx && (p.hxSheetAt
                   ? <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxSheetAt: null }))} title="누르면 취소" className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-500">History 설문지 드림 ✓</button>
@@ -545,8 +556,9 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
 
       {measureFor && measurePatient && (
         <MeasureModal
-          key={`${measureFor.key}-${measureFor.mode}`}
+          key={`${measureFor.key}-${measureFor.mode}-${measureFor.part || 'all'}`}
           mode={measureFor.mode}
+          part={measureFor.part || 'all'}
           patient={measurePatient}
           previous={previousMeasure(measurePatient, history)}
           gatAvailable={gatAvailable}
