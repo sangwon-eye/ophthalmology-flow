@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -360,8 +360,6 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
                   )}
                   {nextVisitNote(p)}
-                  {/* 진료 후 외래 간호사가 처치를 넣을 때 (진료 호출을 다시 하지 않아도 됨) */}
-                  <button type="button" onClick={() => setProcFor(p)} className="text-sm px-3 py-2 rounded-lg border border-rose-300 text-rose-700 font-medium">처치 보내기</button>
                   {early ? (
                     ps === 'doing'
                       ? <span className="text-sm text-slate-500">처치가 끝나면 귀가 처리할 수 있어요</span>
@@ -378,6 +376,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                       <RotateCcw size={12} />진료 완료 취소
                     </button>
                   </>}
+                  {/* 진료 후 외래 간호사가 처치를 넣을 때 (진료 호출을 다시 하지 않아도 됨). 드물어서 맨 오른쪽 끝 */}
+                  <button type="button" onClick={() => setProcFor(p)} className={`${early ? 'ml-auto ' : ''}text-sm px-3 py-2 rounded-lg border border-rose-300 text-rose-700 font-medium`}>처치 보내기</button>
                 </SimpleCard>
                 );
               })}
@@ -399,10 +399,10 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 <MeasureTable today={inRoom.measure} prev={previousMeasure(inRoom, history)} />
               </div>
               {(inRoom.hx || hxPending(inRoom)) && <div className="mb-3"><HistoryLine p={inRoom} /></div>}
-              {inRoomTests.length > 0 && (
+              {(inRoomTests.length > 0 || nctMeasured(inRoom)) && (
                 <div className="text-sm text-slate-700 mb-2">
                   <span className="text-xs text-slate-400 mr-2">오늘 검사</span>
-                  {inRoomTests.map(t => testLabelWithOptions(t, inRoom.detail?.[t.id])).join(', ')}
+                  {[...(nctMeasured(inRoom) ? ['NCT'] : []), ...inRoomTests.map(t => testLabelWithOptions(t, inRoom.detail?.[t.id]))].join(', ')}
                 </div>
               )}
               {inRoomNotes.length > 0 && (

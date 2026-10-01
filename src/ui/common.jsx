@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { hxPending, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -497,10 +497,19 @@ export function PrevVisionBox({ m }) {
       </span>
     );
   };
+  const iop = [pair('nct', false), pair('gat', false)].filter(Boolean);
+  // 시력(파란 칸)과 안압(회색 칸)을 나눠서 한눈에 구분
   return (
-    <div data-prev-vision className="w-full flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2">
-      <span className="text-xs font-semibold text-blue-700 whitespace-nowrap">이전 시력{m.date ? ` ${m.date}` : ''}</span>
-      {pair('ucva', true)}{pair('bcva', true)}{pair('nct', false)}{pair('gat', false)}
+    <div data-prev-vision className="w-full flex flex-wrap items-stretch gap-2">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2">
+        <span className="text-xs font-semibold text-blue-700 whitespace-nowrap">이전 시력{m.date ? ` ${m.date}` : ''}</span>
+        {pair('ucva', true) || <span className="text-sm text-slate-400">시력 없음</span>}{pair('bcva', true)}
+      </div>
+      {iop.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+          <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">이전 안압</span>{iop}
+        </div>
+      )}
     </div>
   );
 }
@@ -546,8 +555,12 @@ export function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigne
   const [warned, setWarned] = useState(false);
 
   const setEye = (key, eye, v) => setM(s => ({ ...s, [key]: { ...s[key], [eye]: v } }));
-  const fields = mode === 'gat' ? ['gat'] : mode === 'vision' ? ['ucva', 'bcva', 'nct'] : ['ucva', 'bcva', 'nct', 'gat'];
-  const noIop = mode === 'vision' && !gat && !m.nct.od.trim() && !m.nct.os.trim();
+  // '안압 안 잼' 환자(소아 등)는 시력만
+  const skipIop = mode === 'vision' && !!patient.noIop;
+  const fields = mode === 'gat' ? ['gat'] : mode === 'vision' ? (skipIop ? ['ucva', 'bcva'] : ['ucva', 'bcva', 'nct']) : ['ucva', 'bcva', 'nct', 'gat'];
+  const noIop = mode === 'vision' && !skipIop && !gat && !m.nct.od.trim() && !m.nct.os.trim();
+  const prevCell = (k, e) => String(previous?.[k]?.[e] ?? '').trim();
+  const prevRows = mode === 'vision' ? fields.filter(k => prevCell(k, 'od') || prevCell(k, 'os')) : [];
   const title = mode === 'prev' ? '이전 시력·안압' : mode === 'gat' ? 'GAT 안압' : '오늘 시력·안압';
   const completeLabel = mode === 'gat' ? 'GAT 완료' : '확인';
 
@@ -564,7 +577,24 @@ export function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigne
 
         {mode !== 'prev' && (
           <div className="bg-slate-50 rounded-xl p-3 mb-4 space-y-1">
-            {mode === 'vision' ? <PrevVisionBox m={previous} /> : <MeasureLine label="이전" m={previous} fields={mode === 'gat' ? ['nct', 'gat'] : undefined} emptyText="이전 값 없음" />}
+            {mode === 'vision' ? (
+              // 이전 값을 아래 입력 칸과 같은 세로줄(OD·OS)에 맞춰서
+              <div data-prev-vision className="grid gap-x-2 gap-y-0.5 items-baseline" style={{ gridTemplateColumns: '4rem 1fr 1fr 4.5rem' }}>
+                <div className="col-span-4 text-xs font-semibold text-blue-700">이전 시력{previous?.date ? ` ${previous.date}` : ''}{!prevRows.length && <span className="ml-2 font-normal text-slate-400">없음</span>}</div>
+                {prevRows.map(k => {
+                  const big = k === 'ucva' || k === 'bcva';
+                  const cls = `text-center tabular-nums ${big ? 'text-2xl font-bold text-slate-900' : 'text-base font-semibold text-slate-600'}`;
+                  return (
+                    <React.Fragment key={k}>
+                      <div className={`text-sm ${big ? 'text-blue-800 font-semibold' : 'text-slate-500'}`}>{k === 'bcva' && previous?.autoV ? '교정(AutoV)' : MEASURE_FIELDS.find(f => f.key === k).label}</div>
+                      <div className={cls}>{prevCell(k, 'od') || '-'}</div>
+                      <div className={cls}>{prevCell(k, 'os') || '-'}</div>
+                      <div />
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            ) : <MeasureLine label="이전" m={previous} fields={mode === 'gat' ? ['nct', 'gat'] : undefined} emptyText="이전 값 없음" />}
             {mode === 'gat' && <MeasureLine label="오늘" m={patient.measure} fields={['nct']} emptyText="오늘 NCT 없음" />}
           </div>
         )}
@@ -608,7 +638,8 @@ export function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigne
           <div className="text-xs text-slate-400 mt-2">시력은 0.1~1.5 같은 숫자나 FC, HM, LP, NLP처럼 적으면 됩니다. AutoV는 AR 값으로 trial lens를 넣고 잰 교정시력일 때 켜주세요.</div>
         )}
 
-        {mode === 'vision' && gatAvailable && (
+        {mode === 'vision' && skipIop && <div className="mt-3 text-sm text-amber-800">안압 안 잼 (관리자 명단 관리에서 정함)</div>}
+        {mode === 'vision' && gatAvailable && !skipIop && (
           <label className="flex items-center gap-2 mt-4 text-sm text-slate-700 cursor-pointer">
             <input type="checkbox" checked={gat} onChange={e => { setGat(e.target.checked); setWarned(false); }} className="w-4 h-4" />
             안압은 GAT로 측정 (정밀검사실에서 입력)
@@ -763,7 +794,8 @@ export function TodayTestsLine({ p, tests }) {
   return (
     <div className="w-full flex flex-wrap items-center gap-1.5 text-xs">
       <span className="text-slate-400 mr-0.5">오늘 검사</span>
-      {list.length === 0 && <span className="text-slate-400">없음</span>}
+      {list.length === 0 && !nctMeasured(p) && <span className="text-slate-400">없음</span>}
+      {nctMeasured(p) && <span className="px-2 py-0.5 rounded-full border flex items-center gap-0.5 bg-green-50 border-green-300 text-green-800"><Check size={11} />NCT</span>}
       {list.map(t => {
         const done = !!p.done?.[t.id];
         return (
@@ -777,7 +809,7 @@ export function TodayTestsLine({ p, tests }) {
 }
 // 설명 대기용 간단 요약: 오늘 한 검사 + 산동
 export function TodayDoneLine({ p, tests, prefs }) {
-  const done = tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id] && p.done?.[t.id]).map(t => testLabelWithOptions(t, p.detail?.[t.id]));
+  const done = [...(nctMeasured(p) ? ['NCT'] : []), ...tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id] && p.done?.[t.id]).map(t => testLabelWithOptions(t, p.detail?.[t.id]))];
   const drops = (p.drops || []).filter(Boolean);
   const eye = dilateEyeOf(p.dilateEye);
   if (drops.length) done.push(crActive(p, prefs) ? 'CR' : `산동${eye ? ` ${eye}` : ''}`);

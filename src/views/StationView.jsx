@@ -29,10 +29,9 @@ function VisionTodayTests({ p, tests, children }) {
   const [open, setOpen] = useState(false);
   const list = tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id]);
   return <>
-    <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} className="text-xs text-slate-500 hover:text-slate-800 underline">오늘 검사 {list.length}{open ? ' ▴' : ' ▾'}</button>
+    <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} className="text-xs text-slate-500 hover:text-slate-800 underline">오늘 검사 {list.length}{open ? ' 접기' : ' 보기'}</button>
     {open && (
       <div className="order-last w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1.5">
-        <div className="text-sm text-slate-700"><span className="text-xs text-slate-400 mr-2">오늘 검사</span>{list.length ? list.map(t => testLabelWithOptions(t, p.detail?.[t.id])).join(', ') : '없음'}</div>
         <div className="flex flex-wrap items-center gap-1.5">{children}</div>
       </div>
     )}
@@ -102,13 +101,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const groupIdle = (g, list) => !list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p)));
   // VF 분류에서도 진행 중인 카드와 종료 버튼을 계속 보여준다.
   const shown = activeGroup ? roomList.filter(p => groupPending(p, activeGroup) || activeGroup.tests.some(t => t.id === activeVf(p))) : roomList;
-  // 초진으로 바꾸면 ARK도 함께 지정 (초진은 ARK를 꼭 찍음). 재진으로 되돌리면 아직 안 한 ARK는 뺌
-  const arkId = settings.tests.some(t => t.id === 'ark' && t.roomId === 'vision') ? 'ark' : null;
-  const toggleFirstVisit = (pk) => patchPatient(mutatePatients, pk, x => {
-    const on = !x.firstVisit;
-    if (!arkId || (!on && x.done?.[arkId])) return { firstVisit: on };
-    return { firstVisit: on, assigned: { ...(x.assigned || {}), [arkId]: on } };
-  });
+  const toggleFirstVisit = (pk) => patchPatient(mutatePatients, pk, x => ({ firstVisit: !x.firstVisit }));
   const firstVisitChip = (p) => (
     <button
       type="button"
@@ -402,7 +395,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 )}
                 {/* NCT를 재는지 바로 보이게: GAT 환자는 NCT 안 함 */}
                 {isVision && !p.measureOk && !nctNeeded(p) && (
-                  <span className="text-sm px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 font-semibold">NCT 안 함 · 검사실 GAT</span>
+                  <span className="text-sm px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 font-semibold">{p.noIop ? '안압 안 잼' : 'NCT 안 함 · 검사실 GAT'}</span>
                 )}
                 {/* 초진: History 설문지를 드렸는지 (입력은 처치실에서) */}
                 {isVision && hxNeeded(p) && !p.hx && (p.hxSheetAt
@@ -463,7 +456,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 ))}
                 {(() => {
                   const picker = (
-                    <TestPicker inline defaultOpen={isVision} chipsWhenClosed={false} closedLabel={isVision ? '시력방 검사' : ''} mainIds={mainTestIds(doctorPrefs, p.doctor)} p={p} tests={orderForPicking(isVision ? allTests.filter(t => t.roomId === 'vision') : allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
+                    <TestPicker inline defaultOpen={isVision} chipsWhenClosed={false} closedLabel={isVision ? '시력방 검사' : ''} mainIds={mainTestIds(doctorPrefs, p.doctor)} p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
                       <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                     </TestPicker>
                   );

@@ -1058,9 +1058,13 @@ export const TREAT_ROOM = { id: 'treat', name: '처치실', patientName: '처치
 export function hxNeeded(p) {
   return !!p.firstVisit;
 }
-// 시력방 NCT: GAT(검사실 안압)이 지정된 환자는 NCT를 재지 않음 (시안: 사용자 확인 대기)
+// 시력방 NCT: GAT(검사실 안압)이 지정됐거나, 관리자 명단 관리에서 '안압 안 잼'(소아 등)이면 NCT를 재지 않음
 export function nctNeeded(p) {
-  return !p.assigned?.[GAT_ID];
+  return !p.noIop && !p.assigned?.[GAT_ID];
+}
+// 오늘 NCT를 쟀는지 (오늘 검사 목록에 'NCT'로 표시)
+export function nctMeasured(p) {
+  return !!(String(p.measure?.nct?.od ?? '').trim() || String(p.measure?.nct?.os ?? '').trim());
 }
 // History는 처치실(검사 지정·예진)에서 입력합니다. 초진인데 아직 없으면 '입력 필요'
 export function hxPending(p) {

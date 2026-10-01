@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw } from 'lucide-react';
-import { DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, cleanDetail, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
+import { patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, cleanDetail, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { loadFu, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
@@ -799,6 +799,11 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                 </select>
                 <button type="button" onClick={() => toggleFirst(patientKey(p))} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
+                </button>
+                {/* 소아 등 안압을 아예 재지 않는 환자: 시력방에 '안압 안 잼', NCT 칸 없음 */}
+                <button type="button" onClick={() => patchPatient(mutatePatients, patientKey(p), x => ({ noIop: !x.noIop }))} title="누르면 안압 잼 ↔ 안 잼"
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${p.noIop ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'border-slate-300 text-slate-500'}`}>
+                  {p.noIop ? '안압 안 잼' : '안압 잼'}
                 </button>
                 <ConfirmButton label="삭제" onConfirm={() => removeOne(patientKey(p))} />
               </div>

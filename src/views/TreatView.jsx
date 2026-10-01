@@ -342,10 +342,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             {/* 한 줄에: History 입력 · 산동 · 검사 지정 (의미 없는 '없음' 줄은 생략) */}
             <div className="w-full flex flex-wrap items-center gap-2">
               <HistoryDetail p={p} button />
-              <DilationRow group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
-              <button type="button" onClick={() => setTriageFor(p)} className="ml-auto text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
+              <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
                 {assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'}
               </button>
+              <DilationRow group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             </div>
           </SimpleCard>
           );
@@ -364,7 +364,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
               <TodayTestsLine p={p} tests={allTests} />
               <div className="w-full flex flex-wrap items-center gap-2">
                 <HistoryDetail p={p} button />
-                <button type="button" onClick={() => finishTriage(p)} className="ml-auto rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
+                <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
               </div>
             </>}
             {(p.procedures || []).some(x => x.performer === 'resident') && (
