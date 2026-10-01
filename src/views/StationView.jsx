@@ -83,6 +83,8 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   // 설정에서 '대기 0명이어도 보이기'를 켠 검사는 항상, 끈 검사는 기다리는 환자가 있을 때만
   const visibleGroups = (gs, list) => gs.filter(g => g.tests.some(t => t.showWhenEmpty !== false) || activeGroup?.key === g.key || list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p))));
   const groupLabel = (g, list) => `${g.key} ${list.filter(p => groupPending(p, g)).length}명${list.some(p => g.tests.some(t => t.id === activeVf(p))) ? ' · 검사 중' : ''}`;
+  // 기다리는(또는 검사 중인) 환자가 없는 검사 칩은 흐리게
+  const groupIdle = (g, list) => !list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p)));
   // VF 분류에서도 진행 중인 카드와 종료 버튼을 계속 보여준다.
   const shown = activeGroup ? roomList.filter(p => groupPending(p, activeGroup) || activeGroup.tests.some(t => t.id === activeVf(p))) : roomList;
   const toggleFirstVisit = (pk) => patchPatient(mutatePatients, pk, x => ({ firstVisit: !x.firstVisit }));
@@ -254,9 +256,9 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
             {groups.length >= 2 ? <>
               <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
               {visibleGroups(groups, roomList).map(g => (
-                <FilterChip key={g.key} active={activeGroup?.key === g.key} onClick={() => setFilter(g.key)} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} />
+                <FilterChip key={g.key} active={activeGroup?.key === g.key} onClick={() => setFilter(g.key)} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} muted={groupIdle(g, roomList)} />
               ))}
-            </> : groups.map(g => <InfoChip key={g.key} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} />)}
+            </> : groups.map(g => <InfoChip key={g.key} label={groupLabel(g, roomList)} dot={dotFor(room.id, g)} title={dotTitle} muted={groupIdle(g, roomList)} />)}
             </div>
             {/* 같은 묶음의 다른 검사실: 보기만, 방마다 줄을 바꿔서 */}
             {groupRooms.filter(r => r.id !== room.id).map(r => {
@@ -282,6 +284,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 active={activeGroup?.key === g.key}
                 onClick={() => setFilter(g.key)}
                 label={`${g.key} ${roomList.filter(p => groupPending(p, g)).length}명${roomList.some(p => g.tests.some(t => t.id === activeVf(p))) ? ' · 검사 중' : ''}`}
+                muted={groupIdle(g, roomList)}
               />
             ))}
           </div>

@@ -7,7 +7,9 @@ import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
 /* ------------------------------------------------------------------ */
 /* 환자용 화면                                                          */
 /* ------------------------------------------------------------------ */
-export function BoardShell({ title, onBack, wide, extra, children }) {
+// 환자용 화면 폭: 넓은 모니터(TV)에서도 화면을 꽉 채워 명단이 한눈에 보이도록
+const BOARD_WIDTH = 'mx-auto w-full max-w-[120rem] px-8';
+export function BoardShell({ title, badge, onBack, extra, children }) {
   const [now, setNow] = useState(new Date());
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef(null);
@@ -37,23 +39,29 @@ export function BoardShell({ title, onBack, wide, extra, children }) {
     const t = setInterval(() => setNow(new Date()), 10000);
     return () => clearInterval(t);
   }, []);
-  const width = wide ? 'max-w-7xl' : 'max-w-4xl';
   return (
-    <div className="h-[calc(100dvh-32px)] min-h-0 flex flex-col overflow-hidden bg-slate-50">
+    <div className="h-dvh min-h-0 flex flex-col overflow-hidden bg-slate-50">
       <div className="shrink-0 bg-white border-b border-slate-200">
-        <div className={`${width} mx-auto px-6 py-5 flex items-center justify-between gap-4`}>
-          <h1 className="text-3xl font-semibold text-slate-900">{title}</h1>
-          <div className="flex items-center gap-4">
-            {extra}
-            <span className="text-2xl text-slate-500 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
-            <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-500">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
-            <TextSizeControl />
-            <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-400">메인 화면</button>
-          </div>
+        <div className={`${BOARD_WIDTH} py-4 flex items-center gap-6`}>
+          {/* 제목은 낱말 단위로만 줄을 바꿈 (글자 중간에서 끊기지 않게). 진료실 번호는 옆에 배지로 */}
+          <h1 className="min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-3xl font-semibold text-slate-900 break-keep">
+            <span>{title}</span>
+            {badge && <span className="whitespace-nowrap rounded-xl bg-amber-100 px-3 py-0.5 text-2xl font-bold text-amber-800">{badge}</span>}
+          </h1>
+          <span className="shrink-0 whitespace-nowrap text-3xl text-slate-500 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
       </div>
       <div ref={scrollRef} tabIndex={0} aria-label="환자 대기 명단" className="min-h-0 flex-1 overflow-y-auto" onWheel={() => setAutoScroll(false)} onTouchStart={() => setAutoScroll(false)}>
-        <div className={`${width} mx-auto px-6 py-3`}>{children}</div>
+        <div className={`${BOARD_WIDTH} py-4`}>{children}</div>
+      </div>
+      {/* 직원용 버튼: 환자에게 덜 보이도록 오른쪽 아래에 작게 (QR 접수 화면의 '관리'처럼) */}
+      <div className="shrink-0">
+        <div className={`${BOARD_WIDTH} py-1.5 flex items-center justify-end gap-3 whitespace-nowrap text-slate-400`}>
+          {extra}
+          <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-400">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
+          <TextSizeControl className="text-slate-400" />
+          <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-400">메인 화면</button>
+        </div>
       </div>
     </div>
   );
@@ -68,16 +76,19 @@ export function patientBoardName(p) {
   return `${maskName(p.name)}${suffix ? ` (${suffix})` : ''}`;
 }
 
+// 순번 칸 (시력방·진료실). 1번은 연한 색 바탕 + 모서리에 '다음 순서' 배지 (칸 높이는 다른 칸과 같게)
 export function BoardNumberRow({ n, name, color, compact, note }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
-    <div className={`flex flex-wrap items-center gap-2 bg-white border ${c.border} rounded-lg px-3 py-1.5`}>
+    <div className={`relative flex items-center gap-3 border ${c.border} ${note ? c.bg : 'bg-white'} rounded-lg px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       <div className={`${compact ? 'w-7 h-7 text-base' : 'w-9 h-9 text-xl'} rounded-full ${c.solid} text-white flex items-center justify-center font-semibold shrink-0`}>{n}</div>
-      <div className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{name}</div>
-      {note && <div className={`text-sm ${c.text}`}>{note}</div>}
+      <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-medium text-slate-900`}>{name}</div>
+      {note && <span className={`absolute ${compact ? '-top-2.5 text-xs' : '-top-3 text-sm'} right-3 whitespace-nowrap rounded-full ${c.solid} px-2.5 py-0.5 font-semibold text-white`}>{note}</span>}
     </div>
   );
 }
+// 명단 칸 배치: 칸 너비를 일정하게 (환자가 적어도 칸이 옆으로 늘어나지 않게)
+export const boardGrid = (minRem) => ({ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${minRem}rem), 1fr))` });
 
 // 대기 화면 안내 문구 (관리자 > 대기 화면 안내에서 입력, 모든 환자용 화면 공유)
 export const NOTICE_PRESETS = ['예약시간이 빠른 환자부터 먼저 검사합니다', '현재 약 30분 정도 지연되고 있습니다', '잠시 후 순서대로 불러드리겠습니다'];
@@ -113,7 +124,7 @@ export function VisionBoardList({ patients, compact }) {
       <WaitNotice patients={patients} kind="vision" compact={compact} />
       <BoardNotice text={notice} compact={compact} />
       {!list.length ? <BoardEmpty /> : (
-        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
+        <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>
           {list.map((p, i) => (
             <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="blue" compact={compact} note={i === 0 ? '다음 순서' : ''} />
           ))}
@@ -145,22 +156,22 @@ export function ExamBoardList({ patients, settings, compact }) {
       <BoardNotice text={examsNotice} compact={compact} />
       <RoomNotices settings={settings} compact={compact} />
       {list.length === 0 ? <BoardEmpty /> : (
-        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
+        <div className="grid gap-2.5" style={boardGrid(compact ? 15 : 20)}>
           {list.map(p => (
-            <div key={patientKey(p)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 flex items-center justify-between gap-2 flex-wrap">
-              <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(p)}</span>
-              <div className="flex flex-wrap gap-2 justify-end">
-                {!activeVf(p) && prepHolding(p, settings) && <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
-                {activeVf(p) && <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
+            <div key={patientKey(p)} className="bg-white border border-slate-200 rounded-lg px-3 py-2 break-keep">
+              <div className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(p)}</div>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {!activeVf(p) && prepHolding(p, settings) && <span className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
+                {activeVf(p) && <span className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
                 {!activeVf(p) && treatTodo(p).length > 0 && (
-                  <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200`}>
+                  <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border bg-rose-50 text-rose-700 border-rose-200`}>
                     {treat.patientName || treat.name}: {treatTodo(p).join(', ')}
                   </span>
                 )}
                 {(activeVf(p) || prepHolding(p, settings) ? [] : pendingRooms(p, settings)).map(r => {
                   const c = COLOR_MAP[roomColor(settings, r.id)];
                   return (
-                    <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-full border ${c.bg} ${c.text} ${c.border}`}>
+                    <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border ${c.bg} ${c.text} ${c.border}`}>
                       {r.patientName || r.name}: {pendingTests(p, settings, r.id).map(t => t.name || t.short).join(', ')}
                     </span>
                   );
@@ -205,22 +216,22 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
   return (
     <div className={plain ? '' : 'bg-white border border-amber-200 rounded-2xl p-4'}>
       {!plain && (
-        <div className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-slate-900 mb-3 flex items-baseline justify-between gap-2 flex-wrap`}>
+        <div className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-slate-900 mb-3 flex items-center justify-between gap-2 flex-wrap break-keep`}>
           {doctor}
-          {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-amber-700`}>{roomLabel}</span>}
+          {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} whitespace-nowrap rounded-lg bg-amber-100 px-2.5 py-0.5 font-bold text-amber-800`}>{roomLabel}</span>}
         </div>
       )}
       <BoardNotice text={notice} compact={compact} />
       {inRoom && (
-        <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">
-          <span className="text-sm text-amber-700 font-medium">진료 중{roomLabel ? ` · ${roomLabel}` : ''}</span>
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3">
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-600 px-3 py-0.5 text-sm font-semibold text-white">진료 중</span>
           <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(inRoom)}</span>
         </div>
       )}
       {waiting.length === 0 ? (
         <div className="text-sm text-slate-400 py-3">진료 대기 환자가 없습니다</div>
       ) : (
-        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
+        <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>
           {waiting.map((p, i) => (
             <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="amber" compact={compact} note={i === 0 ? '다음 순서' : ''} />
           ))}
@@ -278,8 +289,8 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
   }
   if (kind === 'vision-exam') {
     return (
-      <BoardShell title="검사 대기 현황" onBack={onBack} wide extra={<label className="text-xs text-slate-500">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
-        <div className="grid gap-4" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
+      <BoardShell title="검사 대기 현황" onBack={onBack} extra={<label className="text-xs text-slate-400">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-200 bg-white px-2 py-1 text-slate-500"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
+        <div className="grid gap-6" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
           <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} /></BoardColumn>
           <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} /></BoardColumn>
         </div>
@@ -288,7 +299,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
   }
   if (kind === 'consult-all') {
     return (
-      <BoardShell title="진료 대기 순서" onBack={onBack} wide>
+      <BoardShell title="진료 대기 순서" onBack={onBack}>
         {activeDoctors.length === 0 ? <BoardEmpty /> : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {activeDoctors.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} roomLabel={consultRoomLabel(doctorPrefs, d)} />)}
@@ -300,14 +311,14 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
   if (kind.startsWith('consult:')) {
     const d = kind.slice('consult:'.length);
     return (
-      <BoardShell title={`${d} 진료 대기 순서${consultRoomLabel(doctorPrefs, d) ? ` · ${consultRoomLabel(doctorPrefs, d)}` : ''}`} onBack={onBack}>
+      <BoardShell title={`${d} 진료 대기 순서`} badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack}>
         <ConsultBoardSection doctor={d} patients={patients} settings={settings} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
       </BoardShell>
     );
   }
   return (
-    <BoardShell title="오늘의 대기 현황" onBack={onBack} wide>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <BoardShell title="오늘의 대기 현황" onBack={onBack}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} compact /></BoardColumn>
         <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} compact /></BoardColumn>
         <BoardColumn title="진료실">

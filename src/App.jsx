@@ -1,6 +1,6 @@
 // 최상위 App (저장소 동기화와 화면 전환)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
+import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -36,6 +36,18 @@ export function patientQueueLabels(p, settings) {
   if (consultWaiting(p, settings)) labels.push('진료실 · 진료 대기');
   if (p.consultHold && !p.seen && !allDone(p, settings)) labels.push('진료실 · 추가 검사 중 (진료 보류)');
   return labels.length ? labels : [getStage(p, settings).label];
+}
+
+// 상태 칩 색: 그 방 색깔 (시력방 파랑, 검사실은 방마다 색, 처치실 남색, 진료실 주황). 시야검사 진행 중은 주황으로 강조
+export function queueLabelColor(label, p, settings) {
+  if (label.includes('VF 진행 중')) return 'amber';
+  const place = label.split(' · ')[0];
+  if (place === visionNames(settings).name) return 'blue';
+  if (place === treatRoomOf(settings).name) return 'indigo';
+  const room = settings.rooms.find(r => r.name === place && r.builtin !== 'treat');
+  if (room) return roomColor(settings, room.id);
+  if (place === '진료실' || place === '설명 완료' || (p.calledRoom && place === p.calledRoom)) return 'amber';
+  return 'slate';
 }
 
 export const DIRECTORY_STATUSES = [
@@ -111,7 +123,10 @@ export function PatientDirectory({ patients, settings, lastSync, onBack }) {
               </span>
               <span className="text-xs text-slate-500 whitespace-nowrap">{date ? '' : `${p.date} · `}예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</span>
               <span className="ml-auto flex flex-wrap justify-end gap-1.5">
-                {patientQueueLabels(p, settings).map(label => <span key={label} className={`rounded-md border px-2 py-0.5 text-sm ${p.consultDone ? 'border-slate-200 bg-slate-50 text-slate-500' : activeVf(p) ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{label}</span>)}
+                {patientQueueLabels(p, settings).map(label => {
+                  const c = COLOR_MAP[queueLabelColor(label, p, settings)] || COLOR_MAP.slate;
+                  return <span key={label} className={`rounded-md border px-2 py-0.5 text-sm ${p.consultDone ? 'border-slate-200 bg-slate-50 text-slate-500' : `${c.border} ${c.bg} ${c.text}`}`}>{label}</span>;
+                })}
                 {pendingProcedures(p).length > 0 && <span className="rounded-md border border-slate-200 px-2 py-0.5 text-sm text-slate-600">남은 처치: {pendingProcedures(p).map(x => `${x.name} (${PERFORMER_LABEL[x.performer] || x.performer})`).join(', ')}</span>}
               </span>
             </div>

@@ -437,19 +437,20 @@ export function TestDetailModal({ test, patientName, on, value, onApply, onRemov
 function RedDot() {
   return <span aria-hidden="true" className="inline-block w-2 h-2 rounded-full bg-red-500 shrink-0" />;
 }
-export function FilterChip({ active, onClick, label, dot = false, title }) {
+// muted: 기다리는 환자가 없는 검사 (흐리게, 처치실 요약 줄의 0명과 같은 규칙)
+export function FilterChip({ active, onClick, label, dot = false, title, muted = false }) {
   return (
-    <button type="button" onClick={onClick} data-dot={dot ? '1' : undefined} title={dot ? title : undefined}
-      className={`text-sm px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${active ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>
+    <button type="button" onClick={onClick} data-dot={dot ? '1' : undefined} data-muted={muted && !active ? '1' : undefined} title={dot ? title : undefined}
+      className={`text-sm px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${active ? 'bg-slate-800 border-slate-800 text-white' : muted ? 'bg-white border-slate-200 text-slate-400 opacity-50' : 'bg-white border-slate-300 text-slate-600'}`}>
       {dot && <RedDot />}{label}
     </button>
   );
 }
 // 보기만 하는 칩 (같은 묶음의 다른 검사실 대기 등). 눌러도 아무 일 없음
-export function InfoChip({ label, dot = false, title }) {
+export function InfoChip({ label, dot = false, title, muted = false }) {
   return (
-    <span data-dot={dot ? '1' : undefined} title={dot ? title : undefined}
-      className="text-sm px-3 py-1.5 rounded-full border border-dashed border-slate-300 bg-slate-50 text-slate-500 inline-flex items-center gap-1.5">
+    <span data-dot={dot ? '1' : undefined} data-muted={muted ? '1' : undefined} title={dot ? title : undefined}
+      className={`text-sm px-3 py-1.5 rounded-full border border-dashed inline-flex items-center gap-1.5 ${muted ? 'border-slate-200 bg-slate-50 text-slate-400 opacity-50' : 'border-slate-300 bg-slate-50 text-slate-500'}`}>
       {dot && <RedDot />}{label}
     </span>
   );

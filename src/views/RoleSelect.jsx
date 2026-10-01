@@ -204,6 +204,12 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
   );
 }
 
+// 메인 화면 칸의 검사 목록: 많으면 앞의 5개 + '외 N개' (글자가 중간에 잘리지 않게)
+export function testListText(shorts) {
+  if (!shorts.length) return '검사 없음';
+  return shorts.length > 6 ? `${shorts.slice(0, 5).join(', ')} 외\u00a0${shorts.length - 5}개` : shorts.join(', ');
+}
+
 // 메인 화면 칸 아래 대기 인원: 방 색깔 큰 숫자 + '명 대기', 진료실은 교수님별 한 줄
 function WaitBelow({ k, count, detail, c }) {
   return (
@@ -228,7 +234,7 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
     ...settings.rooms.filter(r => r.builtin !== 'treat').map(r => ({
       key: `room:${r.id}`,
       label: r.name,
-      sub: roomTests(settings, r.id).map(t => t.short).join(', ') || '검사 없음',
+      sub: testListText(roomTests(settings, r.id).map(t => t.short)),
       icon: Camera,
       color: roomColor(settings, r.id),
       count: roomWaiting(patients, settings, r.id).length,
@@ -276,16 +282,17 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
           </div>
         </div>
         {groupTitle('진료 흐름 · 직원 화면')}
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] mb-6">
+        {/* 칸 높이는 모두 같게: 설명은 늘 두 줄 자리, 칸 아래 교수님 줄이 길어도 칸은 그대로 (items-start) */}
+        <div className="grid items-start gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] mb-6">
           {flow.map(({ key, label, sub, icon: Icon, color, count, detail }) => {
             const c = COLOR_MAP[color] || COLOR_MAP.slate;
             return (
               <div key={key} className="flex flex-col">
-                <button type="button" data-tile={key} onClick={() => onSelect(key)} className={`flex-1 flex flex-col items-center gap-2 px-3 py-5 rounded-2xl border-2 ${c.border} ${c.bg} hover:shadow-md transition-shadow`}>
+                <button type="button" data-tile={key} onClick={() => onSelect(key)} className={`flex flex-col items-center gap-2 px-3 py-5 rounded-2xl border-2 ${c.border} ${c.bg} hover:shadow-md transition-shadow`}>
                   <Icon size={30} className={c.text} />
                   <div className="text-center min-w-0">
                     <div className="t-tile font-medium text-slate-900">{label}</div>
-                    <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{sub}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 line-clamp-2 min-h-[2.7em]">{sub}</div>
                   </div>
                 </button>
                 {/* 대기 인원은 칸 밖 아래에 따로 */}
