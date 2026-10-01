@@ -1,5 +1,9 @@
 @import "tailwindcss";
-body { margin: 0; font-family: system-ui, sans-serif; }
+/* 글꼴: 한글은 맑은 고딕으로 정해 둡니다 (윈도우 7·10 모두 같은 모양). 태블릿·맥은 각자 기본 글꼴 */
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+/* 환자용 화면 명단: 자동 스크롤되므로 오른쪽 회색 스크롤 막대를 숨깁니다 (윈도우에서 보이던 막대) */
+.board-scroll { scrollbar-width: none; }
+.board-scroll::-webkit-scrollbar { display: none; }
 button, input, select, textarea { font: inherit; }
 
 /* ------------------------------------------------------------------ */

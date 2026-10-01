@@ -49,12 +49,13 @@ export function useApplyTextSize() {
     return () => window.removeEventListener('resize', onResize);
   }, [value]);
 }
-export function TextSizeControl({ className = '' }) {
+// selectClassName: 고르기 칸 색 (어두운 환자용 화면에서 바꿈)
+export function TextSizeControl({ className = '', selectClassName = 'border-slate-300 bg-white text-slate-600' }) {
   const [value, change] = useTextSize();
   return (
     <label className={`flex items-center gap-1 text-xs text-slate-500 ${className}`} title="이 컴퓨터의 글씨 크기 (컴퓨터마다 따로 저장됩니다)">
       글씨
-      <select value={value} onChange={e => change(e.target.value)} className="text-xs border border-slate-300 rounded-lg px-1.5 py-1.5 bg-white text-slate-600">
+      <select value={value} onChange={e => change(e.target.value)} className={`text-xs border rounded-lg px-1.5 py-1.5 ${selectClassName}`}>
         {TEXT_SIZE_OPTIONS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
       </select>
     </label>

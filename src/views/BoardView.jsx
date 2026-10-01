@@ -1,6 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { WAIT_TEXT, shownWait, COLOR_MAP, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { Megaphone } from 'lucide-react';
+import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
 
@@ -9,6 +10,19 @@ import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
 /* ------------------------------------------------------------------ */
 // 환자용 화면 폭: 넓은 모니터(TV)에서도 화면을 꽉 채워 명단이 한눈에 보이도록
 const BOARD_WIDTH = 'mx-auto w-full max-w-[120rem] px-8';
+// 환자용 화면은 어두운 바탕 + 밝은 글씨 (멀리서도 잘 보이게). 방 색깔은 밝은 톤으로
+const DARK = {
+  blue: { num: 'bg-blue-500 text-white', next: 'bg-blue-500/15 border-blue-400/70', badge: 'bg-blue-500 text-white', chip: 'bg-blue-400/15 text-blue-100 border-blue-400/50' },
+  amber: { num: 'bg-amber-400 text-slate-950', next: 'bg-amber-400/15 border-amber-300/70', badge: 'bg-amber-400 text-slate-950', chip: 'bg-amber-400/15 text-amber-100 border-amber-400/50' },
+  teal: { chip: 'bg-teal-400/15 text-teal-100 border-teal-400/50' },
+  violet: { chip: 'bg-violet-400/15 text-violet-100 border-violet-400/50' },
+  rose: { chip: 'bg-rose-400/15 text-rose-100 border-rose-400/50' },
+  sky: { chip: 'bg-sky-400/15 text-sky-100 border-sky-400/50' },
+  emerald: { chip: 'bg-emerald-400/15 text-emerald-100 border-emerald-400/50' },
+  indigo: { chip: 'bg-indigo-400/15 text-indigo-100 border-indigo-400/50' },
+  slate: { chip: 'bg-slate-400/15 text-slate-100 border-slate-400/50' },
+};
+const darkChip = (color) => (DARK[color] || DARK.slate).chip;
 export function BoardShell({ title, badge, onBack, extra, children }) {
   const [now, setNow] = useState(new Date());
   const [autoScroll, setAutoScroll] = useState(true);
@@ -40,27 +54,27 @@ export function BoardShell({ title, badge, onBack, extra, children }) {
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="h-dvh min-h-0 flex flex-col overflow-hidden bg-slate-50">
-      <div className="shrink-0 bg-white border-b border-slate-200">
+    <div className="h-dvh min-h-0 flex flex-col overflow-hidden bg-slate-900 text-slate-100">
+      <div className="shrink-0 bg-slate-950 border-b border-slate-800">
         <div className={`${BOARD_WIDTH} py-4 flex items-center gap-6`}>
           {/* 제목은 낱말 단위로만 줄을 바꿈 (글자 중간에서 끊기지 않게). 진료실 번호는 옆에 배지로 */}
-          <h1 className="min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-3xl font-semibold text-slate-900 break-keep">
+          <h1 className="min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-3xl font-semibold text-white break-keep">
             <span>{title}</span>
-            {badge && <span className="whitespace-nowrap rounded-xl bg-amber-100 px-3 py-0.5 text-2xl font-bold text-amber-800">{badge}</span>}
+            {badge && <span className="whitespace-nowrap rounded-xl bg-amber-400 px-3 py-0.5 text-2xl font-bold text-slate-950">{badge}</span>}
           </h1>
-          <span className="shrink-0 whitespace-nowrap text-3xl text-slate-500 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+          <span className="shrink-0 whitespace-nowrap text-3xl text-slate-300 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
       </div>
-      <div ref={scrollRef} tabIndex={0} aria-label="환자 대기 명단" className="min-h-0 flex-1 overflow-y-auto" onWheel={() => setAutoScroll(false)} onTouchStart={() => setAutoScroll(false)}>
+      <div ref={scrollRef} tabIndex={0} aria-label="환자 대기 명단" className="board-scroll min-h-0 flex-1 overflow-y-auto" onWheel={() => setAutoScroll(false)} onTouchStart={() => setAutoScroll(false)}>
         <div className={`${BOARD_WIDTH} py-4`}>{children}</div>
       </div>
       {/* 직원용 버튼: 환자에게 덜 보이도록 오른쪽 아래에 작게 (QR 접수 화면의 '관리'처럼) */}
       <div className="shrink-0">
-        <div className={`${BOARD_WIDTH} py-1.5 flex items-center justify-end gap-3 whitespace-nowrap text-slate-400`}>
+        <div className={`${BOARD_WIDTH} py-1.5 flex items-center justify-end gap-3 whitespace-nowrap text-slate-500`}>
           {extra}
-          <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-400">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
-          <TextSizeControl className="text-slate-400" />
-          <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-400">메인 화면</button>
+          <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-800 text-slate-400">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
+          <TextSizeControl className="text-slate-500" selectClassName="border-slate-700 bg-slate-800 text-slate-400" />
+          <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-800 text-slate-400">메인 화면</button>
         </div>
       </div>
     </div>
@@ -68,7 +82,7 @@ export function BoardShell({ title, badge, onBack, extra, children }) {
 }
 
 export function BoardEmpty({ text = '대기 중인 환자가 없습니다' }) {
-  return <div className="text-center py-10 text-slate-400">{text}</div>;
+  return <div className="text-center py-10 text-slate-500">{text}</div>;
 }
 
 export function patientBoardName(p) {
@@ -78,12 +92,12 @@ export function patientBoardName(p) {
 
 // 순번 칸 (시력방·진료실). 1번은 연한 색 바탕 + 모서리에 '다음 순서' 배지 (칸 높이는 다른 칸과 같게)
 export function BoardNumberRow({ n, name, color, compact, note }) {
-  const c = COLOR_MAP[color] || COLOR_MAP.slate;
+  const c = DARK[color] || DARK.blue;
   return (
-    <div className={`relative flex items-center gap-3 border ${c.border} ${note ? c.bg : 'bg-white'} rounded-lg px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
-      <div className={`${compact ? 'w-7 h-7 text-base' : 'w-9 h-9 text-xl'} rounded-full ${c.solid} text-white flex items-center justify-center font-semibold shrink-0`}>{n}</div>
-      <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-medium text-slate-900`}>{name}</div>
-      {note && <span className={`absolute ${compact ? '-top-2.5 text-xs' : '-top-3 text-sm'} right-3 whitespace-nowrap rounded-full ${c.solid} px-2.5 py-0.5 font-semibold text-white`}>{note}</span>}
+    <div className={`relative flex items-center gap-3 border ${note ? c.next : 'bg-slate-800 border-slate-700'} rounded-lg px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
+      <div className={`${compact ? 'w-7 h-7 text-base' : 'w-9 h-9 text-xl'} rounded-full ${c.num} flex items-center justify-center font-bold shrink-0`}>{n}</div>
+      <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-medium text-white`}>{name}</div>
+      {note && <span className={`absolute ${compact ? '-top-2.5 text-xs' : '-top-3 text-sm'} right-3 whitespace-nowrap rounded-full ${c.badge} px-2.5 py-0.5 font-bold`}>{note}</span>}
     </div>
   );
 }
@@ -100,8 +114,9 @@ export function useNotice(key) {
 export function BoardNotice({ text, label, compact }) {
   if (!text) return null;
   return (
-    <div role="status" className={`bg-yellow-100 border-2 border-yellow-400 rounded-xl ${compact ? 'px-3 py-2 text-base' : 'px-4 py-3 text-xl'} font-semibold text-yellow-900 mb-3`}>
-      📢 {label ? <span className="font-bold">{label}: </span> : null}{text}
+    <div role="status" className={`flex items-start gap-2 bg-yellow-300 rounded-xl ${compact ? 'px-3 py-2 text-base' : 'px-4 py-3 text-xl'} font-bold text-slate-950 mb-3 break-keep`}>
+      <Megaphone aria-hidden="true" className={`${compact ? 'w-5 h-5' : 'w-6 h-6'} shrink-0 mt-0.5`} />
+      <span>{label ? <span className="font-extrabold">{label}: </span> : null}{text}</span>
     </div>
   );
 }
@@ -158,20 +173,19 @@ export function ExamBoardList({ patients, settings, compact }) {
       {list.length === 0 ? <BoardEmpty /> : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 15 : 20)}>
           {list.map(p => (
-            <div key={patientKey(p)} className="bg-white border border-slate-200 rounded-lg px-3 py-2 break-keep">
-              <div className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(p)}</div>
+            <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
+              <div className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-white`}>{patientBoardName(p)}</div>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {!activeVf(p) && prepHolding(p, settings) && <span className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
-                {activeVf(p) && <span className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900">{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
+                {!activeVf(p) && prepHolding(p, settings) && <span className={`rounded-xl border px-3 py-1 text-sm ${darkChip('amber')}`}>{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
+                {activeVf(p) && <span className={`rounded-xl border px-3 py-1 text-sm ${darkChip('amber')}`}>{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
                 {!activeVf(p) && treatTodo(p).length > 0 && (
-                  <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border bg-rose-50 text-rose-700 border-rose-200`}>
+                  <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border ${darkChip('rose')}`}>
                     {treat.patientName || treat.name}: {treatTodo(p).join(', ')}
                   </span>
                 )}
                 {(activeVf(p) || prepHolding(p, settings) ? [] : pendingRooms(p, settings)).map(r => {
-                  const c = COLOR_MAP[roomColor(settings, r.id)];
                   return (
-                    <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border ${c.bg} ${c.text} ${c.border}`}>
+                    <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border ${darkChip(roomColor(settings, r.id))}`}>
                       {r.patientName || r.name}: {pendingTests(p, settings, r.id).map(t => t.name || t.short).join(', ')}
                     </span>
                   );
@@ -214,22 +228,22 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
   const testing = mine.filter(p => !p.seen && !allDone(p, settings)).length;
   const notice = useNotice(`doctor:${doctor}`);
   return (
-    <div className={plain ? '' : 'bg-white border border-amber-200 rounded-2xl p-4'}>
+    <div className={plain ? '' : 'bg-slate-800/50 border border-slate-700 rounded-2xl p-4'}>
       {!plain && (
-        <div className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-slate-900 mb-3 flex items-center justify-between gap-2 flex-wrap break-keep`}>
+        <div className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-white mb-3 flex items-center justify-between gap-2 flex-wrap break-keep`}>
           {doctor}
-          {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} whitespace-nowrap rounded-lg bg-amber-100 px-2.5 py-0.5 font-bold text-amber-800`}>{roomLabel}</span>}
+          {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} whitespace-nowrap rounded-lg bg-amber-400 px-2.5 py-0.5 font-bold text-slate-950`}>{roomLabel}</span>}
         </div>
       )}
       <BoardNotice text={notice} compact={compact} />
       {inRoom && (
-        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3">
-          <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-600 px-3 py-0.5 text-sm font-semibold text-white">진료 중</span>
-          <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-slate-900`}>{patientBoardName(inRoom)}</span>
+        <div className="flex items-center gap-3 bg-amber-400/10 border border-amber-400/50 rounded-xl px-4 py-2.5 mb-3">
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-400 px-3 py-0.5 text-sm font-bold text-slate-950">진료 중</span>
+          <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-white`}>{patientBoardName(inRoom)}</span>
         </div>
       )}
       {waiting.length === 0 ? (
-        <div className="text-sm text-slate-400 py-3">진료 대기 환자가 없습니다</div>
+        <div className="text-sm text-slate-500 py-3">진료 대기 환자가 없습니다</div>
       ) : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>
           {waiting.map((p, i) => (
@@ -237,7 +251,7 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
           ))}
         </div>
       )}
-      {testing > 0 && <div className="text-sm text-slate-500 mt-3">검사 진행 중 {testing}명</div>}
+      {testing > 0 && <div className="text-sm text-slate-400 mt-3">검사 진행 중 {testing}명</div>}
     </div>
   );
 }
@@ -245,7 +259,7 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
 export function BoardColumn({ title, children }) {
   return (
     <div>
-      <div className="text-xl font-semibold text-slate-800 mb-3 pb-2 border-b-2 border-slate-200">{title}</div>
+      <div className="text-xl font-semibold text-slate-100 mb-3 pb-2 border-b-2 border-slate-700">{title}</div>
       <div className="space-y-4">{children}</div>
     </div>
   );
@@ -289,7 +303,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
   }
   if (kind === 'vision-exam') {
     return (
-      <BoardShell title="검사 대기 현황" onBack={onBack} extra={<label className="text-xs text-slate-400">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-200 bg-white px-2 py-1 text-slate-500"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
+      <BoardShell title="검사 대기 현황" onBack={onBack} extra={<label className="text-xs text-slate-500">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
         <div className="grid gap-6" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
           <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} /></BoardColumn>
           <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} /></BoardColumn>

@@ -108,7 +108,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       checkList.forEach(p => prepChecks(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${t.short || t.name} 확인할 시간` }); }));
       const fresh = seenDue.current ? due.filter(d => !seenDue.current.has(d.k)) : [];
       seenDue.current = new Set(due.map(d => d.k));
-      if (fresh.length) showToast(`⏰ ${fresh.map(d => d.text).join(' · ')}`);
+      if (fresh.length) showToast(`시간 됨 · ${fresh.map(d => d.text).join(' · ')}`);
     };
     check();
     const t = setInterval(check, 10000);

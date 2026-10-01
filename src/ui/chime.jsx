@@ -12,21 +12,41 @@ let lastChime = 0;
 const listeners = new Set();
 const notify = () => listeners.forEach(fn => fn());
 
+function getAudio() {
+  if (!audio) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    audio = new AC();
+    audio.onstatechange = notify; // 소리가 풀리거나 다시 막히면 위쪽 안내를 다시 그림
+    // iPad: 무음 모드(옆 버튼·제어 센터)여도 띵동이 들리도록 (지원하는 iPad만, 나머지는 무시)
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* 지원 안 함 */ }
+  }
+  return audio;
+}
 // 브라우저는 화면을 한 번이라도 누르기 전에는 소리를 막습니다. 누를 때 소리 장치를 준비해 둡니다.
+// 태블릿(터치 화면)은 '누르는 순간'이 아니라 '손을 뗄 때'에만 소리를 허락하므로 그때도 준비합니다.
+function unlockAudio() {
+  try {
+    const a = getAudio();
+    if (!a || a.state === 'running') return;
+    a.resume().then(notify, () => {});
+    // iPad·아이폰: 손을 뗄 때 아주 짧은 무음을 한 번 틀어야 소리가 풀립니다
+    const src = a.createBufferSource();
+    src.buffer = a.createBuffer(1, 1, 22050);
+    src.connect(a.destination);
+    src.start(0);
+  } catch { /* 소리를 못 내도 화면은 그대로 */ }
+}
 function onUserInput() {
   lastLocal = Date.now();
-  try {
-    if (!audio) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) audio = new AC();
-    }
-    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
-  } catch { /* 소리를 못 내도 화면은 그대로 */ }
+  unlockAudio();
   notify();
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('pointerdown', onUserInput, true);
   window.addEventListener('keydown', onUserInput, true);
+  ['pointerup', 'touchend', 'click'].forEach(name => window.addEventListener(name, unlockAudio, true));
+  window.__ophAudioState = () => (audio ? audio.state : 'none'); // 자동 테스트 확인용
 }
 
 export function chimeOff() {
@@ -36,9 +56,11 @@ function setChimeOff(off) {
   try { window.localStorage.setItem(OFF_KEY, off ? '1' : '0'); } catch { /* 저장 못 해도 이번엔 적용 */ }
   notify();
 }
+// 소리 장치가 실제로 켜져 있는지로 판단 (태블릿은 화면을 눌렀어도 소리가 막혀 있을 수 있음)
 function soundBlocked() {
+  if (audio) return audio.state !== 'running';
   if (typeof navigator !== 'undefined' && navigator.userActivation) return !navigator.userActivation.hasBeenActive;
-  return !audio || audio.state !== 'running';
+  return true;
 }
 
 // 띵(높은 음) → 동(낮은 음)
@@ -48,12 +70,8 @@ export function playChime() {
   lastChime = now;
   window.__ophChimes = (window.__ophChimes || 0) + 1; // 자동 테스트 확인용
   try {
-    if (!audio) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      audio = new AC();
-    }
-    if (audio.state === 'suspended') audio.resume().catch(() => {});
+    if (!getAudio()) return;
+    if (audio.state !== 'running') audio.resume().catch(() => {});
     const start = audio.currentTime + 0.03;
     [[659.25, 0], [523.25, 0.34]].forEach(([freq, delay]) => {
       [[freq, 0.32], [freq * 2, 0.06]].forEach(([f, peak]) => { // 기본음 + 약한 배음 (종소리 느낌)
