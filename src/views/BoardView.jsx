@@ -58,7 +58,7 @@ export function BoardShell({ title, badge, onBack, extra, children }) {
       <div className="shrink-0 bg-slate-950 border-b border-slate-800">
         <div className={`${BOARD_WIDTH} py-4 flex items-center gap-6`}>
           {/* 제목은 낱말 단위로만 줄을 바꿈 (글자 중간에서 끊기지 않게). 진료실 번호는 옆에 배지로 */}
-          <h1 className="min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-3xl font-semibold text-white break-keep">
+          <h1 className="min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-3xl font-bold text-white break-keep">
             <span>{title}</span>
             {badge && <span className="whitespace-nowrap rounded-xl bg-amber-400 px-3 py-0.5 text-2xl font-bold text-slate-950">{badge}</span>}
           </h1>
@@ -96,7 +96,7 @@ export function BoardNumberRow({ n, name, color, compact, note }) {
   return (
     <div className={`relative flex items-center gap-3 border ${note ? c.next : 'bg-slate-800 border-slate-700'} rounded-lg px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       <div className={`${compact ? 'w-7 h-7 text-base' : 'w-9 h-9 text-xl'} rounded-full ${c.num} flex items-center justify-center font-bold shrink-0`}>{n}</div>
-      <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-medium text-white`}>{name}</div>
+      <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-bold text-white`}>{name}</div>
       {note && <span className={`absolute ${compact ? '-top-2.5 text-xs' : '-top-3 text-sm'} right-3 whitespace-nowrap rounded-full ${c.badge} px-2.5 py-0.5 font-bold`}>{note}</span>}
     </div>
   );
@@ -174,18 +174,18 @@ export function ExamBoardList({ patients, settings, compact }) {
         <div className="grid gap-2.5" style={boardGrid(compact ? 15 : 20)}>
           {list.map(p => (
             <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
-              <div className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-white`}>{patientBoardName(p)}</div>
+              <div className={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`}>{patientBoardName(p)}</div>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {!activeVf(p) && prepHolding(p, settings) && <span className={`rounded-xl border px-3 py-1 text-sm ${darkChip('amber')}`}>{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
-                {activeVf(p) && <span className={`rounded-xl border px-3 py-1 text-sm ${darkChip('amber')}`}>{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
+                {!activeVf(p) && prepHolding(p, settings) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
+                {activeVf(p) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
                 {!activeVf(p) && treatTodo(p).length > 0 && (
-                  <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border ${darkChip('rose')}`}>
+                  <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border font-medium ${darkChip('rose')}`}>
                     {treat.patientName || treat.name}: {treatTodo(p).join(', ')}
                   </span>
                 )}
                 {(activeVf(p) || prepHolding(p, settings) ? [] : pendingRooms(p, settings)).map(r => {
                   return (
-                    <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border ${darkChip(roomColor(settings, r.id))}`}>
+                    <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border font-medium ${darkChip(roomColor(settings, r.id))}`}>
                       {r.patientName || r.name}: {pendingTests(p, settings, r.id).map(t => t.name || t.short).join(', ')}
                     </span>
                   );
@@ -230,7 +230,7 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
   return (
     <div className={plain ? '' : 'bg-slate-800/50 border border-slate-700 rounded-2xl p-4'}>
       {!plain && (
-        <div className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-white mb-3 flex items-center justify-between gap-2 flex-wrap break-keep`}>
+        <div className={`${compact ? 'text-lg' : 'text-xl'} font-bold text-white mb-3 flex items-center justify-between gap-2 flex-wrap break-keep`}>
           {doctor}
           {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} whitespace-nowrap rounded-lg bg-amber-400 px-2.5 py-0.5 font-bold text-slate-950`}>{roomLabel}</span>}
         </div>
@@ -239,7 +239,7 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
       {inRoom && (
         <div className="flex items-center gap-3 bg-amber-400/10 border border-amber-400/50 rounded-xl px-4 py-2.5 mb-3">
           <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-400 px-3 py-0.5 text-sm font-bold text-slate-950">진료 중</span>
-          <span className={`${compact ? 'text-lg' : 'text-2xl'} font-medium text-white`}>{patientBoardName(inRoom)}</span>
+          <span className={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`}>{patientBoardName(inRoom)}</span>
         </div>
       )}
       {waiting.length === 0 ? (
@@ -259,7 +259,7 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
 export function BoardColumn({ title, children }) {
   return (
     <div>
-      <div className="text-xl font-semibold text-slate-100 mb-3 pb-2 border-b-2 border-slate-700">{title}</div>
+      <div className="text-xl font-bold text-slate-100 mb-3 pb-2 border-b-2 border-slate-700">{title}</div>
       <div className="space-y-4">{children}</div>
     </div>
   );
