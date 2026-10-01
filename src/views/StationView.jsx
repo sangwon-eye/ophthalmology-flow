@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
 import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
-import { DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, HistoryControl, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 
@@ -326,9 +326,10 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 stale={room?.builtin === 'treat' && !locked && !tests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t)) ? staleMinutes(p, settings) : 0}
               >
                 {/* 값이 있는 줄만 보여줌 (값 없음 줄은 생략) */}
-                {isVision && (hasAnyValue(prev) || hasAnyValue(p.measure) || p.measureOk) && (
+                {/* 시력방: 이전 시력을 맨 위에 크게 */}
+                {isVision && <PrevVisionBox m={prev} />}
+                {isVision && (hasAnyValue(p.measure) || p.measureOk) && (
                   <div className="w-full space-y-1">
-                    {hasAnyValue(prev) && <MeasureLine label="이전" m={prev} />}
                     {(hasAnyValue(p.measure) || p.measureOk) && (
                       <div className="flex items-center gap-2 flex-wrap">
                         <MeasureLine label="오늘" m={p.measure} fields={['ucva', 'bcva', 'nct']} emptyText="측정값 없음" />
@@ -378,7 +379,6 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                     측정값 입력
                   </button>
                 )}
-                {isVision && <HistoryControl p={p} />}
                 {runningVf && !tests.some(t => t.id === runningVf) && (() => {
                   const rt = settings.tests.find(t => t.id === runningVf);
                   const rr = rt?.roomId === 'vision' ? visionNames(settings).name : settings.rooms.find(r => r.id === rt?.roomId)?.name || '';
@@ -434,7 +434,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 ))}
                 {(() => {
                   const picker = (
-                    <TestPicker inline chipsWhenClosed={isVision} closedLabel={isVision ? '검사' : ''} mainIds={mainTestIds(doctorPrefs, p.doctor)} p={p} tests={orderForPicking(allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
+                    <TestPicker inline chipsWhenClosed={isVision} closedLabel={isVision ? '시력방 검사' : ''} mainIds={mainTestIds(doctorPrefs, p.doctor)} p={p} tests={orderForPicking(isVision ? allTests.filter(t => t.roomId === 'vision') : allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
                       <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                     </TestPicker>
                   );

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { hxPending, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -480,6 +480,31 @@ export function MeasureLine({ label, m, fields, emptyText = '없음' }) {
   );
 }
 
+// 시력방: 이전 시력·안압을 크게 (시력이 좋던 환자는 작은 글씨부터 바로 재서 시간을 줄이도록)
+export function PrevVisionBox({ m }) {
+  if (!hasAnyMeasure(m)) return <div className="w-full text-sm text-slate-400">이전 시력 없음</div>;
+  const pair = (k, big) => {
+    const od = String(m?.[k]?.od ?? '').trim();
+    const os = String(m?.[k]?.os ?? '').trim();
+    if (!od && !os) return null;
+    const label = k === 'bcva' && m?.autoV ? '교정(AutoV)' : MEASURE_FIELDS.find(f => f.key === k).label;
+    const num = big ? 'text-2xl font-bold text-slate-900' : 'text-base font-semibold text-slate-700';
+    return (
+      <span key={k} className="flex items-baseline gap-1.5 whitespace-nowrap">
+        <span className={`${big ? 'text-sm font-semibold text-blue-800' : 'text-xs text-slate-500'} mr-0.5`}>{label}</span>
+        <span className="text-xs text-slate-400">R</span><span className={`${num} tabular-nums`}>{od || '-'}</span>
+        <span className="text-xs text-slate-400 ml-1">L</span><span className={`${num} tabular-nums`}>{os || '-'}</span>
+      </span>
+    );
+  };
+  return (
+    <div data-prev-vision className="w-full flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2">
+      <span className="text-xs font-semibold text-blue-700 whitespace-nowrap">이전 시력{m.date ? ` ${m.date}` : ''}</span>
+      {pair('ucva', true)}{pair('bcva', true)}{pair('nct', false)}{pair('gat', false)}
+    </div>
+  );
+}
+
 export function MeasureTable({ today, prev }) {
   const rows = [
     { label: '오늘', m: today },
@@ -729,7 +754,7 @@ export function HistoryLine({ p }) {
   if (p.hx) {
     return <div className="w-full text-sm bg-sky-50 border border-sky-200 text-sky-950 rounded-lg px-3 py-1.5"><span className="font-semibold mr-1">Hx</span>{hxSummary(p.hx, ctx.fields) || '특이사항 없음'}</div>;
   }
-  if (p.hxMissing) return <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 font-semibold">History 미입력</span>;
+  if (hxPending(p)) return <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 font-semibold">History 미입력</span>;
   return null;
 }
 // 처치실(검사 지정·예진): 오늘 지정된 검사를 보기만. 한 검사는 초록 ✓, 남은 검사는 회색
@@ -769,10 +794,10 @@ export function HistoryDetail({ p, editable = false }) {
   const [open, setOpen] = useState(false);
   const modal = open && <HistoryModal p={p} onClose={() => setOpen(false)} />;
   if (!p.hx) {
-    if (p.hxMissing) return (
-      <div className="w-full text-sm bg-red-50 border border-red-300 text-red-700 rounded-lg px-3 py-1.5 font-semibold flex items-center justify-between gap-2">
-        History 미입력
-        {editable && <button type="button" onClick={() => setOpen(true)} aria-label={`${p.name} History 입력`} className="text-xs px-2.5 py-1 rounded-md bg-white border border-red-300 text-red-700 font-medium">입력</button>}
+    if (hxPending(p)) return (
+      <div className="w-full text-sm bg-orange-50 border border-orange-300 text-orange-800 rounded-lg px-3 py-1.5 font-semibold flex items-center justify-between gap-2">
+        History 필요 (설문지 보고 입력)
+        {editable && <button type="button" onClick={() => setOpen(true)} aria-label={`${p.name} History 입력`} className="text-sm px-3 py-1 rounded-md bg-orange-500 text-white font-medium">입력</button>}
         {modal}
       </div>
     );

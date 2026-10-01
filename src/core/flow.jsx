@@ -304,7 +304,6 @@ export function visionComplete(p) {
 export function visionTasksLeft(p, prefs) {
   const left = [];
   if (!p.measureOk) left.push('measure');
-  if (hxNeeded(p) && !p.hx) left.push('hx');
   if (VISION_TEST_IDS.some(id => p.assigned?.[id] && !p.done?.[id])) left.push('tests');
   if (dropDue(p, prefs)) left.push('drop');
   return left;
@@ -1057,6 +1056,10 @@ export const TREAT_ROOM = { id: 'treat', name: '처치실', patientName: '처치
 // 초진이면 무조건 History 필요. FU가 길어 초진으로 올라온 환자는 재진으로, 재진인데 필요하면 초진으로 고치면 됨
 export function hxNeeded(p) {
   return !!p.firstVisit;
+}
+// History는 처치실(검사 지정·예진)에서 입력합니다. 초진인데 아직 없으면 '입력 필요'
+export function hxPending(p) {
+  return !p.hx && (!!p.hxMissing || hxNeeded(p));
 }
 
 // 처치실 '오래 기다린 환자': 마지막으로 무언가 진행된 뒤(접수·검사 완료·산동·처치 등) 몇 분 지났는지

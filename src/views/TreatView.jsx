@@ -1,6 +1,6 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys } from '../core/flow.jsx';
+import { hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -337,7 +337,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             <div className="w-full">
               <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
             </div>
-            {(p.hx || p.hxMissing) && <HistoryDetail p={p} editable />}
+            {(p.hx || hxPending(p)) && <HistoryDetail p={p} editable />}
             <TodayTestsLine p={p} tests={allTests} />
             <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
@@ -356,7 +356,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             {needsTriageExam(p, settings) && <>
               <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
-              {(p.hx || p.hxMissing) && <HistoryDetail p={p} editable />}
+              {(p.hx || hxPending(p)) && <HistoryDetail p={p} editable />}
               <TodayTestsLine p={p} tests={allTests} />
               <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
             </>}
@@ -405,7 +405,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           subtitle={assignAtTreat(triageFor)
             ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'
             : `${triageFor.primaryDoctor || '1차'} 진료를 마쳤습니다. ${triageFor.doctor} 진료 전에 할 검사를 체크하세요. 이미 한 검사는 다시 하지 않습니다. 없으면 바로 진료 대기로 이동합니다.${allTests.some(t => triageFor.done?.[t.id]) ? ` (오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')})` : ''}`}
-          info={<div className="space-y-2"><TodayTestsLine p={triageFor} tests={allTests} />{(triageFor.hx || triageFor.hxMissing) && <HistoryDetail p={triageFor} />}</div>}
+          info={<div className="space-y-2"><TodayTestsLine p={triageFor} tests={allTests} />{(triageFor.hx || hxPending(triageFor)) && <HistoryDetail p={triageFor} />}</div>}
           tests={allTests}
           settings={settings}
           initial={triageFor.assigned}
