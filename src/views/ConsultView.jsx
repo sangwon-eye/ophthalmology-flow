@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -194,12 +194,16 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     })));
   };
 
-  const completeExplain = async (sel, detail, dil, _triage, linkDoctor, { later = false, patient } = {}) => {
+  const completeExplain = async (sel, detail, dil, _triage, linkDoctor, { later = false, noFu = false, patient } = {}) => {
     const p = patient || explainFor;
     const pk = patientKey(p);
     const at = Date.now();
     setExplainFor(null);
-    if (later) mutateFu(prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
+    // FU 없음(회송): 이 교수님 FU 지정과 'FU 나중에' 표시를 지움. 되돌리기용으로 지우기 전 기록을 보관
+    let savedFu;
+    if (noFu) mutateFu(prev => { savedFu = prev[p.id]; return unmarkFollowupLater(deleteFollowup(prev, p.id, p.doctor), p.id); });
+    const restoreFu = () => { if (noFu) mutateFu(prev => { const n = { ...prev }; if (savedFu) n[p.id] = savedFu; else delete n[p.id]; return n; }); };
+    if (noFu) { /* FU 저장 안 함 */ } else if (later) mutateFu(prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
     else mutateFu(prev => saveFollowup(prev, p.id, dil?.doctor || p.doctor, {
         ...sel,
         detail,
@@ -222,30 +226,32 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const current = allPatients.find(x => patientKey(x) === pk) || p;
     if (pendingProcedures(current).length) {
       mutatePatients(prev => {
-        let next = prev.map(x => (patientKey(x) === pk ? { ...x, explainedEarly: at, fuLater: later }
+        let next = prev.map(x => (patientKey(x) === pk ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
           : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x));
         if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
         return next;
       });
-      showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : ''}`, () => {
-        patch(pk, () => ({ explainedEarly: null, fuLater: false }));
+      showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : noFu ? ' (FU 없음 · 회송)' : ''}`, () => {
+        patch(pk, () => ({ explainedEarly: null, fuLater: false, referred: undefined }));
         if (later) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+        restoreFu();
       });
       return;
     }
     const undoDone = () => {
-      mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false } : x)), pk));
+      mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false, referred: undefined } : x)), pk));
       if (later) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+      restoreFu();
     };
     mutatePatients(prev => {
-      let next = prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at, fuLater: later }
+      let next = prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined }
         : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x));
       if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
       return activateLinked(next, pk, settings, at);
     });
     const nextVisit = linkDoctor || allPatients.find(x => x.primaryKey === pk && x.linkWaiting)?.doctor;
     const via = settings.linkCheckAdded !== false && linkDoctor ? '처치실 추가 검사 확인 후 ' : '';
-    showToast(`${p.name} 설명 완료${later ? ' · FU는 관리자 > FU 지정 관리에서 나중에' : ''}${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
+    showToast(`${p.name} 설명 완료${later ? ' · FU는 관리자 > FU 지정 관리에서 나중에' : noFu ? ' · FU 없음 (회송)' : ''}${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
   };
 
   const goHome = (p) => {
@@ -512,6 +518,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
           confirmLabel="설명 완료"
           onConfirm={completeExplain}
           onLater={(linkDoctor) => completeExplain(null, null, null, false, linkDoctor, { later: true })}
+          onNoFu={(linkDoctor) => completeExplain(null, null, null, false, linkDoctor, { noFu: true })}
           onCancel={() => setExplainFor(null)}
         />
       )}

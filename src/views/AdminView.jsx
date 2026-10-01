@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw } from 'lucide-react';
-import { patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, cleanDetail, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
+import { unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, cleanDetail, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { loadFu, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
@@ -578,7 +578,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
         };
       }));
     }
-    mutateFu(prev => saveFollowup(prev, id, fuEdit.doctor || '', {
+    mutateFu(prev => saveFollowup(prev, id, dil?.doctor || fuEdit.doctor || '', {
         ...sel,
         detail,
         dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
@@ -589,6 +589,15 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
         visitDate: fuEdit.visitDate || fuMap[id]?.fuLater?.date,
         updatedAt: Date.now(),
     }));
+  };
+
+  // FU 지정 창의 'FU 없음 · FU 명단에서 삭제': 그 교수님 FU 지정과 'FU 나중에' 표시, 다음 명단의 'FU 미지정' 표시를 지움
+  const deleteFuEdit = (e) => {
+    const id = e.id;
+    setFuEdit(null);
+    mutateFu(prev => unmarkFollowupLater(deleteFollowup(prev, id, e.doctor || ''), id));
+    if (patients.some(p => p.id === id && p.fuMissing)) mutatePatients(prev => prev.map(p => (p.id === id && p.fuMissing ? { ...p, fuMissing: false } : p)));
+    setMessage(`${e.name || nameOf(id) || id} FU 없음 · FU 명단에서 삭제했습니다.`);
   };
 
   const TABS = [
@@ -933,8 +942,10 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       {fuEdit && (
         <TestCheckModal
           key={`fu-${fuEdit.id}`}
-          title={`${fuEdit.name || nameOf(fuEdit.id) ? `${fuEdit.name || nameOf(fuEdit.id)}님 (${fuEdit.id})` : `환자 ${fuEdit.id}`} 다음 방문 검사`}
-          subtitle="다음에 내원했을 때 할 검사를 체크해주세요"
+          title={`${fuEdit.name || nameOf(fuEdit.id) ? `${fuEdit.name || nameOf(fuEdit.id)}님 (${fuEdit.id})` : `환자 ${fuEdit.id}`} 다음 내원 검사`}
+          subtitle="다음 내원 때 필요한 검사를 체크하고 저장을 누르세요"
+          followup={{ doctor: fuEdit.doctor || fuMap[fuEdit.id]?.doctor || patients.find(p => p.id === fuEdit.id)?.doctor || '', doctors, prefs: doctorPrefs }}
+          onDelete={() => deleteFuEdit(fuEdit)}
           tests={allTests}
           settings={settings}
           initial={fuEdit}

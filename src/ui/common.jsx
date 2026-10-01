@@ -1507,7 +1507,8 @@ export function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onCancel, mainIds = null }) {
+export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onNoFu, onDelete, onCancel, mainIds = null }) {
+  const [delArmed, setDelArmed] = useState(false);
   const [preSel, setPreSel] = useState(() => preProcChoice?.initial || []);
   const tests = orderForPicking(rawTests, settings);
   const [followupDoctor, setFollowupDoctor] = useState(followup?.doctor || '');
@@ -1680,10 +1681,28 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
           <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor, preProcs: preSel }, triageRequired, linkDoctor)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>
         </div>
-        {onLater && (
-          <button type="button" onClick={() => onLater(linkDoctor)} className="w-full mt-2 py-2.5 rounded-xl border border-emerald-300 text-emerald-700 text-sm font-medium">
-            설명 완료 · FU 나중에 <span className="font-normal text-emerald-600">(위 체크는 저장하지 않음)</span>
-          </button>
+        {(onLater || onNoFu) && (
+          <div className="flex gap-2 mt-2">
+            {onLater && (
+              <button type="button" onClick={() => onLater(linkDoctor)} title="위 체크는 저장하지 않고, 관리자 > FU 지정 관리에서 나중에 지정" className="flex-1 py-2.5 rounded-xl border border-emerald-300 text-emerald-700 text-sm font-medium">
+                설명 완료 · FU 나중에
+              </button>
+            )}
+            {/* 회송서를 쓰고 보내는 등 FU가 아예 없는 환자: FU를 잡지 않고 FU 명단에도 올리지 않음 */}
+            {onNoFu && (
+              <button type="button" onClick={() => onNoFu(linkDoctor)} title="FU를 잡지 않음 (예전 FU 지정도 지움)" className="flex-1 py-2.5 rounded-xl border border-rose-300 text-rose-700 text-sm font-medium">
+                설명 완료 · FU 없음 (회송)
+              </button>
+            )}
+          </div>
+        )}
+        {/* 관리자 FU 지정: FU를 잡지 않고 FU 명단에서 지움 (한 번 더 눌러야 삭제) */}
+        {onDelete && (
+          <div className="mt-3 text-center">
+            <button type="button" onClick={() => (delArmed ? onDelete() : setDelArmed(true))} className="text-sm text-rose-700 underline">
+              {delArmed ? '한 번 더 누르면 FU 명단에서 삭제' : 'FU 없음 · FU 명단에서 삭제'}
+            </button>
+          </div>
         )}
       </div>
     </div>

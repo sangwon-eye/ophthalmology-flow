@@ -16,7 +16,7 @@ import { SettingsView } from './views/SettingsView.jsx';
 /* ------------------------------------------------------------------ */
 // 각 업무 화면과 같은 조건으로 조회하여 여러 명단에 속한 경우도 함께 표시한다.
 export function patientQueueLabels(p, settings) {
-  if (p.consultDone) return ['진료 완료'];
+  if (p.consultDone) return [p.referred ? '진료 완료 · 회송' : '진료 완료'];
   const labels = [];
   if (!p.checkin) labels.push('접수 전');
   if (p.checkin && !visionComplete(p)) labels.push(`${visionNames(settings).name} · 검사 대기`);
