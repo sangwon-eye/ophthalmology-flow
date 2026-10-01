@@ -564,7 +564,7 @@ export function MeasureModal({ mode, patient, previous, gatAvailable, gatAssigne
 
         {mode !== 'prev' && (
           <div className="bg-slate-50 rounded-xl p-3 mb-4 space-y-1">
-            <MeasureLine label="이전" m={previous} fields={mode === 'gat' ? ['nct', 'gat'] : undefined} emptyText="이전 값 없음" />
+            {mode === 'vision' ? <PrevVisionBox m={previous} /> : <MeasureLine label="이전" m={previous} fields={mode === 'gat' ? ['nct', 'gat'] : undefined} emptyText="이전 값 없음" />}
             {mode === 'gat' && <MeasureLine label="오늘" m={patient.measure} fields={['nct']} emptyText="오늘 NCT 없음" />}
           </div>
         )}
@@ -789,10 +789,15 @@ export function TodayDoneLine({ p, tests, prefs }) {
 }
 // 처치실 검사 지정용: 항목마다 한 줄씩 전부 (여러 줄 글은 줄바꿈 그대로)
 // editable: 처치실(검사 지정 대기·예진 대기)에서 [수정]/[입력] — 시력방을 지난 뒤에도 고칠 수 있게
-export function HistoryDetail({ p, editable = false }) {
+export function HistoryDetail({ p, editable = false, button = false }) {
   const ctx = useContext(HxContext);
   const [open, setOpen] = useState(false);
   const modal = open && <HistoryModal p={p} onClose={() => setOpen(false)} />;
+  // button: 처치실 카드의 한 줄 안에 들어가는 작은 [History 입력] 버튼
+  if (button) return hxPending(p) ? <>
+    <button type="button" onClick={() => setOpen(true)} aria-label={`${p.name} History 입력`} className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium">History 입력</button>
+    {modal}
+  </> : null;
   if (!p.hx) {
     if (hxPending(p)) return (
       <div className="w-full text-sm bg-orange-50 border border-orange-300 text-orange-800 rounded-lg px-3 py-1.5 font-semibold flex items-center justify-between gap-2">

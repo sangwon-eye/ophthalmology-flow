@@ -176,9 +176,12 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const items = chosen.map(c => ({
       uid: newId('pr'), procId: c.id, name: c.name, performer: c.performer, note, done: false, doneAt: null, orderedAt: at,
     }));
-    patch(pk, x => ({ seen: true, seenAt: at, calledRoom: null, procOrderedAt: at, procedures: [...(x.procedures || []), ...items] }));
+    // 설명 대기 중에 보낸 처치(진료 후 외래 간호사 입력): 설명 대기 순서는 그대로 두고 처치만 추가
+    const already = !!p.seen;
+    patch(pk, x => ({ seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, procedures: [...(x.procedures || []), ...items] }));
     const where = items.some(i => i.performer === 'prof') ? '설명 대기에서 교수님 처치' : '처치실로';
-    showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => backToRoom(pk, x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at) })));
+    const removeItems = x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at) });
+    showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems)));
   };
 
   const finishProfProcedure = (p) => {
@@ -357,6 +360,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
                   )}
                   {nextVisitNote(p)}
+                  {/* 진료 후 외래 간호사가 처치를 넣을 때 (진료 호출을 다시 하지 않아도 됨) */}
+                  <button type="button" onClick={() => setProcFor(p)} className="text-sm px-3 py-2 rounded-lg border border-rose-300 text-rose-700 font-medium">처치 보내기</button>
                   {early ? (
                     ps === 'doing'
                       ? <span className="text-sm text-slate-500">처치가 끝나면 귀가 처리할 수 있어요</span>

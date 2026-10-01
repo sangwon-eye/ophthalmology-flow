@@ -1,7 +1,7 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -22,6 +22,21 @@ export function StationView(props) {
     );
   }
   return <StationScreen {...props} />;
+}
+
+// 시력방: [오늘 검사 ▾]를 누르면 오늘 지정된 검사(보기만)와 시력방 검사 바꾸기가 펼쳐짐
+function VisionTodayTests({ p, tests, children }) {
+  const [open, setOpen] = useState(false);
+  const list = tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id]);
+  return <>
+    <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} className="text-xs text-slate-500 hover:text-slate-800 underline">오늘 검사 {list.length}{open ? ' ▴' : ' ▾'}</button>
+    {open && (
+      <div className="order-last w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1.5">
+        <div className="text-sm text-slate-700"><span className="text-xs text-slate-400 mr-2">오늘 검사</span>{list.length ? list.map(t => testLabelWithOptions(t, p.detail?.[t.id])).join(', ') : '없음'}</div>
+        <div className="flex flex-wrap items-center gap-1.5">{children}</div>
+      </div>
+    )}
+  </>;
 }
 
 function StationScreen({ mode, settings, doctorPrefs, patients, history, mutatePatients, mutateHistoryEntry, onBack, lastSync, embedded = false }) {
@@ -87,7 +102,13 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const groupIdle = (g, list) => !list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p)));
   // VF 분류에서도 진행 중인 카드와 종료 버튼을 계속 보여준다.
   const shown = activeGroup ? roomList.filter(p => groupPending(p, activeGroup) || activeGroup.tests.some(t => t.id === activeVf(p))) : roomList;
-  const toggleFirstVisit = (pk) => patchPatient(mutatePatients, pk, x => ({ firstVisit: !x.firstVisit }));
+  // 초진으로 바꾸면 ARK도 함께 지정 (초진은 ARK를 꼭 찍음). 재진으로 되돌리면 아직 안 한 ARK는 뺌
+  const arkId = settings.tests.some(t => t.id === 'ark' && t.roomId === 'vision') ? 'ark' : null;
+  const toggleFirstVisit = (pk) => patchPatient(mutatePatients, pk, x => {
+    const on = !x.firstVisit;
+    if (!arkId || (!on && x.done?.[arkId])) return { firstVisit: on };
+    return { firstVisit: on, assigned: { ...(x.assigned || {}), [arkId]: on } };
+  });
   const firstVisitChip = (p) => (
     <button
       type="button"
@@ -376,9 +397,17 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 })()}
                 {isVision && !p.measureOk && (
                   <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision' })} className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium">
-                    측정값 입력
+                    {nctNeeded(p) ? '시력 + NCT 입력' : '시력 입력'}
                   </button>
                 )}
+                {/* NCT를 재는지 바로 보이게: GAT 환자는 NCT 안 함 */}
+                {isVision && !p.measureOk && !nctNeeded(p) && (
+                  <span className="text-sm px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 font-semibold">NCT 안 함 · 검사실 GAT</span>
+                )}
+                {/* 초진: History 설문지를 드렸는지 (입력은 처치실에서) */}
+                {isVision && hxNeeded(p) && !p.hx && (p.hxSheetAt
+                  ? <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxSheetAt: null }))} title="누르면 취소" className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-500">History 설문지 드림 ✓</button>
+                  : <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ hxSheetAt: Date.now() }))} className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium">History 설문지 드리기</button>)}
                 {runningVf && !tests.some(t => t.id === runningVf) && (() => {
                   const rt = settings.tests.find(t => t.id === runningVf);
                   const rr = rt?.roomId === 'vision' ? visionNames(settings).name : settings.rooms.find(r => r.id === rt?.roomId)?.name || '';
@@ -434,7 +463,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 ))}
                 {(() => {
                   const picker = (
-                    <TestPicker inline chipsWhenClosed={isVision} closedLabel={isVision ? '시력방 검사' : ''} mainIds={mainTestIds(doctorPrefs, p.doctor)} p={p} tests={orderForPicking(isVision ? allTests.filter(t => t.roomId === 'vision') : allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
+                    <TestPicker inline defaultOpen={isVision} chipsWhenClosed={false} closedLabel={isVision ? '시력방 검사' : ''} mainIds={mainTestIds(doctorPrefs, p.doctor)} p={p} tests={orderForPicking(isVision ? allTests.filter(t => t.roomId === 'vision') : allTests, settings)} onPick={(t, on) => pickTest(p, t, on)} onSpecial={(t) => openSpecial(p, t)}>
                       <DilationRow togglesOnly inline p={p} prefs={doctorPrefs} waitMin={settings.dilationWaitMin} mutatePatients={mutatePatients} />
                     </TestPicker>
                   );
@@ -446,8 +475,9 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                       <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateSkip: true }))} title="점안은 다음 검사실·처치실에서 기록할 수 있어요"
                         className="text-xs text-slate-500 hover:text-slate-800 underline">점안 없이 넘기기</button>
                     )}
+                    {/* 오늘 검사는 평소엔 접어 두고, 눌렀을 때만 (시력방은 대부분 바꿀 일이 없음) */}
+                    <VisionTodayTests p={p} tests={allTests}>{picker}</VisionTodayTests>
                     <button type="button" onClick={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1"><RotateCcw size={12} />접수 취소</button>
-                    <div className="order-last w-full flex flex-wrap items-center gap-1.5">{picker}</div>
                   </>;
                   // 검사실: 접힌 [검사 변경]은 검사 칸 줄 끝에 (위 검사 칸과 겹치는 '오늘 검사' 칩은 숨김)
                   return <>

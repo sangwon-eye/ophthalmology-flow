@@ -337,12 +337,16 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             <div className="w-full">
               <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
             </div>
-            {(p.hx || hxPending(p)) && <HistoryDetail p={p} editable />}
-            <TodayTestsLine p={p} tests={allTests} />
-            <DilationRow p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
-            <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
-              {assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'}
-            </button>
+            {p.hx && <HistoryDetail p={p} editable />}
+            {allTests.some(t => t.id !== VISION_KEY && p.assigned?.[t.id]) && <TodayTestsLine p={p} tests={allTests} />}
+            {/* 한 줄에: History 입력 · 산동 · 검사 지정 (의미 없는 '없음' 줄은 생략) */}
+            <div className="w-full flex flex-wrap items-center gap-2">
+              <HistoryDetail p={p} button />
+              <DilationRow group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+              <button type="button" onClick={() => setTriageFor(p)} className="ml-auto text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
+                {assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'}
+              </button>
+            </div>
           </SimpleCard>
           );
         })}
@@ -356,9 +360,12 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             {needsTriageExam(p, settings) && <>
               <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-medium text-sky-700">예진</span>
               <div className="w-full"><MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" /></div>
-              {(p.hx || hxPending(p)) && <HistoryDetail p={p} editable />}
+              {p.hx && <HistoryDetail p={p} editable />}
               <TodayTestsLine p={p} tests={allTests} />
-              <button type="button" onClick={() => finishTriage(p)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
+              <div className="w-full flex flex-wrap items-center gap-2">
+                <HistoryDetail p={p} button />
+                <button type="button" onClick={() => finishTriage(p)} className="ml-auto rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">예진 완료</button>
+              </div>
             </>}
             {(p.procedures || []).some(x => x.performer === 'resident') && (
               <div className="w-full flex items-center justify-between gap-3 flex-wrap">

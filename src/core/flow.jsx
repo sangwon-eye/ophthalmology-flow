@@ -304,6 +304,7 @@ export function visionComplete(p) {
 export function visionTasksLeft(p, prefs) {
   const left = [];
   if (!p.measureOk) left.push('measure');
+  if (hxNeeded(p) && !p.hx && !p.hxSheetAt) left.push('hxSheet'); // 초진: History 설문지 드리기
   if (VISION_TEST_IDS.some(id => p.assigned?.[id] && !p.done?.[id])) left.push('tests');
   if (dropDue(p, prefs)) left.push('drop');
   return left;
@@ -1056,6 +1057,10 @@ export const TREAT_ROOM = { id: 'treat', name: '처치실', patientName: '처치
 // 초진이면 무조건 History 필요. FU가 길어 초진으로 올라온 환자는 재진으로, 재진인데 필요하면 초진으로 고치면 됨
 export function hxNeeded(p) {
   return !!p.firstVisit;
+}
+// 시력방 NCT: GAT(검사실 안압)이 지정된 환자는 NCT를 재지 않음 (시안: 사용자 확인 대기)
+export function nctNeeded(p) {
+  return !p.assigned?.[GAT_ID];
 }
 // History는 처치실(검사 지정·예진)에서 입력합니다. 초진인데 아직 없으면 '입력 필요'
 export function hxPending(p) {
