@@ -1,4 +1,4 @@
-import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
+import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES , measureVision } from '../lib.mjs';
 // 최민지(재진) 산동 예정 / 정대현(재진) 산동 예정 + VF 지정 / 강서윤(초진)
 await editKey('daily-patients', list => list.map(p => {
   if (p.name === '최민지') return { ...p, dilateOverride: true };
@@ -9,12 +9,10 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 const { errors, ok, W, pick, back, cardOf } = tester(page);
 const measure = async (n) => {
-  await cardOf(n).getByRole('button', { name: '측정값 입력' }).click(); await W(300);
-  const m = page.locator('.fixed.inset-0').last();
-  ok(await m.getByRole('button', { name: '저장', exact: true }).count() === 0, '측정 창: [저장] 없이 [확인] 하나');
-  await m.locator('input').first().fill('0.5');
-  await m.getByRole('button', { name: '확인', exact: true }).click(); await W(300);
-  if (await page.locator('.fixed.inset-0').count()) await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click();
+  await cardOf(n).getByRole('button', { name: '시력', exact: true }).click(); await W(300);
+  ok(await page.locator('.fixed.inset-0').last().getByRole('button', { name: '저장', exact: true }).count() === 0, '측정 창: [저장] 없이 [확인] 하나');
+  await page.keyboard.press('Escape'); await page.locator('.fixed.inset-0').last().getByRole('button', { name: '취소', exact: true }).click().catch(() => {}); await W(200);
+  await measureVision(page, cardOf(n), '0.5');
   await W(1200);
 };
 const pt = async (n) => (await getKey('daily-patients')).value.find(p => p.name === n);
@@ -41,7 +39,7 @@ await measure('정대현');
 ok((await pt('정대현')).done?.visionIop === true, 'VF 남은 산동 환자: 점안 없이 넘어감');
 // 초진: 측정만으로는 안 넘어감
 await measure('강서윤');
-ok(!(await pt('강서윤')).done?.visionIop, '초진: History 확인 전엔 남음');
+ok(!(await pt('강서윤')).done?.visionIop, '초진: History 설문지 드리기 전엔 남음');
 await page.screenshot({ path: `${SP}/r29-vision.png`, fullPage: true });
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

@@ -873,6 +873,26 @@ export function mergeHistoryEntry(list, date, patch) {
   return next.length ? next : null;
 }
 
+/* 검사 결과 입력 (설정에서 검사마다 [결과 입력]을 켜고 칸을 고름. 예: MR = S·C·A·Add·VA, WG = S·C·A)
+   결과는 그날 명단 기록에만 (다음 내원 때 이전 값으로 보이지 않음) */
+export const RESULT_FIELDS = [
+  { key: 's', label: 'S' },
+  { key: 'c', label: 'C' },
+  { key: 'a', label: 'A' },
+  { key: 'add', label: 'Add' },
+  { key: 'va', label: 'VA' },
+];
+export function resultFieldsOf(t) {
+  return Array.isArray(t?.resultFields) ? RESULT_FIELDS.filter(f => t.resultFields.includes(f.key)) : [];
+}
+export function hasResultValue(r) {
+  return !!r && ['od', 'os'].some(e => Object.values(r[e] || {}).some(v => String(v ?? '').trim()));
+}
+// 한 눈 결과를 한 줄로: "S -1.25 C -0.50 A 180"
+export function resultEyeText(r, eye, fields) {
+  return fields.map(f => [f.label, String(r?.[eye]?.[f.key] ?? '').trim()]).filter(([, v]) => v).map(([l, v]) => `${l} ${v}`).join(' ');
+}
+
 /* 검사 세부 종류·눈·프로토콜 */
 export const EYE_OPTIONS = [
   { key: 'OU', label: '양안' },

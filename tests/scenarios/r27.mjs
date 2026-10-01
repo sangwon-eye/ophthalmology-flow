@@ -12,19 +12,20 @@ await pick('시력');
 const mid = async (l) => { const b = await l.boundingBox(); return b.y + b.height / 2; };
 for (const n of ['최민지', '정대현']) {
   const c = cardOf(n);
-  const y0 = await mid(c.getByRole('button', { name: '측정값 입력' }));
-  ok(Math.abs(await mid(c.getByRole('button', { name: '산동', exact: true })) - y0) < 12 && await c.getByRole('button', { name: /점안$/ }).count() === 0, `${n}: 측정값·산동 첫 줄 (점안 버튼 따로 없음)`);
-  if (n === '최민지') ok(Math.abs(await mid(c.getByRole('button', { name: 'History 필요' })) - y0) < 12, `${n}: History 필요도 첫 줄`);
-  const yt = await mid(c.getByRole('button', { name: /WFP/ }).first());
-  ok(yt > y0 + 20, `${n}: 검사는 둘째 줄`);
+  const y0 = await mid(c.getByRole('button', { name: '시력', exact: true }));
+  ok(Math.abs(await mid(c.getByRole('button', { name: '산동', exact: true })) - y0) < 12 && await c.getByRole('button', { name: /점안$/ }).count() === 0, `${n}: 시력·산동 첫 줄 (점안 버튼 따로 없음)`);
+  if (n === '최민지') ok(Math.abs(await mid(c.getByRole('button', { name: 'History 설문지 드리기' })) - y0) < 12, `${n}: 설문지 버튼도 첫 줄`);
+  ok(await c.getByRole('button', { name: /WFP/ }).count() === 0, `${n}: 다른 검사실 검사는 접혀 있음`);
+  await c.getByRole('button', { name: /^오늘 검사 \d/ }).click(); await W(300);
+  ok(await c.getByRole('button', { name: /WFP/ }).count() >= 1, `${n}: [오늘 검사 보기]를 누르면 검사실 검사까지 모두`);
+  await c.getByRole('button', { name: /^오늘 검사 \d/ }).click(); await W(200);
   await c.screenshot({ path: `${SP}/r27-${n}.png` });
 }
 const c = cardOf('정대현');
-ok(await mid(c.getByText(/HTN/)) < await mid(c.getByRole('button', { name: /WFP/ }).first()), 'Hx 내용은 검사 줄 위');
 await c.getByRole('button', { name: '산동', exact: true }).click(); await W();
 ok(await c.getByRole('button', { name: /^산동 \d/ }).count() === 1 && await c.getByText(/분 남음/).count() === 0, '누르면 산동 시각, 남은 시간 없음');
-await c.getByRole('button', { name: '검사 변경' }).click(); await W(200);
-ok(await c.getByRole('button', { name: '접기' }).count() === 1, '검사 변경 펼치기 동작');
+await c.getByRole('button', { name: /^오늘 검사 \d/ }).click(); await W(200);
+ok(await c.getByRole('button', { name: /^\+ ?WFP|WFP/ }).count() >= 1, '오늘 검사 펼치면 검사 바꾸기 가능');
 await page.screenshot({ path: `${SP}/r27-vision.png` });
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

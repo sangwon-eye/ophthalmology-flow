@@ -1,55 +1,44 @@
-import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
-// 최민지: 초진 (기록 없음) → 추천, 정대현: 초진이지만 FU 기록 있음(9개월 FU) → 추천 안 함
+import { chromium, SP, getKey, editKey, tester, BASE, measureVision } from '../lib.mjs';
+// History: 시력방은 초진에게 설문지만 드리고([History 설문지 드리기]), 입력은 처치실(검사 지정 대기)에서
 await editKey('daily-patients', list => list.map(p => (p.name === '최민지' || p.name === '정대현' ? { ...p, firstVisit: true } : p)));
-const pts = (await getKey('daily-patients')).value;
-const jid = pts.find(p => p.name === '정대현').id;
-await editKey('fu-designations', fu => ({ ...(fu || {}), [jid]: { oct: true, doctor: '나상훈', byDoctor: { '나상훈': { oct: true, doctor: '나상훈' } } } }));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 const { errors, ok, W, pick, back, cardOf } = tester(page);
 await page.goto(`${BASE}/`); await W(1000);
 await pick('시력');
-ok(await cardOf('최민지').getByText('History 필요', { exact: true }).count() === 1, '초진 + 기록 없음 → History 필요');
-ok(await cardOf('정대현').getByText('History 필요', { exact: true }).count() === 1, '초진이면 FU 기록이 있어도 History 필요');
-ok(await cardOf('정대현').getByRole('button', { name: /필요 없음|History 입력/ }).count() === 0, '필요 없음·History 입력 버튼 없음');
-// 최민지 입력
-await cardOf('최민지').getByRole('button', { name: /^History (입력|필요)$/ }).click(); await W(300);
+ok(await cardOf('최민지').getByRole('button', { name: 'History 설문지 드리기' }).count() === 1, '초진 → [History 설문지 드리기]');
+ok(await cardOf('최민지').getByRole('button', { name: /History (입력|필요|수정)/ }).count() === 0, '시력방에는 History 입력 버튼·창 없음');
+// 강서윤(초진): 측정만 하면 설문지가 남아 시력방에 그대로
+await measureVision(page, cardOf('강서윤'), '0.5');
+let k = (await getKey('daily-patients')).value.find(p => p.name === '강서윤');
+ok(!k.done?.visionIop && k.measureOk && k.vaOk && k.nctOk, '시력·NCT 따로 저장 → 측정 완료, 설문지 남아 시력방에 그대로');
+await cardOf('강서윤').screenshot({ path: `${SP}/r29-measure-done.png` });
+await cardOf('강서윤').getByRole('button', { name: '측정값 수정' }).click(); await W(300);
+ok(await page.locator('.fixed.inset-0').count() === 1, '[수정]으로 측정 창');
+await page.locator('.fixed.inset-0').last().getByRole('button', { name: '취소', exact: true }).click(); await W(300);
+await cardOf('강서윤').getByRole('button', { name: 'History 설문지 드리기' }).click(); await W(1500);
+k = (await getKey('daily-patients')).value.find(p => p.name === '강서윤');
+ok(k.done?.visionIop === true && k.hxSheetAt && !k.hx, '설문지 드림 → 시력방 자동 완료 (History는 아직 없음)');
+ok(await page.getByText(/강서윤 시력방 완료/).count() === 1, '완료 알림');
+await back();
+// 처치실 검사 지정 대기: [History 입력] (검사 지정과 같은 줄)
+await pick('처치실');
+const tc = cardOf('강서윤');
+const hb = await tc.getByRole('button', { name: '강서윤 History 입력' }).boundingBox();
+const ab = await tc.getByRole('button', { name: '검사 지정', exact: true }).boundingBox();
+ok(hb && ab && Math.abs(hb.y - ab.y) < 4 && Math.abs(hb.height - ab.height) < 2 && hb.x < ab.x, '처치실: [History 입력]·[검사 지정] 같은 줄, 같은 크기, 왼쪽부터');
+ok(!/오늘 검사\s*없음/.test(await tc.innerText()), "'오늘 검사 없음' 줄 없음");
+await tc.getByRole('button', { name: '강서윤 History 입력' }).click(); await W(300);
 const m = page.locator('.fixed.inset-0').last();
 await m.getByRole('button', { name: '고혈압 있음' }).click();
 await m.getByRole('button', { name: '당뇨 있음' }).click();
 await m.getByLabel('당뇨 기간').fill('5');
-await m.getByLabel('이전 안과 수술력').fill('백내장 OD (2020)\n녹내장 레이저');
 await m.getByLabel('주호소').fill('좌안 흐림 1달');
 await m.screenshot({ path: `${SP}/r18-hx-modal.png` });
 await m.getByRole('button', { name: '확인', exact: true }).click(); await W();
-ok(await cardOf('최민지').getByText(/HTN\(\+\) · DM\(\+\) 5년 · 수술력: 백내장 OD \(2020\), 녹내장 레이저 · 주호소: 좌안 흐림 1달/).count() === 1, '입력 후 카드에 요약');
-// 강서윤(초진, seed) → 입력 없이 완료 → 경고
-ok(await cardOf('강서윤').getByText('History 필요', { exact: true }).count() === 1, '강서윤 History 필요');
-// 시력 완료: 측정값 입력 창에서 완료
-await cardOf('강서윤').getByRole('button', { name: '측정값 입력' }).click(); await W(300);
-const mm = page.locator('.fixed.inset-0').last();
-await mm.getByRole('button', { name: '확인', exact: true }).click(); await W(300);
-if (await page.locator('.fixed.inset-0').count()) { await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click(); }
-await W(800);
-let list = (await getKey('daily-patients')).value;
-let k = list.find(p => p.name === '강서윤');
-ok(!k.done?.visionIop && k.measureOk && k.measure, '측정 확인만: 시력방에 남음 (History 남음)');
-ok(await cardOf('강서윤').getByRole('button', { name: '측정값 입력' }).count() === 0 && await cardOf('강서윤').getByRole('button', { name: '측정값 수정' }).count() === 1, '측정값 입력 버튼 사라지고 [수정]');
-await cardOf('강서윤').screenshot({ path: `${SP}/r29-measure-done.png` });
-// 수정 → 창 열림 → 취소
-await cardOf('강서윤').getByRole('button', { name: '측정값 수정' }).click(); await W(300);
-ok(await page.locator('.fixed.inset-0').count() === 1, '[수정]으로 측정 창');
-await page.locator('.fixed.inset-0').last().getByRole('button', { name: '취소', exact: true }).click(); await W(300);
-// 빈칸으로 History [확인] → 할 일 끝 → 자동으로 넘어감
-await cardOf('강서윤').getByRole('button', { name: 'History 필요' }).click(); await W(300);
-await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click(); await W(1200);
-list = (await getKey('daily-patients')).value;
-ok(list.find(p => p.name === '강서윤').done?.visionIop === true, 'History 확인 → 자동으로 시력방 완료');
-ok(await page.getByText(/강서윤 시력방 완료/).count() === 1, '완료 알림');
-await back();
-// History는 그날 기록에만 (다음 내원 미리 채우기용 저장소에는 쓰지 않음)
+k = (await getKey('daily-patients')).value.find(p => p.name === '강서윤');
+ok(k.hx?.dm === true && k.hx.dmYears === '5' && k.hx.cc === '좌안 흐림 1달', '처치실에서 History 입력 → 그날 환자 기록에 저장');
+ok(/주호소/.test(await cardOf('강서윤').innerText()), '입력 후 카드에 History');
 ok((await getKey('patient-history')).value === null, '미리 채우기 저장소에 쓰지 않음');
-const c = list.find(p => p.name === '최민지');
-ok(c.hx?.dm === true && c.hx.dmYears === '5', '그날 환자 기록에 History 저장');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

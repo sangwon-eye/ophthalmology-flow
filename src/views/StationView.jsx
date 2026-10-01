@@ -1,9 +1,9 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
-import { PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 
@@ -45,6 +45,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const [session, setSession] = useState('all');
   const [query, setQuery] = useState('');
   const [measureFor, setMeasureFor] = useState(null);
+  const [resultFor, setResultFor] = useState(null); // 결과 입력 검사(MR 등): { key, testId }
   const [detailFor, setDetailFor] = useState(null);
   const [toastNode, showToast] = useUndoToast();
   // 시간 재는 칸(예: Schirmer)이 정한 시간이 되면 초록으로 바뀌도록 가끔 다시 그림
@@ -148,6 +149,19 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readyKeys]);
+
+  // 결과 입력 검사(MR·WG 등): 결과를 저장하고 완료 (그날 기록에만, 다음 내원 때는 보이지 않음)
+  const saveResult = (r) => {
+    const { key: pk, testId } = resultFor;
+    const p = patients.find(x => patientKey(x) === pk);
+    setResultFor(null);
+    if (!p || activeVf(p)) return;
+    const at = Date.now();
+    mutatePatients(prev => prev.map(x => (patientKey(x) !== pk || activeVf(x) ? x : {
+      ...x, results: { ...(x.results || {}), [testId]: r }, done: { ...x.done, [testId]: true }, doneAt: { ...(x.doneAt || {}), [testId]: at },
+    })));
+    showToast(`${p.name} ${testLabel(testId)} 완료`, () => writeDone(pk, testId, false, null));
+  };
 
   const markDone = (p, key, val) => {
     if (activeVf(p)) return;
@@ -367,6 +381,9 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                     {hasFieldValue(p.measure, ['nct', 'gat']) && <MeasureLine label="오늘" m={p.measure} fields={['nct', 'gat']} />}
                   </div>
                 )}
+                {tests.filter(t => resultFieldsOf(t).length && p.results?.[t.id]).map(t => (
+                  <ResultLine key={`r-${t.id}`} test={t} r={p.results[t.id]} onEdit={() => setResultFor({ key: pk, testId: t.id })} />
+                ))}
                 {notes.length > 0 && (
                   <div className="w-full text-xs bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-2 space-y-0.5">
                     {notes.map(n => (
@@ -461,7 +478,8 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                     label={testLabelWithOptions(t, p.detail?.[t.id])}
                     done={!!p.done?.[t.id]}
                     emphasize={topTest?.id === t.id}
-                    onToggle={v => (v && t.id === GAT_ID && roomHasGat ? setMeasureFor({ key: pk, mode: 'gat' }) : markDone(p, t.id, v))}
+                    onToggle={v => (v && t.id === GAT_ID && roomHasGat ? setMeasureFor({ key: pk, mode: 'gat' })
+                      : v && resultFieldsOf(t).length ? setResultFor({ key: pk, testId: t.id }) : markDone(p, t.id, v))}
                     onSpecial={isVision ? undefined : () => openSpecial(p, t)}
                   />
                 ))}
@@ -567,6 +585,11 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
           onCancel={() => setMeasureFor(null)}
         />
       )}
+      {resultFor && (() => {
+        const rp = patients.find(x => patientKey(x) === resultFor.key);
+        const rt = settings.tests.find(t => t.id === resultFor.testId);
+        return rp && rt ? <ResultModal key={`${resultFor.key}-${rt.id}`} test={rt} patient={rp} onSave={saveResult} onCancel={() => setResultFor(null)} /> : null;
+      })()}
       {detailFor && detailPatient && detailTest && (
         <TestDetailModal
           key={`${detailFor.key}-${detailFor.testId}`}

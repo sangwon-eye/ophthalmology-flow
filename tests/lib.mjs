@@ -32,3 +32,17 @@ export function tester(page) {
   const cardOf = (name) => page.locator('div.bg-white').filter({ has: page.getByText(name, { exact: true }) }).last();
   return { errors, ok, W, pick, back, cardOf };
 }
+
+// 시력방 측정: [시력] → (첫 칸 값) [확인], [NCT] 버튼이 있으면 → [확인] (NCT 빈칸 경고는 한 번 더 [확인])
+export async function measureVision(page, card, va = '') {
+  const confirm = async () => {
+    await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click(); await page.waitForTimeout(300);
+    if (await page.locator('.fixed.inset-0').count()) await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click();
+    await page.waitForTimeout(400);
+  };
+  await card.getByRole('button', { name: '시력', exact: true }).click(); await page.waitForTimeout(300);
+  if (va) await page.locator('.fixed.inset-0').last().locator('input').first().fill(va);
+  await confirm();
+  const nct = card.getByRole('button', { name: 'NCT', exact: true });
+  if (await nct.count()) { await nct.click(); await page.waitForTimeout(300); await confirm(); }
+}

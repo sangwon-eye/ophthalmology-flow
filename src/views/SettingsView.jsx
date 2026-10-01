@@ -1,7 +1,7 @@
 // 설정 화면
 import React, { useState } from 'react';
 import { Plus, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
-import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, renameTestOptions, sortedTests, toDraft, holdCallOf } from '../core/flow.jsx';
+import { RESULT_FIELDS, COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, renameTestOptions, sortedTests, toDraft, holdCallOf } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';
@@ -158,6 +158,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             ['holdCall', '진행 중 호출 금지', holdCallOf(t), roomKey !== 'vision' && !(t.timed && t.prepMode === 'go')],
             ['withExams', '대기 중에도', !!t.withExams, isTreat],
             ['showWhenEmpty', '0명도 표시', t.showWhenEmpty !== false, machineGroups(tests).length >= 2],
+            ['resultFields', '결과 입력', Array.isArray(t.resultFields) && t.resultFields.length > 0, true],
           ].filter(o => o[3]);
           return (
             <div key={t.id} data-test-row={t.short || t.name} className={`rounded-lg ${open ? 'bg-white border border-slate-300' : 'bg-slate-50'}`}>
@@ -174,13 +175,27 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                       onClick={() => {
                         // 검사 준비와 시간 재기는 둘 중 하나만 (켜면 다른 하나는 꺼짐)
                         updateTest(t.id, k === 'prepOn' ? { prepOn: !on, timed: false, prepWaitMin: t.prepWaitMin ?? 20 }
-                          : k === 'timed' ? { timed: !on, prepOn: false, prepWaitMin: t.prepWaitMin ?? 20 } : { [k]: !on });
+                          : k === 'timed' ? { timed: !on, prepOn: false, prepWaitMin: t.prepWaitMin ?? 20 }
+                            : k === 'resultFields' ? { resultFields: on ? [] : RESULT_FIELDS.map(f => f.key) } : { [k]: !on });
                         if ((k === 'prepOn' || k === 'timed') && !on) toggleTestOpen(t.id, true); // 켜면 시간·방식을 적도록 펼침
                       }}
                       className={`text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-500'}`}>
                       {on ? '✓ ' : ''}{label}
                     </button>
                   ))}
+                  {/* 결과 입력을 켠 검사: 칸 고르기 (MR = S·C·A·Add·VA, WG = S·C·A) */}
+                  {Array.isArray(t.resultFields) && t.resultFields.length > 0 && (
+                    <span className="flex items-center gap-1 pl-1 border-l border-slate-300" aria-label={`${t.short || t.name} 결과 칸`}>
+                      {RESULT_FIELDS.map(f => {
+                        const fon = t.resultFields.includes(f.key);
+                        return (
+                          <button key={f.key} type="button" aria-pressed={fon} title={`${f.label} 칸 ${fon ? '빼기' : '넣기'}`}
+                            onClick={() => updateTest(t.id, { resultFields: fon ? t.resultFields.filter(x => x !== f.key) : RESULT_FIELDS.map(x => x.key).filter(x => x === f.key || t.resultFields.includes(x)) })}
+                            className={`text-xs px-2 py-0.5 rounded border ${fon ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-400'}`}>{f.label}</button>
+                        );
+                      })}
+                    </span>
+                  )}
                 </span>
                 <span className="ml-auto flex items-center gap-1">
                   <button type="button" aria-label="우선순위 올리기" onClick={() => moveTest(t.id, 'up')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronUp size={14} /></button>
@@ -292,7 +307,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
               검사 이름이나 [자세히]를 누르면 이름·검사실·세부 종류를 고칠 수 있어요.</p>
             <p className="mt-2">세부 종류를 적어두면 창에서 종류를 고를 수 있어요 (예: OCT의 Macular, Disc, Angio). 어떤 검사든 오른쪽 클릭(터치스크린은 길게 누르기)하면 양안·우안·좌안과 검사 프로토콜을 지정하는 창이 떠요.</p>
             <ul className="mt-2 space-y-1">
-              {[['popupOnClick', '세부 창'], ['noOrder', '처방 없음'], ['noDilate', '산동 금지'], ['prepOn', '검사 준비'], ['timed', '시간 재기'], ['holdCall', '진행 중 호출 금지'], ['withExams', '대기 중에도'], ['showWhenEmpty', '0명도 표시']].map(([k, l]) => (
+              {[['popupOnClick', '세부 창'], ['noOrder', '처방 없음'], ['noDilate', '산동 금지'], ['prepOn', '검사 준비'], ['timed', '시간 재기'], ['holdCall', '진행 중 호출 금지'], ['withExams', '대기 중에도'], ['showWhenEmpty', '0명도 표시'], ['resultFields', '결과 입력']].map(([k, l]) => (
                 <li key={k}><b className="text-slate-800">{l}</b> · {TEST_OPTION_HELP[k]}</li>
               ))}
             </ul>

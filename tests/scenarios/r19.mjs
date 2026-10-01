@@ -1,4 +1,4 @@
-import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
+import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES, measureVision } from '../lib.mjs';
 await editKey('settings', s => ({ ...s, procedures: [...s.procedures, { id: 'prp', name: 'PRP', performer: 'prof', dilate: true }] }));
 await editKey('daily-patients', list => list.map(p => {
   if (p.name === '원성옥') return { ...p, checkin: '08:30', done: { visionIop: true }, preProcs: [{ uid: 'u1', procId: 'prp', name: 'PRP', performer: 'prof', dilate: true, done: false }], skipVision: true };
@@ -30,16 +30,9 @@ await W(4500);
 await pick('시력');
 let c = cardOf('정대현');
 ok(await c.getByRole('button', { name: /^Topo/ }).count() >= 1, '시력방 카드에 Topo 칸');
-await c.getByRole('button', { name: /^History (입력|필요)$/ }).click(); await W(300);
-const m = page.locator('.fixed.inset-0').last();
-ok(await m.getByText(/처치실에서 오늘 검사 정하기/).count() === 0, 'History 창: 처치실 체크 칸 없음');
-await m.getByRole('button', { name: '고혈압 없음' }).click();
-await m.getByRole('button', { name: '확인', exact: true }).click(); await W();
-// 시력 완료 (측정값 저장하고 완료 두 번), Topo 완료
-c = cardOf('정대현');
-await c.getByRole('button', { name: '측정값 입력' }).click(); await W(300);
-await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click(); await W(300);
-if (await page.locator('.fixed.inset-0').count()) await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click();
+await c.getByRole('button', { name: 'History 설문지 드리기' }).click(); await W();
+// 시력 완료 ([시력]·[NCT] 따로), Topo 완료
+await measureVision(page, cardOf('정대현'));
 await W(600);
 ok(await page.getByText('정대현', { exact: true }).count() === 1, 'Topo 남아 있어 시력방에 그대로');
 await cardOf('정대현').getByRole('button', { name: /^Topo/ }).first().click(); await W(600);

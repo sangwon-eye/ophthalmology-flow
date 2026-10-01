@@ -1,4 +1,4 @@
-import { chromium, SP, BASE, DATA, getKey, editKey, tester } from '../lib.mjs';
+import { chromium, SP, BASE, DATA, getKey, editKey, tester , measureVision } from '../lib.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -23,11 +23,7 @@ const pid = (await getKey('daily-patients')).value.find(p => p.name === '최민�
 await editKey('measure-history', () => ({ [pid]: [{ date: '2025-05-01', nct: { od: '20', os: '20' } }, { date: '2025-01-01', nct: { od: '21', os: '21' } }], other: [{ date: '2025-01-01' }] }));
 await page.goto(`${BASE}/`); await W();
 await pick('시력');
-await cardOf('최민지').getByRole('button', { name: '측정값 입력' }).click(); await W(300);
-const m = page.locator('.fixed.inset-0').last();
-await m.locator('input').first().fill('0.5');
-await m.getByRole('button', { name: '확인', exact: true }).click(); await W(300);
-if (await page.locator('.fixed.inset-0').count()) { await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click(); }
+await measureVision(page, cardOf('최민지'), '0.5');
 await W(1500);
 h = (await getKey('measure-history')).value;
 ok(Array.isArray(h[pid]) && h[pid].length === 2 && h[pid][1].date === '2025-05-01', `오늘 + 지난 1회만 남음 (${JSON.stringify(h[pid]?.map(x => x.date))})`);

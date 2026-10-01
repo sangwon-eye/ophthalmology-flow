@@ -20,7 +20,7 @@ await page.getByRole('button', { name: '확인', exact: true }).click(); await W
 ok((await pt('강서윤')).hx.cc === '눈부심', '검사 지정 대기에서 History 수정 저장');
 ok(/눈부심/.test(await cardOf('강서윤').innerText()), '카드에 바로 반영');
 // 예진 대기: 미입력 → 입력
-ok(/History 미입력/.test(await cardOf('정대현').innerText()), '예진 대기 카드에 History 미입력 표시');
+ok(await cardOf('정대현').getByRole('button', { name: '정대현 History 입력' }).count() === 1, '예진 대기 카드에 [History 입력]');
 await page.getByRole('button', { name: '정대현 History 입력' }).click(); await W(300);
 await page.getByRole('button', { name: '고혈압 있음' }).click();
 await page.getByLabel('주호소').fill('충혈');

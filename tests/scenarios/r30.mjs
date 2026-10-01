@@ -1,4 +1,4 @@
-import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
+import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES , measureVision } from '../lib.mjs';
 const list0 = (await getKey('daily-patients')).value;
 const today = list0[0].date;
 const nextWeek = new Date(new Date(today).getTime() + 7 * 86400000).toISOString().slice(0, 10);
@@ -22,7 +22,7 @@ ok(Object.keys(sub).length === 2 && !sub['9999999'], '서버 부분 조회: 명�
 let net = 0; page.on('response', async res => { if (res.url().includes('storage-subset/measure-history') && res.status() === 200) net++; if (res.url().endsWith('/api/storage/measure-history')) console.log('     전체 받기 발생', res.status()); });
 await page.goto(`${BASE}/`); await W(1200);
 await pick('시력');
-ok(await cardOf('최민지').getByText('0.3 / 0.4').count() === 1, '오늘 환자 이전 시력 보임');
+ok(/R\s*0\.3\s*L\s*0\.4/.test(await cardOf('최민지').locator('[data-prev-vision]').innerText()), '오늘 환자 이전 시력 보임 (크게)');
 await back();
 // 다음 주 차트리뷰: 관리자 명단 관리에서 날짜 변경
 await pick('관리자'); await page.getByRole('button', { name: '명단 관리', exact: true }).click(); await W(400);
@@ -41,11 +41,7 @@ ok(await cc.getByText(/0\.6/).count() >= 1, '차트리뷰 중 이전 시력 직�
 await back();
 // 오늘 측정 저장 → 전체 기록에 합쳐지고 옛 환자 기록 보존
 await pick('시력');
-await cardOf('최민지').getByRole('button', { name: '측정값 입력' }).click(); await W(300);
-const mm = page.locator('.fixed.inset-0').last();
-await mm.locator('input').first().fill('0.5');
-await mm.getByRole('button', { name: '확인', exact: true }).click(); await W(300);
-if (await page.locator('.fixed.inset-0').count()) await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click();
+await measureVision(page, cardOf('최민지'), '0.5');
 await W(1500);
 const full = (await getKey('measure-history')).value;
 ok(full['9999999'] && full[choi.id].some(x => x.date === today) && full['7000001'], '저장 후에도 옛 환자 기록 그대로 + 오늘 기록 추가');

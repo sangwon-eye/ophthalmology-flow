@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -259,7 +259,81 @@ export const TEST_OPTION_HELP = {
   holdCall: '이 검사를 하는 동안 다른 검사실에서 부르지 않음 (VF는 처음부터 켜짐). 일반 검사는 [▶ 시작]·[종료]가 생기고, 검사 준비·시간 재기 검사는 시작~확인 동안',
   withExams: '처치실 검사: 다른 검사실을 기다리는 동안에도 처치실 목록에 뜸 (예: OSDI). 끄면 다른 검사 뒤에 (예: Syringing)',
   showWhenEmpty: '검사실 화면 위쪽 장비 버튼을 대기 0명이어도 보임',
+  resultFields: '검사 칸을 누르면 결과 입력 창(S·C·A·Add·VA 중 고른 칸)이 열림 (예: MR, WG). 결과는 진료실에 그날만 보임',
 };
+// 검사 결과 입력 창 (MR·WG 등): OD·OS 두 줄, 설정에서 고른 칸만. 이전 값은 같은 세로줄에
+export function ResultModal({ test, patient, onSave, onCancel }) {
+  const fields = resultFieldsOf(test);
+  const init = patient.results?.[test.id] || {};
+  const [r, setR] = useState(() => ({ od: { ...(init.od || {}) }, os: { ...(init.os || {}) } }));
+  const cols = `3rem repeat(${fields.length}, minmax(0, 1fr))`;
+  const name = test.short || test.name;
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-xl max-h-full overflow-y-auto">
+        <h3 className="text-lg font-medium text-slate-900">{patient.name}님 {name} 결과</h3>
+        <div className="text-xs text-slate-400 mb-4">{patient.id}</div>
+        <div className="grid gap-2 items-center" style={{ gridTemplateColumns: cols }}>
+          <div />
+          {fields.map(f => <div key={f.key} className="text-xs text-slate-500 text-center">{f.label}</div>)}
+          {['od', 'os'].map((e, ei) => (
+            <React.Fragment key={e}>
+              <div className="text-sm text-slate-700">{e === 'od' ? 'R (OD)' : 'L (OS)'}</div>
+              {fields.map((f, fi) => (
+                <input key={f.key} autoFocus={ei === 0 && fi === 0} aria-label={`${e === 'od' ? 'R' : 'L'} ${f.label}`} value={r[e][f.key] ?? ''}
+                  onChange={ev => setR(s => ({ ...s, [e]: { ...s[e], [f.key]: ev.target.value } }))}
+                  className="border border-slate-300 rounded-lg px-1 py-2 text-center text-base w-full min-w-0" />
+              ))}
+            </React.Fragment>
+          ))}
+        </div>
+        <div className="flex gap-2 mt-6">
+          <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="button" onClick={() => onSave(r)} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-medium">{name} 완료</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// 검사 결과 한 줄 (검사실 카드): "MR  R S -1.25 C -0.50 A 180 · L ..."
+export function ResultLine({ test, r, onEdit }) {
+  const fields = resultFieldsOf(test);
+  if (!hasResultValue(r)) return null;
+  return (
+    <div className="w-full flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-700">
+      <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">{test.short || test.name}</span>
+      <span><span className="text-slate-400">R</span> {resultEyeText(r, 'od', fields) || '-'}</span>
+      <span><span className="text-slate-400">L</span> {resultEyeText(r, 'os', fields) || '-'}</span>
+      {onEdit && <button type="button" onClick={onEdit} className="text-xs px-2 py-0.5 rounded border border-blue-200 text-blue-700 hover:bg-blue-50">수정</button>}
+    </div>
+  );
+}
+// 진료실: 결과 검사(MR·WG 등) 오늘 표. 칸을 넓게, 세로로 맞춤
+export function ResultTable({ tests, today }) {
+  const rows = tests.filter(t => resultFieldsOf(t).length && hasResultValue(today?.[t.id]));
+  if (!rows.length) return null;
+  return (
+    <div className="overflow-x-auto mt-2 border-t border-slate-200 pt-2">
+      <table className="w-full text-base">
+        <thead>
+          <tr className="text-xs text-slate-400">
+            <th className="text-left font-normal py-1 w-24" /><th className="text-left font-normal py-1 w-10" />
+            {RESULT_FIELDS.map(f => <th key={f.key} className="text-left font-normal py-1">{f.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.flatMap(t => ['od', 'os'].map(e => (
+            <tr key={`${t.id}-${e}`} className={e === 'od' ? 'border-t border-slate-100' : ''}>
+              <td className="py-1.5 text-sm font-medium text-slate-600 whitespace-nowrap">{e === 'od' ? (t.short || t.name) : ''}</td>
+              <td className="py-1.5 text-xs text-slate-400">{e === 'od' ? 'R' : 'L'}</td>
+              {RESULT_FIELDS.map(f => <td key={f.key} className="py-1.5 pr-4 whitespace-nowrap text-slate-900 font-semibold tabular-nums">{resultFieldsOf(t).some(x => x.key === f.key) ? (String(today[t.id]?.[e]?.[f.key] ?? '').trim() || '-') : ''}</td>)}
+            </tr>
+          )))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 // 산동 금지 검사: 설정에서 정하고, 정하지 않았으면 VF는 기본으로 산동 금지
 export function noDilateTest(t) {
   return typeof t?.noDilate === 'boolean' ? t.noDilate : isVfTest(t || {});
