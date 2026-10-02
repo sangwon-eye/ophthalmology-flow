@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { REDO_SHORT, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -133,9 +133,14 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const mine = patients.filter(p => p.doctor === selectedDoctor);
   const explainList = mine.filter(awaitingExplain).sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0));
   const inRoom = mine.find(inConsult);
-  // 띵동: 이 교수님 진료실에 진료 호출이 생기면 (진료실 앞 PC 등). 교수님을 바꾸면 기준만 다시 잡음
-  useChime(mine.filter(inConsult).map(patientKey), { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
-  const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
+  // CR(진료실 간호사 담당)·점안 후 다시 진료: 점안이 끝날 때까지 'CR·산동 점안' 칸에 (시간이 지나면 저절로 진료 대기로)
+  const [, setTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(i); }, []);
+  const dropsList = mine.filter(p => p.checkin && !inConsult(p) && dropsPending(p, doctorPrefs, waitMin)).sort(byQueue);
+  const dropsReady = mine.filter(p => p.checkin && !p.consultDone && !p.seen && (redoActive(p) || crActive(p, doctorPrefs)) && dilationState(p, doctorPrefs, waitMin).status === 'ready');
+  // 띵동: 이 교수님 진료실에 진료 호출이 생기면 (진료실 앞 PC 등), CR·산동 점안 시간이 되면. 교수님을 바꾸면 기준만 다시 잡음
+  useChime([...mine.filter(inConsult).map(patientKey), ...dropsReady.map(p => `drop:${patientKey(p)}`)], { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
+  const waiting = mine.filter(p => consultWaiting(p, settings, doctorPrefs)).sort(byQueue);
   const onHold = mine.filter(p => p.consultHold && !p.consultDone && !p.seen && (!allDone(p, settings) || p.treatRequest));
   const testing = mine.filter(p => !p.consultDone && !p.consultHold && !p.seen && p.checkin && !allDone(p, settings) && !inTreatRoom(p, settings)).length;
   const residentCount = mine.filter(p => inTreatRoom(p, settings)).length;
@@ -164,11 +169,11 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const finishConsult = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
-    patch(pk, () => ({ seen: true, seenAt: at, calledRoom: null }));
+    patch(pk, x => ({ seen: true, seenAt: at, calledRoom: null, ...releaseRedo(x) }));
     showToast(`${p.name} 진료 완료, 설명 대기로`, () => backToRoom(pk));
   };
 
-  const orderProcedures = (chosen, note) => {
+  const orderProcedures = (chosen, note, redoKind) => {
     const p = procFor;
     const pk = patientKey(p);
     const at = Date.now();
@@ -176,9 +181,21 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const items = chosen.map(c => ({
       uid: newId('pr'), procId: c.id, name: c.name, performer: c.performer, note, done: false, doneAt: null, orderedAt: at,
     }));
+    // CR·산동 후 다시 진료: 진료실 'CR·산동 점안' 칸으로, 같이 고른 처치는 다시 진료가 끝난 뒤 시작. 점안이 끝나면 진료 대기 맨 앞
+    if (redoKind) {
+      const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'dropsBefore', 'drops', 'dropsExtra', 'cr', 'dilateOverride', 'queueKey'];
+      const before = Object.fromEntries(keys.map(k => [k, p[k]]));
+      mutatePatients(prev => {
+        const others = prev.filter(x => patientKey(x) !== pk && x.date === p.date && x.doctor === p.doctor && !x.consultDone && !x.seen && typeof x.queueKey === 'number');
+        const frontKey = others.length ? Math.min(...others.map(x => x.queueKey)) - 0.001 : undefined;
+        return prev.map(x => (patientKey(x) === pk ? { ...x, ...redoPatch(x, redoKind, { at, from: doctor, pending: items, frontKey }) } : x));
+      });
+      showToast(`${p.name} ${REDO_SHORT[redoKind]}: 진료실 'CR·산동 점안' 칸으로`, () => patch(pk, () => before));
+      return;
+    }
     // 설명 대기 중에 보낸 처치(진료 후 외래 간호사 입력): 설명 대기 순서는 그대로 두고 처치만 추가
     const already = !!p.seen;
-    patch(pk, x => ({ seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, procedures: [...(x.procedures || []), ...items] }));
+    patch(pk, x => { const r = releaseRedo(x); return { seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, ...r, procedures: [...(r.procedures || x.procedures || []), ...items] }; });
     const where = items.some(i => i.performer === 'prof') ? '설명 대기에서 교수님 처치' : '처치실로';
     const removeItems = x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at) });
     showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems)));
@@ -340,6 +357,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       extra={<><ChimeControl /><DoctorPicker doctors={doctors} value={selectedDoctor} onChange={setSelectedDoctor} /></>}
       sub={selectedDoctor ? <SummaryBar label="진료실 할 일 요약" items={[
         { id: 'consult-explain', label: '설명 대기', n: explainList.length },
+        { id: 'consult-drops', label: 'CR·산동', n: dropsList.length },
         { id: 'consult-waiting', label: '진료 대기', n: waiting.length },
         { id: 'consult-hold', label: '진료 보류', n: onHold.length },
       ]} /> : null}
@@ -396,6 +414,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
               <div className="text-2xl font-semibold text-slate-900 mb-1 flex items-center gap-2 flex-wrap">
                 {inRoom.name}
                 {inRoom.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-normal">초진</span>}
+                {redoActive(inRoom) && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-300 font-normal">{REDO_SHORT[inRoom.redo.kind]}</span>}
                 {inRoom.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-normal">2차 진료 · {inRoom.primaryDoctor} 후</span>}
                 {nextVisitNote(inRoom)}
                 <PatientMemo p={inRoom} />
@@ -432,6 +451,29 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
             </div>
           )}
 
+          {dropsList.length > 0 && (
+            <div id="consult-drops" className="mb-6 scroll-mt-36">
+              <SectionTitle hint="CR과 '점안 후 다시 진료' 환자의 점안을 기록합니다. 점안을 마치고 기다리는 시간이 지나면 저절로 진료 대기로 갑니다 (띵동)">CR·산동 점안 · {dropsList.length}명</SectionTitle>
+              {dropsList.map(p => {
+                const st = dilationState(p, doctorPrefs, waitMin);
+                const left = st.status === 'waiting' ? Math.max(1, (Number(waitMin) || 15) - st.mins) : 0;
+                const stage = getStage(p, settings);
+                return (
+                  <SimpleCard key={patientKey(p)} p={p} tone="rose" badges={redoActive(p)
+                    ? <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-300">{REDO_SHORT[p.redo.kind]}</span>
+                    : null}>
+                    <div className="w-full flex flex-wrap items-center gap-2">
+                      <DilationRow group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+                      {left > 0 && <span className="text-xs text-slate-500">완료까지 {left}분</span>}
+                      {!redoActive(p) && !['consult', 'inRoom'].includes(stage.area) && <span className="text-xs text-slate-400">지금: {stage.label}</span>}
+                      {(p.redo?.pending || []).length > 0 && <span className="text-xs text-slate-500">다시 진료 뒤 처치: {p.redo.pending.map(x => x.name).join(', ')}</span>}
+                    </div>
+                  </SimpleCard>
+                );
+              })}
+            </div>
+          )}
+
           <div id="consult-waiting" className="scroll-mt-36" />
           <SectionTitle>
             진료 대기 · {waiting.length}명
@@ -456,6 +498,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     onUp={() => moveInQueue(mutatePatients, waiting, pk, i - 1)}
                     onDown={() => moveInQueue(mutatePatients, waiting, pk, i + 1)}
                   >
+                    {redoActive(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-300">{REDO_SHORT[p.redo.kind]}</span>}
                     <div className="w-full mb-1">
                       <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
                     </div>
@@ -551,6 +594,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
           key={`proc-${patientKey(procFor)}`}
           patient={procFor}
           procedures={settings.procedures || []}
+          crAvailable={!!doctorPrefs?.[procFor.doctor]?.cr}
           onConfirm={orderProcedures}
           onCancel={() => setProcFor(null)}
         />

@@ -263,7 +263,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                 </div>
                 <button type="button" onClick={() => finishPreProcs(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium shrink-0">처치 완료</button>
               </div>
-              <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+              <DilationRow compact crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             </SimpleCard>
           ))}
         </div>
@@ -345,7 +345,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
               <button type="button" onClick={() => setTriageFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">
                 {assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'}
               </button>
-              <DilationRow group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+              <DilationRow group crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             </div>
           </SimpleCard>
           );
@@ -375,7 +375,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                 </button>}
               </div>
             )}
-            <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+            <DilationRow compact crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
           </SimpleCard>
         ))}
       </div>

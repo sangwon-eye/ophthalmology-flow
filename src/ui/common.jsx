@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { REDO_LABEL, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -1340,7 +1340,7 @@ export function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCa
 // compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
 // group: 카드 버튼 줄 안에 산동·점안을 한 덩어리로 (줄이 넘치면 함께 다음 줄로)
-export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false }) {
+export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false, crStatusOnly = false }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);
@@ -1352,6 +1352,14 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
   const blockers = dilationBlockers(p);
   const blocked = blockers.length > 0 && st.given === 0;
   if (compact && !dil && !cr) return null;
+  // CR은 진료실 간호사 담당: 처치실 등에서는 몇 회째인지만 보여 줌 (점안 버튼 없음)
+  if (crStatusOnly && cr && !togglesOnly) {
+    return (
+      <span title="CR 점안은 진료실 화면에서 기록합니다" className={`${large ? 'text-sm px-3 py-1.5' : 'text-xs px-2.5 py-1'} rounded-full border bg-rose-50 border-rose-300 text-rose-700`}>
+        CR {st.given}/{st.total}{st.status === 'ready' ? ' · 완료' : ' · 진료실'}
+      </span>
+    );
+  }
   if (togglesOnly) showDrops = false;
   // 카드 줄(compact): 켜고 끄기 칩 없이 [산동] 하나만. 누르면 점안 시각 기록(다시 누르면 취소).
   // 산동 예정 자체를 빼는 것은 [검사 변경] 안에서 (다른 검사처럼)
@@ -1422,8 +1430,11 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
   );
 }
 
-export function ProcedureModal({ patient, procedures, onConfirm, onCancel }) {
+export function ProcedureModal({ patient, procedures, crAvailable = false, onConfirm, onCancel }) {
   const [sel, setSel] = useState({});
+  // 점안 후 다시 진료 (CR·산동 중 하나). 진료실 간호사가 점안하고, 끝나면 진료 대기 맨 앞으로
+  const [redo, setRedo] = useState('');
+  const redoKinds = [...(crAvailable ? ['cr'] : []), 'dilate'];
   const [note, setNote] = useState('');
   // 목록에 없는 요청은 직접 입력 (예: 안약 교육, 봉합사 제거)
   const [custom, setCustom] = useState('');
@@ -1439,6 +1450,14 @@ export function ProcedureModal({ patient, procedures, onConfirm, onCancel }) {
         <h3 className="text-lg font-medium mb-1 text-slate-900">{patient.name}님 처치</h3>
         <p className="text-sm text-slate-500 mb-4">진료 완료 후 설명 대기로 가서 '처치 중'으로 표시됩니다. 교수님 처치는 설명 대기 카드에서, 전공의 처치는 처치실에서 완료합니다.</p>
         <div className="space-y-2 mb-4">
+          {redoKinds.map(k => (
+            <label key={k} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${redo === k ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'}`}>
+              <input type="checkbox" checked={redo === k} onChange={() => setRedo(r => (r === k ? '' : k))} className="w-5 h-5" />
+              <span className="text-slate-700 flex-1">{REDO_LABEL[k]}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">진료실 점안</span>
+            </label>
+          ))}
+          {redo && <p className="text-xs text-slate-500 px-1">진료실 화면 'CR·산동 점안' 칸으로 가고, 점안이 끝나면 진료 대기 맨 앞으로 돌아옵니다. 같이 고른 처치는 다시 진료가 끝난 뒤 시작합니다.</p>}
           {procedures.length === 0 && <div className="text-sm text-slate-400">설정 &gt; 처치에서 처치 목록을 먼저 만들어주세요</div>}
           {procedures.map(x => (
             <label key={x.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer">
@@ -1468,9 +1487,9 @@ export function ProcedureModal({ patient, procedures, onConfirm, onCancel }) {
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
           <button
             type="button"
-            disabled={!chosen.length}
-            onClick={() => onConfirm(chosen, note.trim())}
-            className={`flex-1 py-3 rounded-xl font-medium ${chosen.length ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-400'}`}
+            disabled={!chosen.length && !redo}
+            onClick={() => onConfirm(chosen, note.trim(), redo)}
+            className={`flex-1 py-3 rounded-xl font-medium ${chosen.length || redo ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-400'}`}
           >
             처치 지정
           </button>

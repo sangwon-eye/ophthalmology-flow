@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone } from 'lucide-react';
-import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
@@ -297,11 +297,14 @@ export function DoctorRoomInput({ name, value, onSave }) {
   );
 }
 
-export function ConsultBoardSection({ doctor, patients, settings, compact, plain, roomLabel = '' }) {
+export function ConsultBoardSection({ doctor, patients, settings, prefs, compact, plain, roomLabel = '' }) {
   const mine = patients.filter(p => p.doctor === doctor && !p.consultDone);
   const inRoom = mine.find(inConsult);
-  const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
-  const testing = mine.filter(p => !p.seen && !allDone(p, settings)).length;
+  // CR·산동 점안 중인 환자는 시간이 지나면 진료 대기로 (가끔 다시 계산)
+  const [, setTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => setTick(x => x + 1), 30000); return () => clearInterval(i); }, []);
+  const waiting = mine.filter(p => consultWaiting(p, settings, prefs)).sort(byQueue);
+  const testing = mine.filter(p => !p.seen && (!allDone(p, settings) || dropsPending(p, prefs, settings.dilationWaitMin))).length;
   const notice = useNotice(`doctor:${doctor}`);
   // 진료실 앞 모니터(교수님 한 분): 진료 중·다음 순서는 가장 크게, 2·3번은 크게, 그다음은 작게
   if (plain) {
@@ -426,7 +429,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
       <BoardShell title="진료 대기 순서" onBack={onBack}>
         {activeDoctors.length === 0 ? <BoardEmpty /> : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {activeDoctors.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} roomLabel={consultRoomLabel(doctorPrefs, d)} />)}
+            {activeDoctors.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} prefs={doctorPrefs} roomLabel={consultRoomLabel(doctorPrefs, d)} />)}
           </div>
         )}
       </BoardShell>
@@ -436,7 +439,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
     const d = kind.slice('consult:'.length);
     return (
       <BoardShell title={`${d} 교수님`} big badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack} extra={<ChimeControl dark />}>
-        <ConsultBoardSection doctor={d} patients={patients} settings={settings} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
+        <ConsultBoardSection doctor={d} patients={patients} settings={settings} prefs={doctorPrefs} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
       </BoardShell>
     );
   }
@@ -447,7 +450,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
         <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} compact /></BoardColumn>
         <BoardColumn title="진료실">
           {activeDoctors.length === 0 ? <BoardEmpty /> : activeDoctors.map(d => (
-            <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} compact roomLabel={consultRoomLabel(doctorPrefs, d)} />
+            <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} prefs={doctorPrefs} compact roomLabel={consultRoomLabel(doctorPrefs, d)} />
           ))}
         </BoardColumn>
       </div>

@@ -311,6 +311,7 @@ export function visionTasksLeft(p, prefs) {
 }
 export function dropDue(p, prefs) {
   if (p.dilateSkip) return false;
+  if (crActive(p, prefs)) return false; // CR은 진료실 간호사 담당: 시력방에서 첫 점안을 해도 되지만 안 해도 넘어감
   const st = dilationState(p, prefs, 15);
   return !!st.need && st.given === 0 && dilationBlockers(p).length === 0;
 }
@@ -381,8 +382,10 @@ export function procedureStatus(p) {
 export function inConsult(p) {
   return !p.consultDone && !p.seen && !!p.calledRoom;
 }
-export function consultWaiting(p, settings) {
-  return !p.consultDone && !p.seen && !p.calledRoom && !p.treatRequest && allDone(p, settings);
+// prefs(교수님 설정)를 주면 CR 환자는 CR 점안이 끝나야 진료 대기 (진료실 간호사가 CR 담당)
+export function consultWaiting(p, settings, prefs) {
+  return !p.consultDone && !p.seen && !p.calledRoom && !p.treatRequest && allDone(p, settings)
+    && !dropsPending(p, prefs, settings?.dilationWaitMin);
 }
 
 export function getStage(p, settings) {
@@ -404,6 +407,7 @@ export function getStage(p, settings) {
   if (p.seen && p.explainedEarly) return { label: '처치 완료 · 귀가 대기', area: 'explain' };
   if (p.seen) return { label: '설명 대기', area: 'explain' };
   if (p.calledRoom) return { label: `${p.calledRoom} 진료 중`, area: 'inRoom' };
+  if (redoActive(p) && p.redo.kind && dropsPending(p, { [p.doctor]: { cr: true } }, settings?.dilationWaitMin)) return { label: `${REDO_SHORT[p.redo.kind]} · 점안 중`, area: 'consult' };
   return { label: '진료 대기', area: 'consult' };
 }
 
@@ -418,6 +422,38 @@ export function needsDilation(p, prefs) {
 }
 export function crActive(p, prefs) {
   return !!p.cr && !!prefs?.[p.doctor]?.cr;
+}
+/* 점안 후 다시 진료: 진료실 [처치]·설명 대기 [처치 보내기]에서 'CR 후 다시 진료' / '산동 후 다시 진료'
+   p.redo = { kind: 'cr' | 'dilate', at, from, pending: [같이 고른 처치] } (새 칸, 기존 기록은 그대로)
+   점안은 진료실 간호사가 진료실 화면 'CR·산동 점안' 칸에서. 끝나면 진료 대기 맨 앞으로 */
+export const REDO_LABEL = { cr: 'CR 후 다시 진료', dilate: '산동 후 다시 진료' };
+export const REDO_SHORT = { cr: 'CR 후 재진', dilate: '산동 후 재진' };
+export function redoActive(p) {
+  return !!p.redo?.kind && !p.consultDone && !p.seen;
+}
+// CR(진료실 간호사 담당) 또는 점안 후 다시 진료: 점안이 끝나고 기다리는 시간이 지나야 진료 대기로
+export function dropsPending(p, prefs, waitMin, now = Date.now()) {
+  if (p.consultDone || p.seen) return false;
+  if (!redoActive(p) && !crActive(p, prefs)) return false;
+  const st = dilationState(p, prefs, waitMin, now);
+  return !!st.need && st.status !== 'ready';
+}
+// 다시 진료로 보낼 때 바뀌는 칸. 예전 점안 기록은 dropsBefore 에 남기고 점안은 1회부터 새로
+export function redoPatch(x, kind, { at, from, pending = [], frontKey }) {
+  const before = [...(x.drops || []), ...(x.dropsExtra || [])].filter(Boolean);
+  return {
+    redo: { kind, at, from, pending, ...(x.cr ? { crWas: true } : {}) },
+    seen: false, seenAt: null, calledRoom: null,
+    ...(before.length ? { dropsBefore: [...(x.dropsBefore || []), ...before] } : {}),
+    drops: [], dropsExtra: [],
+    ...(kind === 'cr' ? { cr: true } : { dilateOverride: true, cr: false }),
+    ...(typeof frontKey === 'number' ? { queueKey: Math.min(x.queueKey, frontKey) } : {}),
+  };
+}
+// 다시 진료가 끝나면(진료 완료·처치 지정) 같이 골라 둔 처치를 그때 시작
+export function releaseRedo(x) {
+  if (!x.redo?.pending?.length) return {};
+  return { procedures: [...(x.procedures || []), ...x.redo.pending], redo: { ...x.redo, pending: [] } };
 }
 export function dilationState(p, prefs, waitMin, now = Date.now()) {
   const cr = crActive(p, prefs);

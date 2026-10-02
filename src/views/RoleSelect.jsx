@@ -268,13 +268,13 @@ export function AboutModal({ onClose }) {
   );
 }
 
-export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doctors = [] }) {
+export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doctors = [], doctorPrefs }) {
   const [about, setAbout] = useState(false);
   // 메인 화면: 매일 쓰는 직원 화면(진료 흐름)은 크게, 환자용 화면·관리는 작게 묶어서 한 화면에 모두
   // 방마다 대기 인원(각 화면 위쪽 '대기 N명'과 같은 숫자). 진료실은 교수님별로 한 줄
   // 오늘 명단에 환자가 없는 교수님은 빼기
   const byDoctor = doctors.filter(d => patients.some(p => p.doctor === d))
-    .map(d => [d, patients.filter(p => p.doctor === d && consultWaiting(p, settings)).length]);
+    .map(d => [d, patients.filter(p => p.doctor === d && consultWaiting(p, settings, doctorPrefs)).length]);
   const flow = [
     { key: 'vision', label: visionNames(settings).name, sub: '가장 먼저 거치는 검사실', icon: Eye, color: 'blue', count: visionWaiting(patients).length },
     ...settings.rooms.filter(r => r.builtin !== 'treat').map(r => ({

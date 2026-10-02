@@ -1,6 +1,6 @@
 // 최상위 App (저장소 동기화와 화면 전환)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
+import { REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -15,7 +15,7 @@ import { SettingsView } from './views/SettingsView.jsx';
 /* 최상위 App                                                          */
 /* ------------------------------------------------------------------ */
 // 각 업무 화면과 같은 조건으로 조회하여 여러 명단에 속한 경우도 함께 표시한다.
-export function patientQueueLabels(p, settings) {
+export function patientQueueLabels(p, settings, prefs) {
   if (p.consultDone) return [p.referred ? '진료 완료 · 회송' : '진료 완료'];
   const labels = [];
   if (!p.checkin) labels.push('접수 전');
@@ -33,7 +33,8 @@ export function patientQueueLabels(p, settings) {
   if (inResidentProcedure(p)) labels.push(`${treatRoomOf(settings).name} · 전공의 처치 대기`);
   if (awaitingExplain(p)) labels.push(p.explainedEarly ? (procedureStatus(p) === 'doing' ? '설명 완료 · 처치 후 귀가' : '진료실 · 처치 완료 · 귀가 대기') : `진료실 · 설명 대기${procedureStatus(p) === 'doing' ? ' (처치 중)' : ''}`);
   if (inConsult(p)) labels.push(`${p.calledRoom} · 진료 중`);
-  if (consultWaiting(p, settings)) labels.push('진료실 · 진료 대기');
+  if (dropsPending(p, prefs, settings.dilationWaitMin)) labels.push(`진료실 · ${redoActive(p) ? REDO_SHORT[p.redo.kind] : 'CR'} 점안 중`);
+  if (consultWaiting(p, settings, prefs)) labels.push('진료실 · 진료 대기');
   if (p.consultHold && !p.seen && !allDone(p, settings)) labels.push('진료실 · 추가 검사 중 (진료 보류)');
   return labels.length ? labels : [getStage(p, settings).label];
 }
@@ -60,7 +61,7 @@ export const DIRECTORY_STATUSES = [
   ['done', '진료 완료'],
 ];
 
-export function matchesDirectoryStatus(p, settings, status) {
+export function matchesDirectoryStatus(p, settings, status, prefs) {
   if (status === 'all') return true;
   if (status === 'done') return !!p.consultDone;
   if (p.consultDone) return false;
@@ -68,29 +69,29 @@ export function matchesDirectoryStatus(p, settings, status) {
     case 'reception': return !p.checkin && !p.linkWaiting;
     case 'vision': return !!p.checkin && !visionComplete(p);
     case 'exam': return pendingRooms(p, settings).length > 0 || !!activeVf(p);
-    case 'consult': return consultWaiting(p, settings) || inConsult(p) || awaitingExplain(p);
+    case 'consult': return consultWaiting(p, settings, prefs) || dropsPending(p, prefs, settings.dilationWaitMin) || inConsult(p) || awaitingExplain(p);
     case 'treatment': return inTreatRoom(p, settings) || inProfProcedure(p);
     default: return false;
   }
 }
 
-export function filterDirectory(patients, settings, date, query, doctor, status) {
+export function filterDirectory(patients, settings, date, query, doctor, status, prefs) {
   const q = query.trim().toLocaleLowerCase();
   return patients.filter(p => (!date || p.date === date)
     && (!doctor || p.doctor === doctor)
-    && matchesDirectoryStatus(p, settings, status)
-    && (!q || [p.name, p.id, p.doctor, ...patientQueueLabels(p, settings)].some(v => String(v || '').toLocaleLowerCase().includes(q))))
+    && matchesDirectoryStatus(p, settings, status, prefs)
+    && (!q || [p.name, p.id, p.doctor, ...patientQueueLabels(p, settings, prefs)].some(v => String(v || '').toLocaleLowerCase().includes(q))))
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || byQueue(a, b) || String(a.id).localeCompare(String(b.id)));
 }
 
-export function PatientDirectory({ patients, settings, lastSync, onBack }) {
+export function PatientDirectory({ patients, settings, doctorPrefs, lastSync, onBack }) {
   const [query, setQuery] = useState('');
   const [date, setDate] = useState(todayISO());
   const [doctor, setDoctor] = useState('');
   const [status, setStatus] = useState('all');
   const archived = useArchivedPatients(date);
   const source = archived.isArchived ? archived.list : patients;
-  const list = filterDirectory(source, settings, date, query, doctor, status);
+  const list = filterDirectory(source, settings, date, query, doctor, status, doctorPrefs);
   const doctors = [...new Set(source.map(p => p.doctor).filter(Boolean))];
   return (
     <ScreenShell title="전체 환자 명단" color="slate" onBack={onBack} lastSync={lastSync}>
@@ -123,7 +124,7 @@ export function PatientDirectory({ patients, settings, lastSync, onBack }) {
               </span>
               <span className="text-xs text-slate-500 whitespace-nowrap">{date ? '' : `${p.date} · `}예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</span>
               <span className="ml-auto flex flex-wrap justify-end gap-1.5">
-                {patientQueueLabels(p, settings).map(label => {
+                {patientQueueLabels(p, settings, doctorPrefs).map(label => {
                   const c = COLOR_MAP[queueLabelColor(label, p, settings)] || COLOR_MAP.slate;
                   return <span key={label} className={`rounded-md border px-2 py-0.5 text-sm ${p.consultDone ? 'border-slate-200 bg-slate-50 text-slate-500' : `${c.border} ${c.bg} ${c.text}`}`}>{label}</span>;
                 })}
@@ -240,7 +241,7 @@ export default function App() {
   const today = todayISO();
   // 1차 진료 설명 완료를 기다리는 2차 진료는 관리자·전체 명단에서만 보입니다.
   const patientsToday = patients.filter(p => p.date === today && !p.linkWaiting);
-  const main = <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} patients={patientsToday} doctors={doctors} />;
+  const main = <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} patients={patientsToday} doctors={doctors} doctorPrefs={doctorPrefs} />;
   if (!role) return main;
 
   const onBack = () => setRole(null);
@@ -295,7 +296,7 @@ export default function App() {
     );
   }
   if (role === 'directory') {
-    return <PatientDirectory patients={patients} settings={settings} lastSync={lastSync} onBack={onBack} />;
+    return <PatientDirectory patients={patients} settings={settings} doctorPrefs={doctorPrefs} lastSync={lastSync} onBack={onBack} />;
   }
   if (role === 'admin') {
     return (
