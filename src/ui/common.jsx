@@ -1340,7 +1340,8 @@ export function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCa
 // compact: 산동·CR 예정이 없으면 아무것도 보이지 않음 (켜고 끄기는 [검사 변경] 안에서)
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
 // group: 카드 버튼 줄 안에 산동·점안을 한 덩어리로 (줄이 넘치면 함께 다음 줄로)
-export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false, crStatusOnly = false }) {
+// dropsOnly: 점안 버튼만 (다시 진료 환자의 점안 칸 — 산동·CR 켜기/끄기 칩 없이)
+export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false, crStatusOnly = false, dropsOnly = false }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
   const cr = crActive(p, prefs);
@@ -1377,7 +1378,7 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
   const chip = (on) => `${sz} rounded-full border ${on ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-300 text-slate-400'}`;
   return (
     <div className={group ? 'inline-flex flex-wrap items-center gap-1.5' : inline ? 'contents' : 'w-full flex flex-wrap items-center gap-1.5'}>
-      {!cr && !single && (
+      {!cr && !single && !dropsOnly && (
         <SpecialPressButton
           onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateOverride: !dil }))}
           onSpecial={() => setEyeModal(true)}
@@ -1397,7 +1398,7 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
           onCancel={() => setEyeModal(false)}
         />
       )}
-      {crAvail && !single && (cr || !compact) && (
+      {crAvail && !single && !dropsOnly && (cr || !compact) && (
         <button type="button" onClick={() => patchPatient(mutatePatients, pk, x => ({ cr: !x.cr }))} className={chip(cr)}>
           {cr ? 'CR' : 'CR 안 함'}
         </button>

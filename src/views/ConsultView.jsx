@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -21,6 +21,22 @@ export function DoctorPicker({ doctors, value, onChange }) {
         </button>
       ))}
     </div>
+  );
+}
+
+// 작은 밑줄 글씨 버튼: 한 번 누르면 확인 문구로 바뀌고 3초 안에 한 번 더 누르면 실행
+function ConfirmLink({ label, confirmLabel, onConfirm, className = '' }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <button type="button" onClick={() => { if (armed) { setArmed(false); onConfirm(); } else setArmed(true); }}
+      className={`${className} text-xs underline ${armed ? 'text-rose-700 font-medium' : 'text-slate-400 hover:text-rose-600'}`}>
+      {armed ? confirmLabel : label}
+    </button>
   );
 }
 
@@ -171,6 +187,15 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const at = Date.now();
     patch(pk, x => ({ seen: true, seenAt: at, calledRoom: null, ...releaseRedo(x) }));
     showToast(`${p.name} 진료 완료, 설명 대기로`, () => backToRoom(pk));
+  };
+
+  // 다시 진료 취소: 원래 있던 곳으로 (설명 대기에서 보냈으면 설명 대기, 진료 중에 보냈으면 진료 대기 맨 앞)
+  const cancelRedo = (p) => {
+    const pk = patientKey(p);
+    const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'explainedEarly', 'cr', 'dilateOverride', 'drops', 'dropsExtra', 'dropsBefore', 'procedures', 'procOrderedAt'];
+    const before = Object.fromEntries(keys.map(k => [k, p[k]]));
+    patch(pk, x => cancelRedoPatch(x));
+    showToast(`${p.name} 다시 진료 취소, ${p.redo?.prev?.seen ? '설명 대기로' : '진료 대기로'}`, () => patch(pk, () => before));
   };
 
   const orderProcedures = (chosen, redoKind) => {
@@ -464,9 +489,10 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     ? <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-300">{REDO_SHORT[p.redo.kind]}</span>
                     : null}>
                     <div className="w-full flex flex-wrap items-center gap-2">
-                      <DilationRow group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+                      <DilationRow group dropsOnly={redoActive(p)} p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
                       {!redoActive(p) && !['consult', 'inRoom'].includes(stage.area) && <span className="text-xs text-slate-400">지금: {stage.label}</span>}
                       {(p.redo?.pending || []).length > 0 && <span className="text-xs text-slate-500">다시 진료 뒤 처치: {p.redo.pending.map(x => x.name).join(', ')}</span>}
+                      {redoActive(p) && <ConfirmLink className="ml-auto" label="다시 진료 취소" confirmLabel="한 번 더 누르면 다시 진료 취소" onConfirm={() => cancelRedo(p)} />}
                     </div>
                   </SimpleCard>
                 );

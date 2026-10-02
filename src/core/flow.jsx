@@ -442,8 +442,10 @@ export function crActive(p, prefs) {
    점안은 진료실 간호사가 진료실 화면 'CR·산동 점안' 칸에서. 끝나면 진료 대기 맨 앞으로 */
 export const REDO_LABEL = { cr: 'CR 후 다시 진료', dilate: '산동 후 다시 진료' };
 export const REDO_SHORT = { cr: 'CR 후 재진', dilate: '산동 후 재진' };
+// 다시 진료 중인지: 취소하지 않았고, 그 점안(산동·CR)이 아직 켜져 있을 때만 (다른 화면에서 꺼 버리면 '재진' 표시도 사라짐)
 export function redoActive(p) {
-  return !!p.redo?.kind && !p.consultDone && !p.seen;
+  if (!p.redo?.kind || p.redo.cancelledAt || p.consultDone || p.seen) return false;
+  return p.redo.kind === 'cr' ? !!p.cr : p.dilateOverride === true;
 }
 // CR(진료실 간호사 담당) 또는 점안 후 다시 진료: 점안이 끝나고 기다리는 시간이 지나야 진료 대기로
 export function dropsPending(p, prefs, waitMin, now = Date.now()) {
@@ -455,13 +457,34 @@ export function dropsPending(p, prefs, waitMin, now = Date.now()) {
 // 다시 진료로 보낼 때 바뀌는 칸. 예전 점안 기록은 dropsBefore 에 남기고 점안은 1회부터 새로
 export function redoPatch(x, kind, { at, from, pending = [], frontKey }) {
   const before = [...(x.drops || []), ...(x.dropsExtra || [])].filter(Boolean);
+  // 보내기 전 상태 (다시 진료 취소 때 되돌림)
+  const prev = { seen: !!x.seen, seenAt: x.seenAt ?? null, explainedEarly: !!x.explainedEarly, cr: !!x.cr,
+    dilateOverride: typeof x.dilateOverride === 'boolean' ? x.dilateOverride : null,
+    drops: x.drops || [], dropsExtra: x.dropsExtra || [], dropsBefore: x.dropsBefore || [] };
   return {
-    redo: { kind, at, from, pending, ...(x.cr ? { crWas: true } : {}) },
-    seen: false, seenAt: null, calledRoom: null,
+    redo: { kind, at, from, pending, prev, ...(x.cr ? { crWas: true } : {}) },
+    seen: false, seenAt: null, calledRoom: null, explainedEarly: false,
     ...(before.length ? { dropsBefore: [...(x.dropsBefore || []), ...before] } : {}),
     drops: [], dropsExtra: [],
     ...(kind === 'cr' ? { cr: true } : { dilateOverride: true, cr: false }),
     ...(typeof frontKey === 'number' ? { queueKey: Math.min(x.queueKey, frontKey) } : {}),
+  };
+}
+// 다시 진료 취소: 표시를 지우고 산동·점안 기록을 보내기 전으로, 환자는 원래 있던 곳으로
+// (설명 대기에서 보냈으면 설명 대기 원래 순서 + 같이 고른 처치 시작, 진료 중에 보냈으면 진료 대기 맨 앞)
+export function cancelRedoPatch(x, at = Date.now()) {
+  if (!x.redo?.kind) return {};
+  const pv = x.redo.prev || {};
+  const pending = x.redo.pending || [];
+  const fromExplain = !!pv.seen;
+  return {
+    redo: { ...x.redo, cancelledAt: at, pending: fromExplain ? [] : pending },
+    cr: !!pv.cr,
+    dilateOverride: typeof pv.dilateOverride === 'boolean' ? pv.dilateOverride : undefined,
+    drops: pv.drops || [], dropsExtra: pv.dropsExtra || [], dropsBefore: pv.dropsBefore || [],
+    ...(fromExplain
+      ? { seen: true, seenAt: pv.seenAt || at, explainedEarly: !!pv.explainedEarly, calledRoom: null, ...(pending.length ? { procedures: [...(x.procedures || []), ...pending], procOrderedAt: at } : {}) }
+      : { seen: false, calledRoom: null }),
   };
 }
 // 다시 진료가 끝나면(진료 완료·처치 지정) 같이 골라 둔 처치를 그때 시작
