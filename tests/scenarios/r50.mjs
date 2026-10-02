@@ -27,10 +27,11 @@ ok(await c().getByRole('button', { name: /^산동 \d\d:\d\d · 2회$/ }).count()
 ok(!/산동 완료/.test(await c().innerText()) && await c().getByRole('button', { name: '추가 점안' }).count() === 0, '다시 기다리는 중 (산동 완료·추가 점안 숨김)');
 await c().screenshot({ path: `${SP}/r50-extra.png` });
 // 잘못 눌렀으면: 버튼을 누르면 마지막 추가 점안만 취소
-await c().getByRole('button', { name: /· 2회$/ }).click(); await W(800);
+await c().getByRole('button', { name: /· 2회$/ }).click(); await W(300);
+await c().getByRole('button', { name: '누르면 취소' }).click(); await W(800);
 x = await pt('장민호');
 ok((x.dropsExtra || []).length === 0 && x.drops[0] === ago(20), '버튼을 누르면 추가 점안만 취소');
-ok(/산동 완료/.test(await c().innerText()) && await c().getByRole('button', { name: /^산동 \d\d:\d\d$/ }).count() === 1, '처음 점안과 산동 완료로 돌아옴');
+ok(await c().getByRole('button', { name: /^산동 완료 \d\d:\d\d$/ }).count() === 1, '처음 점안으로 돌아옴 (버튼이 초록 산동 완료 시각)');
 // 두 번째 추가 점안: 첫 추가 점안도 시간이 지나 산동 완료 → 다시 추가 가능 → 3회
 await editKey('daily-patients', list => list.map(p => (p.name === '장민호' ? { ...p, dropsExtra: [ago(18)] } : p)));
 await W(5000);
@@ -38,7 +39,7 @@ ok(/산동 완료/.test(await c().innerText()) && await c().getByRole('button', 
 await c().getByRole('button', { name: '추가 점안' }).click(); await W(800);
 ok(await c().getByRole('button', { name: /· 3회$/ }).count() === 1 && (await pt('장민호')).dropsExtra.length === 2, '두 번째 추가 점안 → 3회');
 // CR 환자, 산동 금지 검사(VF)가 남은 환자는 추가 점안 없음
-ok(/산동 완료/.test(await cardOf('한지훈').innerText()) && await cardOf('한지훈').getByRole('button', { name: '추가 점안' }).count() === 0, 'CR 환자는 추가 점안 없음');
+ok(await cardOf('한지훈').getByRole('button', { name: /· 완료$/ }).count() === 1 && await cardOf('한지훈').getByRole('button', { name: '추가 점안' }).count() === 0, 'CR 환자는 4회 버튼이 완료, 추가 점안 없음');
 ok(await cardOf('윤지아').getByRole('button', { name: '추가 점안' }).count() === 0, 'VF(산동 금지)가 남아 있으면 추가 점안 숨김');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

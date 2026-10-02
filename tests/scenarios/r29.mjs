@@ -29,7 +29,8 @@ await page.getByRole('button', { name: '되돌리기' }).first().click(); await 
 const back1 = await pt('최민지');
 ok(!back1.done?.visionIop && !back1.measureOk && back1.measure?.ucva, '되돌리기: 시력방으로, 측정값은 남고 [확인]만 다시');
 // 점안 기록 취소 후 점안 없이 넘기기
-await cardOf('최민지').getByRole('button', { name: /^산동 \d/ }).click(); await W(600);
+await cardOf('최민지').getByRole('button', { name: /^산동 \d/ }).click(); await W(300);
+await cardOf('최민지').getByRole('button', { name: '누르면 취소' }).click(); await W(600);
 await measure('최민지');
 await cardOf('최민지').getByRole('button', { name: '점안 없이 넘기기' }).click(); await W(1200);
 const f = await pt('최민지');

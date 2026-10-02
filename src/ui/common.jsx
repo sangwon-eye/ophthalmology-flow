@@ -1348,6 +1348,13 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
   const st = dilationState(p, prefs, waitMin);
   const eye = !cr && dil ? dilateEyeOf(p.dilateEye) : undefined;
   const [eyeModal, setEyeModal] = useState(false);
+  // 점안 시각이 찍힌 버튼은 두 번 눌러야 취소 (한 번 누르면 3초 동안 '누르면 취소', 실수로 스쳐도 기록이 사라지지 않게)
+  const [armed, setArmed] = useState(-1);
+  useEffect(() => {
+    if (armed < 0) return undefined;
+    const t = setTimeout(() => setArmed(-1), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
   // VF처럼 산동 금지 검사가 남아 있으면 점안을 아예 막음 (이미 기록한 점안이 있으면 그대로 보여줌)
   const blockers = dilationBlockers(p);
   const blocked = blockers.length > 0 && st.given === 0;
@@ -1404,23 +1411,37 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
         // 추가 점안이 있으면 버튼 하나에 마지막 시각과 횟수만 (누르면 마지막 추가 점안만 취소)
         const extraLast = !cr && st.extra.length ? st.extra[st.extra.length - 1] : 0;
         const shown = extraLast || t;
+        // 산동 완료: 따로 칸을 두지 않고 마지막 점안 버튼이 초록 '산동 완료 11:18' (CR은 '4회 … · 완료')
+        const doneHere = st.status === 'ready' && i === st.total - 1;
+        const isArmed = armed === i && !!t;
+        const base = single ? (cr ? `CR ${i + 1}회` : `산동${eyeText}`) : (cr ? `${i + 1}회 점안` : '점안');
+        const label = isArmed ? '누르면 취소'
+          : doneHere && !cr ? `산동 완료${eyeText}${shown ? ` ${fmtClock(shown)}` : ''}${extraLast ? ` · ${st.extra.length + 1}회` : ''}`
+            : `${base}${shown ? ` ${fmtClock(shown)}` : ''}${extraLast ? ` · ${st.extra.length + 1}회` : ''}${doneHere ? ' · 완료' : ''}`;
         return (
           <button
             key={i}
             type="button"
-            onClick={() => (extraLast ? undoExtraDrop(mutatePatients, pk) : toggleDrop(mutatePatients, pk, i))}
+            onClick={() => {
+              if (!t) { toggleDrop(mutatePatients, pk, i); return; }
+              if (!isArmed) { setArmed(i); return; }
+              setArmed(-1);
+              if (extraLast) undoExtraDrop(mutatePatients, pk); else toggleDrop(mutatePatients, pk, i);
+            }}
             title={extraLast
-              ? `점안 ${[t, ...st.extra].map(fmtClock).join(', ')} · 누르면 ${fmtClock(extraLast)} 추가 점안 취소`
-              : t ? '다시 누르면 기록 취소' : '누르면 지금 시각으로 기록'}
-            className={`${sz} rounded-lg border ${t
-              ? 'bg-slate-100 border-slate-200 text-slate-500'
-              : i === st.given ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-300 text-slate-500'}`}
+              ? `점안 ${[t, ...st.extra].map(fmtClock).join(', ')} · 두 번 누르면 ${fmtClock(extraLast)} 추가 점안 취소`
+              : t ? '두 번 누르면 기록 취소' : '누르면 지금 시각으로 기록'}
+            className={`${sz} rounded-lg border ${isArmed
+              ? 'bg-white border-rose-400 text-rose-700'
+              : doneHere ? 'bg-green-100 border-green-300 text-green-800'
+                : t ? 'bg-slate-100 border-slate-200 text-slate-500'
+                  : i === st.given ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-300 text-slate-500'}`}
           >
-            {single ? (cr ? `CR ${i + 1}회` : `산동${eyeText}`) : (cr ? `${i + 1}회 점안` : '점안')}{shown ? ` ${fmtClock(shown)}` : ''}{extraLast ? ` · ${st.extra.length + 1}회` : ''}
+            {label}
           </button>
         );
       })}
-      {st.need && !togglesOnly && !blocked && <DilationBadge st={st} large={large} />}
+      {st.need && !togglesOnly && !blocked && !(showDrops && st.status === 'ready') && <DilationBadge st={st} large={large} />}
       {/* 산동 완료인데 덜 됐을 때: 한 번 더 점안 (CR 제외, 산동 금지 검사가 남아 있으면 숨김) */}
       {showDrops && st.need && !cr && st.status === 'ready' && blockers.length === 0 && (
         <button type="button" onClick={() => addExtraDrop(mutatePatients, pk)} title="산동이 덜 됐으면 한 번 더 점안 (이 시각부터 다시 시간을 잽니다)"

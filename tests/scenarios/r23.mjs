@@ -18,9 +18,14 @@ ok(await c.getByRole('button', { name: /^산동 \d\d:\d\d$/ }).count() === 1, '�
 ok(await c.getByText(/분 남음/).count() === 0, '남은 시간 표시 없음');
 await c.screenshot({ path: `${SP}/r23-after-drop.png` });
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
-// 다시 누르면 기록 취소, 산동 예정은 그대로
+// 시각이 찍힌 버튼은 두 번 눌러야 취소 (한 번 누르면 '누르면 취소'), 산동 예정은 그대로
 const c2 = cardOf('조현우');
-await c2.getByRole('button', { name: /^산동 \d/ }).click(); await W();
-ok(await c2.getByRole('button', { name: '산동', exact: true }).count() === 1, '다시 누르면 점안 기록만 취소');
+await c2.getByRole('button', { name: /^산동 \d/ }).click(); await W(300);
+ok(await c2.getByRole('button', { name: '누르면 취소' }).count() === 1 && await c2.getByRole('button', { name: '산동', exact: true }).count() === 0, '한 번 누르면 아직 취소 안 됨 (누르면 취소)');
+await c2.getByRole('button', { name: '누르면 취소' }).click(); await W();
+ok(await c2.getByRole('button', { name: '산동', exact: true }).count() === 1, '한 번 더 누르면 점안 기록만 취소');
+await c2.getByRole('button', { name: '산동', exact: true }).click(); await W(300);
+await c2.getByRole('button', { name: /^산동 \d/ }).click(); await W(3600);
+ok(await c2.getByRole('button', { name: /^산동 \d/ }).count() === 1, '3초 지나면 원래대로 (기록 그대로)');
 await browser.close();
 
