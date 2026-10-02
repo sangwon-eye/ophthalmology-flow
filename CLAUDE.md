@@ -57,6 +57,7 @@
 - `src/ui/common.jsx` 공용 카드·버튼·창, `src/views/*` 화면별(시력방·검사실=StationView, 진료실, 처치실, 관리자, 설정, 환자용, 메인)
 - `src/App.jsx` 최상위(동기화·화면 전환), `src/main.jsx` 서버 연결·새 버전 알림
 - `tests/`: Playwright 시나리오(`tests/README.md`), `tests/seed.cjs` 가상 명단
+- `.claude/agents/code-improver.md`: 읽기 전용 코드 검토 에이전트(Opus, 한국어). “code-improver로 ○○ 검토해 줘”로 부름. 제안은 확인 후 사용자에게 물어보고 고침
 
 ## 5. 정해진 결정과 이유 (다시 제안하거나 “버그”로 고치지 말 것)
 **검사·시간**
