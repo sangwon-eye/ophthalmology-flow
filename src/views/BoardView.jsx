@@ -3,8 +3,9 @@ import React, { useState, useEffect, useRef, createContext, useContext } from 'r
 import { Megaphone } from 'lucide-react';
 import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
-import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
-import { ChimeControl, useChime } from '../ui/chime.jsx';
+import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
+import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
+import { BellOff } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /* 환자용 화면                                                          */
@@ -24,8 +25,34 @@ const DARK = {
   slate: { chip: 'bg-slate-400/15 text-slate-100 border-slate-400/50' },
 };
 const darkChip = (color) => (DARK[color] || DARK.slate).chip;
-export function BoardShell({ title, badge, onBack, extra, big, children }) {
+// 직원용 버튼(자동 스크롤·글씨·종·메인 화면): 환자·보호자에게는 안 보이게 평소엔 숨기고,
+// 마우스를 움직이거나 화면을 누르면 잠깐(5초) 나타남. '글씨' 크기와 상관없이 늘 같은 작은 크기
+const STAFF_HIDE_MS = 5000;
+function useStaffControls() {
+  const [show, setShow] = useState(false);
+  const hold = useRef(false); // 버튼 위에 마우스가 있거나 고르는 중이면 숨기지 않음
+  useEffect(() => {
+    let timer = null;
+    const hideLater = () => {
+      clearTimeout(timer);
+      timer = setTimeout(function check() {
+        if (hold.current) { timer = setTimeout(check, 1000); return; }
+        setShow(false);
+      }, STAFF_HIDE_MS);
+    };
+    const wake = () => { setShow(true); hideLater(); };
+    const evs = ['mousemove', 'pointerdown', 'keydown', 'touchstart'];
+    evs.forEach(e => window.addEventListener(e, wake, true));
+    return () => { clearTimeout(timer); evs.forEach(e => window.removeEventListener(e, wake, true)); };
+  }, []);
+  return [show, hold];
+}
+
+export function BoardShell({ title, badge, onBack, extra, big, chime = false, children }) {
   const [now, setNow] = useState(new Date());
+  const [staffShow, staffHold] = useStaffControls();
+  const [textSize] = useTextSize();
+  const soundBlocked = useSoundBlocked();
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef(null);
   useEffect(() => {
@@ -55,7 +82,7 @@ export function BoardShell({ title, badge, onBack, extra, big, children }) {
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="h-dvh min-h-0 flex flex-col overflow-hidden bg-slate-900 text-slate-100">
+    <div className="relative h-dvh min-h-0 flex flex-col overflow-hidden bg-slate-900 text-slate-100">
       <div className="shrink-0 bg-slate-950 border-b border-slate-800">
         <div className={`${BOARD_WIDTH} py-4 flex items-center gap-6`}>
           {/* 제목은 낱말 단위로만 줄을 바꿈 (글자 중간에서 끊기지 않게). 진료실 번호는 옆에 배지로 */}
@@ -69,15 +96,29 @@ export function BoardShell({ title, badge, onBack, extra, big, children }) {
       <div ref={scrollRef} tabIndex={0} aria-label="환자 대기 명단" className="board-scroll min-h-0 flex-1 overflow-y-auto" onWheel={() => setAutoScroll(false)} onTouchStart={() => setAutoScroll(false)}>
         <div className={`${BOARD_WIDTH} py-4`}>{children}</div>
       </div>
-      {/* 직원용 버튼: 환자에게 덜 보이도록 오른쪽 아래에 작게 (QR 접수 화면의 '관리'처럼) */}
-      <div className="shrink-0">
-        <div className={`${BOARD_WIDTH} py-1.5 flex items-center justify-end gap-3 whitespace-nowrap text-slate-500`}>
-          {extra}
-          <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-800 text-slate-400">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
-          <TextSizeControl className="text-slate-500" selectClassName="border-slate-700 bg-slate-800 text-slate-400" />
-          <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-800 text-slate-400">메인 화면</button>
-        </div>
+      {/* 직원용 버튼: 오른쪽 아래 구석, 평소엔 숨김 (마우스를 움직이면 나타남). zoom 으로 '글씨' 크기와 상관없이 같은 크기 */}
+      <div
+        data-staff-controls
+        aria-hidden={!staffShow}
+        onMouseEnter={() => { staffHold.current = true; }}
+        onMouseLeave={() => { staffHold.current = false; }}
+        onFocus={() => { staffHold.current = true; }}
+        onBlur={() => { staffHold.current = false; }}
+        style={{ zoom: 1 / textScale(textSize) }}
+        className={`absolute bottom-3 right-4 z-20 flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-700/80 bg-slate-950/90 px-3 py-2 text-slate-500 shadow-lg transition-opacity duration-300 ${staffShow ? 'opacity-100' : 'opacity-0'}`}
+      >
+        {chime && <ChimeControl dark />}
+        {extra}
+        <button type="button" aria-pressed={autoScroll} onClick={() => setAutoScroll(v => !v)} className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-800 text-slate-400">{autoScroll ? '자동 스크롤 켜짐' : '자동 스크롤 꺼짐'}</button>
+        <TextSizeControl className="text-slate-500" selectClassName="border-slate-700 bg-slate-800 text-slate-400" />
+        <button type="button" onClick={onBack} className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-800 text-slate-400">메인 화면</button>
       </div>
+      {/* 숨겨 둔 동안 띵동 소리가 막혀 있으면 아주 작은 표시만 (직원이 화면을 한 번 누르면 풀림) */}
+      {!staffShow && soundBlocked && chime && (
+        <div aria-hidden="true" title="소리를 켜려면 화면을 한 번 눌러 주세요" style={{ zoom: 1 / textScale(textSize) }} className="absolute bottom-3 right-4 z-10 text-amber-400/70">
+          <BellOff size={16} />
+        </div>
+      )}
     </div>
   );
 }
@@ -438,7 +479,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
   if (kind.startsWith('consult:')) {
     const d = kind.slice('consult:'.length);
     return (
-      <BoardShell title={`${d} 교수님`} big badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack} extra={<ChimeControl dark />}>
+      <BoardShell title={`${d} 교수님`} big badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack} chime>
         <ConsultBoardSection doctor={d} patients={patients} settings={settings} prefs={doctorPrefs} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
       </BoardShell>
     );

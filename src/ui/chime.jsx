@@ -110,6 +110,17 @@ export function useChime(keys, { ready = true, context = '' } = {}) {
   }, [sig, ready, context]);
 }
 
+// 소리가 막혀 있는지 (환자용 화면: 직원용 버튼을 숨겨 둔 동안에도 작은 표시를 띄우려고)
+export function useSoundBlocked() {
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const fn = () => rerender(n => n + 1);
+    listeners.add(fn);
+    return () => { listeners.delete(fn); };
+  }, []);
+  return !chimeOff() && soundBlocked();
+}
+
 // 화면 위쪽: 소리 켜기/끄기 버튼 + 소리가 막혀 있으면 안내
 export function ChimeControl({ dark = false } = {}) {
   const [, rerender] = useState(0);
