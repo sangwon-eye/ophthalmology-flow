@@ -99,7 +99,6 @@ export function BoardShell({ title, badge, onBack, extra, big, chime = false, ch
       {/* 직원용 버튼: 오른쪽 아래 구석, 평소엔 숨김 (마우스를 움직이면 나타남). zoom 으로 '글씨' 크기와 상관없이 같은 크기 */}
       <div
         data-staff-controls
-        aria-hidden={!staffShow}
         onMouseEnter={() => { staffHold.current = true; }}
         onMouseLeave={() => { staffHold.current = false; }}
         onFocus={() => { staffHold.current = true; }}
