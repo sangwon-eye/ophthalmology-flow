@@ -112,6 +112,23 @@ export function Field({ label, children }) {
   );
 }
 
+// 두 번 눌러야 실행되는 버튼 (기록이 바로 지워지고 되돌리기가 없는 곳: 접수 취소·처치 취소 등).
+// 한 번 누르면 3초 동안 '누르면 취소'(빨간 글씨)로 바뀌고, 그 안에 한 번 더 누르면 실행
+export function TwoStepButton({ onConfirm, className = '', armedClassName = '', armedLabel = '누르면 취소', children }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <button type="button" onClick={() => { if (armed) { setArmed(false); onConfirm(); } else setArmed(true); }}
+      className={armed ? armedClassName || `${className} !text-rose-700 font-medium` : className}>
+      {armed ? armedLabel : children}
+    </button>
+  );
+}
+
 export function ConfirmButton({ label, confirmLabel = '한 번 더 누르면 삭제', onConfirm, disabled, className = '' }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
@@ -1575,7 +1592,7 @@ export function ProcedureList({ p, performer, onCancel }) {
           <span className="font-medium">{procLabel(x)}</span>
           <span className="text-xs text-slate-400 ml-1">{PERFORMER_LABEL[x.performer]}</span>
           {x.note && <span className="text-xs text-yellow-800 ml-2">{x.note}</span>}
-          {!x.done && onCancel && <button type="button" onClick={() => onCancel(x.uid)} className="ml-3 rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700">처치 취소</button>}
+          {!x.done && onCancel && <TwoStepButton onConfirm={() => onCancel(x.uid)} className="ml-3 rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700" armedClassName="ml-3 rounded-lg border border-rose-500 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700">처치 취소</TwoStepButton>}
         </div>
       ))}
     </div>
