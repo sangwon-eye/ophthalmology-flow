@@ -379,13 +379,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                 </button>}
               </div>
             )}
-            <div className="w-full flex flex-wrap items-center gap-2 empty:hidden">
-              <DilationRow compact group crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
-              {procDilatePending(p) && (() => {
-                const st = dilationState(p, doctorPrefs, waitMin);
-                return st.status === 'waiting' ? <span className="text-xs text-slate-500">산동 중 · 완료까지 {Math.max(1, (Number(waitMin) || 15) - st.mins)}분</span> : null;
-              })()}
-            </div>
+            <DilationRow compact crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
           </SimpleCard>
         ))}
       </div>

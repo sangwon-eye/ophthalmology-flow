@@ -458,8 +458,6 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
             <div id="consult-drops" className="mb-6 scroll-mt-36">
               <SectionTitle hint="CR과 '점안 후 다시 진료' 환자의 점안을 기록합니다. 점안을 마치고 기다리는 시간이 지나면 저절로 진료 대기로 갑니다 (띵동)">CR·산동 점안 · {dropsList.length}명</SectionTitle>
               {dropsList.map(p => {
-                const st = dilationState(p, doctorPrefs, waitMin);
-                const left = st.status === 'waiting' ? Math.max(1, (Number(waitMin) || 15) - st.mins) : 0;
                 const stage = getStage(p, settings);
                 return (
                   <SimpleCard key={patientKey(p)} p={p} tone="rose" badges={redoActive(p)
@@ -467,7 +465,6 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     : null}>
                     <div className="w-full flex flex-wrap items-center gap-2">
                       <DilationRow group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
-                      {left > 0 && <span className="text-xs text-slate-500">완료까지 {left}분</span>}
                       {!redoActive(p) && !['consult', 'inRoom'].includes(stage.area) && <span className="text-xs text-slate-400">지금: {stage.label}</span>}
                       {(p.redo?.pending || []).length > 0 && <span className="text-xs text-slate-500">다시 진료 뒤 처치: {p.redo.pending.map(x => x.name).join(', ')}</span>}
                     </div>

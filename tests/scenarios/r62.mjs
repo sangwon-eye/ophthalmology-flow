@@ -27,7 +27,7 @@ ok(await drops.getByText('권나은', { exact: true }).count() === 1, 'FU CR 환
 ok(!(await inWaiting('권나은')), 'CR 끝나기 전에는 진료 대기에 없음');
 for (let i = 1; i <= 4; i++) { await cardOf('권나은').getByRole('button', { name: `${i}회 점안` }).click(); await W(400); }
 ok((await pt('권나은')).drops.filter(Boolean).length === 4, '진료실에서 CR 4회 점안 기록');
-ok(/완료까지 \d+분/.test(await cardOf('권나은').innerText()), '완료까지 남은 시간');
+ok(!/완료까지/.test(await cardOf('권나은').innerText()), '남은 시간 글은 따로 쓰지 않음 (기존 산동·CR과 같게)');
 await W(2600);
 const c0 = await chimes();
 await setP('권나은', p => ({ drops: p.drops.map(t => t - 20 * 60000) }));
