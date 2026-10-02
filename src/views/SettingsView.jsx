@@ -415,9 +415,17 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                   <option value="prof">교수님이 직접</option>
                   <option value="resident">전공의</option>
                 </select>
-                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="진료 전 처치로 지정되면 접수하자마자 '산동'이 켜집니다">
+                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="진료 전 처치로 지정되면 접수하자마자, 진료 후 처치로 보내면 그때 '산동'이 켜집니다 (이미 점안했으면 그 시각 그대로)">
                   <input type="checkbox" checked={!!x.dilate} onChange={e => updateProc(x.id, { dilate: e.target.checked })} className="w-4 h-4" />
                   산동 필요
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="처치 창에서 이 처치를 체크하면 OU·OD·OS 버튼이 나옵니다 (예: PRP, YAG)">
+                  <input type="checkbox" checked={!!x.eyeSelect} onChange={e => updateProc(x.id, { eyeSelect: e.target.checked })} className="w-4 h-4" />
+                  눈 고르기
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="처치 창에서 이 처치를 체크하면 짧은 메모 칸이 나옵니다">
+                  <input type="checkbox" checked={!!x.memoField} onChange={e => updateProc(x.id, { memoField: e.target.checked })} className="w-4 h-4" />
+                  메모 칸
                 </label>
                 <button type="button" aria-label="위로" onClick={() => moveProc(x.id, 'up')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronUp size={14} /></button>
                 <button type="button" aria-label="아래로" onClick={() => moveProc(x.id, 'down')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { REDO_LABEL, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { REDO_LABEL, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -1432,24 +1432,31 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
 
 export function ProcedureModal({ patient, procedures, crAvailable = false, onConfirm, onCancel }) {
   const [sel, setSel] = useState({});
-  // 점안 후 다시 진료 (CR·산동 중 하나). 진료실 간호사가 점안하고, 끝나면 진료 대기 맨 앞으로
-  const [redo, setRedo] = useState('');
-  const redoKinds = [...(crAvailable ? ['cr'] : []), 'dilate'];
-  const [note, setNote] = useState('');
+  // 처치마다: 설정에서 [눈 고르기]를 켠 처치는 OU·OD·OS, [메모 칸]을 켠 처치는 짧은 메모
+  const [eye, setEye] = useState({});
+  const [memo, setMemo] = useState({});
   // 목록에 없는 요청은 직접 입력 (예: 안약 교육, 봉합사 제거)
   const [custom, setCustom] = useState('');
   const [customBy, setCustomBy] = useState('resident');
+  // 점안 후 다시 진료 (CR·산동 중 하나). 진료실 간호사가 점안하고, 끝나면 진료 대기 맨 앞으로
+  const [redo, setRedo] = useState('');
+  const redoKinds = [...(crAvailable ? ['cr'] : []), 'dilate'];
   const customName = custom.trim();
   const chosen = [
-    ...procedures.filter(x => sel[x.id]),
-    ...(customName ? [{ id: 'custom', name: customName, performer: customBy }] : []),
+    ...procedures.filter(x => sel[x.id]).map(x => ({
+      ...x,
+      eye: x.eyeSelect && eye[x.id] ? eye[x.id] : undefined,
+      note: x.memoField ? String(memo[x.id] || '').trim() : '',
+    })),
+    ...(customName ? [{ id: 'custom', name: customName, performer: customBy, note: '' }] : []),
   ];
+  const box = (on) => `flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${on ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200'}`;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-full overflow-y-auto">
         <h3 className="text-lg font-medium mb-1 text-slate-900">{patient.name}님 처치</h3>
         <p className="text-sm text-slate-500 mb-4">진료 완료 후 설명 대기로 가서 '처치 중'으로 표시됩니다. 교수님 처치는 설명 대기 카드에서, 전공의 처치는 처치실에서 완료합니다.</p>
-        <div className="space-y-2 mb-4">
+        <div className={`grid gap-2 mb-2 ${redoKinds.length > 1 ? 'sm:grid-cols-2' : ''}`}>
           {redoKinds.map(k => (
             <label key={k} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${redo === k ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'}`}>
               <input type="checkbox" checked={redo === k} onChange={() => setRedo(r => (r === k ? '' : k))} className="w-5 h-5" />
@@ -1457,21 +1464,43 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
               <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">진료실 점안</span>
             </label>
           ))}
-          {redo && <p className="text-xs text-slate-500 px-1">진료실 화면 'CR·산동 점안' 칸으로 가고, 점안이 끝나면 진료 대기 맨 앞으로 돌아옵니다. 같이 고른 처치는 다시 진료가 끝난 뒤 시작합니다.</p>}
-          {procedures.length === 0 && <div className="text-sm text-slate-400">설정 &gt; 처치에서 처치 목록을 먼저 만들어주세요</div>}
-          {procedures.map(x => (
-            <label key={x.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer">
-              <input type="checkbox" checked={!!sel[x.id]} onChange={() => setSel(s => ({ ...s, [x.id]: !s[x.id] }))} className="w-5 h-5" />
-              <span className="text-slate-700 flex-1">{x.name}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${x.performer === 'prof' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>{PERFORMER_LABEL[x.performer]}</span>
-            </label>
-          ))}
         </div>
-        <div className="rounded-xl border border-slate-200 p-3 mb-4">
+        {redo && <p className="text-xs text-slate-500 px-1 mb-2">진료실 화면 'CR·산동 점안' 칸으로 가고, 점안이 끝나면 진료 대기 맨 앞으로 돌아옵니다. 같이 고른 처치는 다시 진료가 끝난 뒤 시작합니다.</p>}
+        <div className="grid gap-2 sm:grid-cols-2 mb-4 mt-3">
+          {procedures.length === 0 && <div className="text-sm text-slate-400">설정 &gt; 처치에서 처치 목록을 먼저 만들어주세요</div>}
+          {procedures.map(x => {
+            const on = !!sel[x.id];
+            return (
+              <label key={x.id} className={box(on)}>
+                <input type="checkbox" checked={on} onChange={() => setSel(s => ({ ...s, [x.id]: !s[x.id] }))} className="w-5 h-5 mt-0.5" />
+                <span className="flex-1 min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="text-slate-700 flex-1 min-w-0">{x.name}</span>
+                    {x.dilate && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700" title="보내면 산동 예정이 켜집니다 (이미 점안했으면 그 시각 그대로)">산동</span>}
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${x.performer === 'prof' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>{PERFORMER_LABEL[x.performer]}</span>
+                  </span>
+                  {on && x.eyeSelect && (
+                    <span className="flex gap-1 mt-2" onClick={e => e.preventDefault()}>
+                      {['OU', 'OD', 'OS'].map(v => (
+                        <button key={v} type="button" aria-pressed={eye[x.id] === v} aria-label={`${x.name} ${v}`}
+                          onClick={() => setEye(m => ({ ...m, [x.id]: m[x.id] === v ? '' : v }))}
+                          className={`px-2.5 py-1 rounded-lg border text-xs font-medium ${eye[x.id] === v ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>{v}</button>
+                      ))}
+                    </span>
+                  )}
+                  {on && x.memoField && (
+                    <input value={memo[x.id] || ''} onClick={e => e.preventDefault()} onChange={e => setMemo(m => ({ ...m, [x.id]: e.target.value }))}
+                      aria-label={`${x.name} 메모`} placeholder="메모" className={`${INPUT} mt-2 py-1.5`} />
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="rounded-xl border border-slate-200 p-3 mb-6">
           <div className="text-sm text-slate-700 mb-2">기타 요청 (직접 입력)</div>
-          <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="예: 안약 점안 교육, 봉합사 제거" className={INPUT} />
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-xs text-slate-500">누가</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="예: 안약 점안 교육, 봉합사 제거" className={`${INPUT} flex-1 min-w-[12rem]`} />
             <div className="inline-flex gap-1 bg-slate-100 rounded-lg p-1">
               {['prof', 'resident'].map(k => (
                 <button key={k} type="button" aria-pressed={customBy === k} onClick={() => setCustomBy(k)}
@@ -1482,13 +1511,12 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
             </div>
           </div>
         </div>
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="처치 메모 (선택 · 위에서 고른 처치 모두에 붙습니다)" className={`${INPUT} mb-6`} />
         <div className="flex gap-3">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
           <button
             type="button"
             disabled={!chosen.length && !redo}
-            onClick={() => onConfirm(chosen, note.trim(), redo)}
+            onClick={() => onConfirm(chosen, redo)}
             className={`flex-1 py-3 rounded-xl font-medium ${chosen.length || redo ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-400'}`}
           >
             처치 지정
@@ -1516,7 +1544,7 @@ export function ProcedureList({ p, performer, onCancel }) {
     <div className="w-full text-sm text-slate-700 space-y-0.5">
       {list.map(x => (
         <div key={x.uid} className={x.done ? 'text-slate-400 line-through' : ''}>
-          <span className="font-medium">{x.name}</span>
+          <span className="font-medium">{procLabel(x)}</span>
           <span className="text-xs text-slate-400 ml-1">{PERFORMER_LABEL[x.performer]}</span>
           {x.note && <span className="text-xs text-yellow-800 ml-2">{x.note}</span>}
           {!x.done && onCancel && <button type="button" onClick={() => onCancel(x.uid)} className="ml-3 rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700">처치 취소</button>}

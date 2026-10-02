@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { REDO_SHORT, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -173,13 +173,14 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     showToast(`${p.name} 진료 완료, 설명 대기로`, () => backToRoom(pk));
   };
 
-  const orderProcedures = (chosen, note, redoKind) => {
+  const orderProcedures = (chosen, redoKind) => {
     const p = procFor;
     const pk = patientKey(p);
     const at = Date.now();
     setProcFor(null);
     const items = chosen.map(c => ({
-      uid: newId('pr'), procId: c.id, name: c.name, performer: c.performer, note, done: false, doneAt: null, orderedAt: at,
+      uid: newId('pr'), procId: c.id, name: c.name, performer: c.performer, note: c.note || '', done: false, doneAt: null, orderedAt: at,
+      ...(c.eye ? { eye: c.eye } : {}), ...(c.dilate ? { dilate: true } : {}),
     }));
     // CR·산동 후 다시 진료: 진료실 'CR·산동 점안' 칸으로, 같이 고른 처치는 다시 진료가 끝난 뒤 시작. 점안이 끝나면 진료 대기 맨 앞
     if (redoKind) {
@@ -195,9 +196,10 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     }
     // 설명 대기 중에 보낸 처치(진료 후 외래 간호사 입력): 설명 대기 순서는 그대로 두고 처치만 추가
     const already = !!p.seen;
-    patch(pk, x => { const r = releaseRedo(x); return { seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, ...r, procedures: [...(r.procedures || x.procedures || []), ...items] }; });
+    // '산동 필요' 처치(예: YAG)는 산동 예정을 켬 (이미 점안했으면 그 시각 그대로)
+    patch(pk, x => { const r = releaseRedo(x); return { seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, ...r, ...procDilatePatch(x, items), procedures: [...(r.procedures || x.procedures || []), ...items] }; });
     const where = items.some(i => i.performer === 'prof') ? '설명 대기에서 교수님 처치' : '처치실로';
-    const removeItems = x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at) });
+    const removeItems = x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at), dilateOverride: p.dilateOverride });
     showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems)));
   };
 
@@ -380,6 +382,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 </>}>
                   <TodayDoneLine p={p} tests={allTests} prefs={doctorPrefs} />
                   <ProcedureList p={p} onCancel={early ? undefined : uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
+                  {procDilatePending(p) && <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />}
                   {pendingProcedures(p, 'prof').length > 0 && (
                     <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
                   )}

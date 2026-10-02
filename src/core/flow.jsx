@@ -366,8 +366,22 @@ export function pendingProcedures(p, performer) {
 export function inProfProcedure(p) {
   return !p.consultDone && pendingProcedures(p, 'prof').length > 0;
 }
+// 교수님 처치가 같이 남아 있어도 전공의 처치는 처치실에 바로 올라감 (상황에 맞게 먼저 할 수 있게)
 export function inResidentProcedure(p) {
-  return !p.consultDone && pendingProcedures(p, 'prof').length === 0 && pendingProcedures(p, 'resident').length > 0;
+  return !p.consultDone && pendingProcedures(p, 'resident').length > 0;
+}
+// 진료 후 보낸 처치 중 '산동 필요'(설정 > 처치)가 남아 있음 → 설명 대기·처치실 카드에 [산동] 점안 버튼
+export function procDilatePending(p) {
+  return pendingProcedures(p).some(x => x.dilate);
+}
+// 처치 이름 + 눈 (예: PRP · OS)
+export function procLabel(x) {
+  return `${x.name}${['OU', 'OD', 'OS'].includes(x.eye) ? ` · ${x.eye}` : ''}`;
+}
+// 처치를 보낼 때: '산동 필요' 처치가 있으면 산동 예정을 켬. 이미 점안한 기록은 그대로 (그 시각부터 계속)
+export function procDilatePatch(x, items) {
+  if (!items.some(i => i.dilate) || x.dilateOverride === true) return {};
+  return { dilateOverride: true };
 }
 // 진료 완료 후 설명 대기. 처치가 남아 있어도 설명 대기에 '처치 중'으로 함께 보입니다.
 // explainedEarly: 처치 중에 설명을 먼저 끝낸 환자 → 처치가 끝나면 진찰실에서 [귀가]
@@ -453,7 +467,7 @@ export function redoPatch(x, kind, { at, from, pending = [], frontKey }) {
 // 다시 진료가 끝나면(진료 완료·처치 지정) 같이 골라 둔 처치를 그때 시작
 export function releaseRedo(x) {
   if (!x.redo?.pending?.length) return {};
-  return { procedures: [...(x.procedures || []), ...x.redo.pending], redo: { ...x.redo, pending: [] } };
+  return { procedures: [...(x.procedures || []), ...x.redo.pending], redo: { ...x.redo, pending: [] }, ...procDilatePatch(x, x.redo.pending) };
 }
 export function dilationState(p, prefs, waitMin, now = Date.now()) {
   const cr = crActive(p, prefs);
@@ -1273,6 +1287,7 @@ export function treatChimeKeys(patients, settings, now = Date.now()) {
     treatTimedDue(p, settings, now).forEach(t => keys.push(`due:${pk}:${t.id}`));
     prepPendingTests(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) keys.push(`due:${pk}:${t.id}`); });
     prepChecks(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) keys.push(`due:${pk}:${t.id}`); });
+    if (inResidentProcedure(p) && procDilatePending(p) && dilationState(p, null, settings.dilationWaitMin, now).status === 'ready') keys.push(`dil:${pk}`);
   });
   return keys;
 }

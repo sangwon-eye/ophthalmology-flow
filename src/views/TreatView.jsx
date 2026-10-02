@@ -1,6 +1,6 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys } from '../core/flow.jsx';
+import { dilationState, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -106,6 +106,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       patients.forEach(p => sortedTests(settings).filter(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t)).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${prepLabel(t)} 끝 · 확인해주세요` }); }));
       prepList.forEach(p => prepPendingTests(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${prepLabel(t)} 끝 · 확인해주세요` }); }));
       checkList.forEach(p => prepChecks(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${t.short || t.name} 확인할 시간` }); }));
+      patients.filter(p => inResidentProcedure(p) && procDilatePending(p)).forEach(p => { if (dilationState(p, null, settings.dilationWaitMin, now).status === 'ready') due.push({ k: `${patientKey(p)}:dil`, text: `${p.name} 산동 완료 · ${pendingProcedures(p, 'resident').map(procLabel).join(', ')}` }); });
       const fresh = seenDue.current ? due.filter(d => !seenDue.current.has(d.k)) : [];
       seenDue.current = new Set(due.map(d => d.k));
       if (fresh.length) showToast(`시간 됨 · ${fresh.map(d => d.text).join(' · ')}`);
@@ -369,13 +370,22 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             </>}
             {(p.procedures || []).some(x => x.performer === 'resident') && (
               <div className="w-full flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex-1 min-w-0"><ProcedureList p={p} performer="resident" onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} /></div>
+                <div className="flex-1 min-w-0">
+                  <ProcedureList p={p} performer="resident" onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
+                  {pendingProcedures(p, 'prof').length > 0 && <div className="text-xs text-slate-400 mt-0.5">교수님 처치도 남음: {pendingProcedures(p, 'prof').map(procLabel).join(', ')}</div>}
+                </div>
                 {inResidentProcedure(p) && <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium shrink-0">
                   처치 완료
                 </button>}
               </div>
             )}
-            <DilationRow compact crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+            <div className="w-full flex flex-wrap items-center gap-2 empty:hidden">
+              <DilationRow compact group crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
+              {procDilatePending(p) && (() => {
+                const st = dilationState(p, doctorPrefs, waitMin);
+                return st.status === 'waiting' ? <span className="text-xs text-slate-500">산동 중 · 완료까지 {Math.max(1, (Number(waitMin) || 15) - st.mins)}분</span> : null;
+              })()}
+            </div>
           </SimpleCard>
         ))}
       </div>
