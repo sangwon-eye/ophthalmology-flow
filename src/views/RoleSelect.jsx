@@ -1,6 +1,6 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
 import React, { useState, useEffect, useRef } from 'react';
-import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode } from 'lucide-react';
+import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
 import { COLOR_MAP, INPUT, applyCheckin, consultWaiting, forcedToday, patientKey, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, todayISO, treatRoomOf, treatWork, treatWorkCount, visionWaiting } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
@@ -223,7 +223,53 @@ function WaitBelow({ k, count, detail, c }) {
   );
 }
 
+// 메인 화면 맨 아래 작은 글씨 [감사의 글] → 만든 사람의 글
+const THANKS = [
+  '시간이 지나고 보니 이 말은 수학에만 해당하는 이야기가 아니었습니다. 같은 수고를 매일 손으로 되풀이하기보다, 한 번 더 고민해서 그 수고를 덜어 내는 것. 이 프로그램은 그 작은 마음에서 시작되었습니다.',
+  '외래의 하루는 수많은 기다림으로 채워집니다. 환자분들은 시력검사를, 검사실을, 진료실을 차례로 기다리시고, 직원분들은 명단을 넘기고 이름을 부르며 환자분이 어디쯤 계신지 확인하느라 쉴 틈이 없습니다. 바쁜 수련 생활 속에서도 그 기다림을 조금이라도 줄이고, 함께 일하는 동료들의 수고를 덜고 싶었습니다.',
+  '그래서 시력검사실에서 검사실과 처치실, 진료실로 이어지는 흐름 하나하나를 들여다보며, 현장에서 들은 이야기를 한 줄씩 담았습니다. 띵동 소리 하나, 버튼 하나에도 “이렇게 하면 조금 더 편하지 않을까” 하는 고민이 들어 있습니다.',
+  '검사실·진료실·처치실의 모든 선생님들과 진료를 기다리시는 환자분들께, 화면 곳곳에 담긴 작은 배려가 전해지기를 바랍니다. 불편한 점이나 더 좋은 생각이 있으시면 언제든 편하게 말씀해 주세요.',
+];
+export function AboutModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <div role="dialog" aria-label="감사의 글" className="relative bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[92vh] overflow-y-auto break-keep" onClick={e => e.stopPropagation()}>
+        <button type="button" onClick={onClose} aria-label="닫기" className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:bg-white/70"><X size={20} /></button>
+        <div className="px-8 pt-8 pb-6 bg-gradient-to-br from-indigo-50 via-white to-sky-50 border-b border-slate-100 rounded-t-2xl">
+          <div className="flex items-center gap-2 text-indigo-500 mb-2">
+            <Eye size={18} aria-hidden="true" />
+            <span className="text-xs font-semibold tracking-wide">Ophthalmology Flow</span>
+          </div>
+          <h2 className="text-2xl font-bold text-slate-900">감사의 글</h2>
+        </div>
+        <div className="px-8 pt-6 pb-2 text-[15px] leading-7 text-slate-700 space-y-4">
+          <blockquote className="border-l-4 border-indigo-300 bg-indigo-50/60 rounded-r-lg px-4 py-3">
+            <div className="text-xs text-indigo-500 mb-1">학창 시절 수학 선생님께서 해 주신 말씀</div>
+            <div className="text-base font-medium text-slate-900">“수학을 잘하려면 몸은 게으르고, 머리는 부지런해야 한다.”</div>
+          </blockquote>
+          {THANKS.map((t, i) => <p key={i}>{t}</p>)}
+          <p className="font-medium text-slate-900">감사합니다.</p>
+        </div>
+        <div className="px-8 pt-4 pb-8 flex items-end justify-between gap-4">
+          <span className="text-xs text-slate-400">{APP_VERSION}</span>
+          <div className="text-right">
+            <div className="text-xs text-slate-400">2026년 10월</div>
+            <div className="text-lg font-bold text-slate-900">한상원 <span className="text-sm font-normal text-slate-500">드림</span></div>
+            <div className="text-xs text-slate-400">2023년 입국</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doctors = [] }) {
+  const [about, setAbout] = useState(false);
   // 메인 화면: 매일 쓰는 직원 화면(진료 흐름)은 크게, 환자용 화면·관리는 작게 묶어서 한 화면에 모두
   // 방마다 대기 인원(각 화면 위쪽 '대기 N명'과 같은 숫자). 진료실은 교수님별로 한 줄
   // 오늘 명단에 환자가 없는 교수님은 빼기
@@ -311,8 +357,14 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
             <div className="grid gap-3 sm:grid-cols-3">{manage.map(small)}</div>
           </section>
         </div>
-        <div className="text-center text-xs text-slate-400 mt-6">{APP_VERSION}</div>
+        <div className="flex items-center justify-center gap-3 text-xs text-slate-400 mt-6">
+          {APP_VERSION}
+          <button type="button" onClick={() => setAbout(true)} className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100">
+            <Heart size={13} aria-hidden="true" />감사의 글
+          </button>
+        </div>
       </div>
+      {about && <AboutModal onClose={() => setAbout(false)} />}
     </div>
   );
 }
