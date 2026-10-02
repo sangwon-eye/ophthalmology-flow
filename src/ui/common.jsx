@@ -1552,10 +1552,16 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
 export function cancelProcedure(mutatePatients, pk, uid) {
   mutatePatients(prev => prev.map(p => {
     if (patientKey(p) !== pk || p.consultDone || !(p.procedures || []).some(x => x.uid === uid && !x.done)) return p;
+    const item = p.procedures.find(x => x.uid === uid);
     const procedures = p.procedures.filter(x => x.uid !== uid);
-    if (procedures.length) return { ...p, procedures };
+    // 이 처치 때문에 켠 산동이고 아직 점안 전이면 산동도 원래대로 (다른 '산동 필요' 처치가 남아 있으면 그대로)
+    const undoDilate = item.dilateSet && !procedures.some(x => x.dilate && !x.done) && !(p.drops || []).some(Boolean)
+      ? { dilateOverride: typeof item.dilateWas === 'boolean' ? item.dilateWas : undefined } : {};
+    if (procedures.length) return { ...p, procedures, ...undoDilate };
+    // 설명 대기에서 [처치 보내기]로 넣은 처치였으면 설명 대기에 그대로
+    if (item.fromExplain) return { ...p, procedures, procOrderedAt: null, ...undoDilate };
     const occupied = prev.some(x => patientKey(x) !== pk && x.date === p.date && x.doctor === p.doctor && inConsult(x));
-    return { ...p, procedures, seen: false, seenAt: null, procOrderedAt: null, calledRoom: occupied ? null : p.doctor || null };
+    return { ...p, procedures, seen: false, seenAt: null, procOrderedAt: null, calledRoom: occupied ? null : p.doctor || null, ...undoDilate };
   }));
 }
 

@@ -383,6 +383,12 @@ export function procDilatePatch(x, items) {
   if (!items.some(i => i.dilate) || x.dilateOverride === true) return {};
   return { dilateOverride: true };
 }
+// 처치 때문에 산동을 켰으면 그 처치에 표시 (처치 취소 때 산동도 원래대로 되돌리려고)
+export function markDilateSet(x, items) {
+  if (!procDilatePatch(x, items).dilateOverride) return items;
+  const was = typeof x.dilateOverride === 'boolean' ? x.dilateOverride : null;
+  return items.map(i => (i.dilate ? { ...i, dilateSet: true, dilateWas: was } : i));
+}
 // 진료 완료 후 설명 대기. 처치가 남아 있어도 설명 대기에 '처치 중'으로 함께 보입니다.
 // explainedEarly: 처치 중에 설명을 먼저 끝낸 환자 → 처치가 끝나면 진찰실에서 [귀가]
 export function awaitingExplain(p) {
@@ -490,7 +496,16 @@ export function cancelRedoPatch(x, at = Date.now()) {
 // 다시 진료가 끝나면(진료 완료·처치 지정) 같이 골라 둔 처치를 그때 시작
 export function releaseRedo(x) {
   if (!x.redo?.pending?.length) return {};
-  return { procedures: [...(x.procedures || []), ...x.redo.pending], redo: { ...x.redo, pending: [] }, ...procDilatePatch(x, x.redo.pending) };
+  const items = markDilateSet(x, x.redo.pending);
+  // released: 진료 완료 취소 때 다시 대기로 되돌릴 처치
+  return { procedures: [...(x.procedures || []), ...items], redo: { ...x.redo, pending: [], released: items.map(i => i.uid) }, ...procDilatePatch(x, items) };
+}
+// 다시 진료 뒤 [진료 완료 취소]: 그때 시작한 처치(아직 안 한 것)를 다시 '다시 진료 뒤 처치'로
+export function unreleaseRedo(x) {
+  const ids = new Set(x.redo?.released || []);
+  if (!ids.size) return {};
+  const back = (x.procedures || []).filter(i => ids.has(i.uid) && !i.done);
+  return { procedures: (x.procedures || []).filter(i => !(ids.has(i.uid) && !i.done)), redo: { ...x.redo, pending: [...(x.redo.pending || []), ...back], released: [] } };
 }
 export function dilationState(p, prefs, waitMin, now = Date.now()) {
   const cr = crActive(p, prefs);

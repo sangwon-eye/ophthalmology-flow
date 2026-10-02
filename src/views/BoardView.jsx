@@ -345,6 +345,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
   useEffect(() => { const i = setInterval(() => setTick(x => x + 1), 30000); return () => clearInterval(i); }, []);
   const waiting = mine.filter(p => consultWaiting(p, settings, prefs)).sort(byQueue);
   const testing = mine.filter(p => !p.seen && (!allDone(p, settings) || dropsPending(p, prefs, settings.dilationWaitMin))).length;
+  const testingLabel = mine.some(p => !p.seen && dropsPending(p, prefs, settings.dilationWaitMin)) ? '검사·점안 진행 중' : '검사 진행 중';
   const notice = useNotice(`doctor:${doctor}`);
   // 진료실 앞 모니터(교수님 한 분): 진료 중·다음 순서는 가장 크게, 2·3번은 크게, 그다음은 작게
   if (plain) {
@@ -362,7 +363,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
         </div>
         {!waiting.length && <div className="text-2xl text-slate-500 py-4">진료 대기 환자가 없습니다</div>}
         <SmallRest list={waiting.slice(3)} start={4} color="amber" />
-        {testing > 0 && <div className="text-lg text-slate-400 mt-4">검사 진행 중 {testing}명</div>}
+        {testing > 0 && <div className="text-lg text-slate-400 mt-4">{testingLabel} {testing}명</div>}
       </div>
     );
   }
@@ -390,7 +391,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
           ))}
         </div>
       )}
-      {testing > 0 && <div className="text-sm text-slate-400 mt-3">검사 진행 중 {testing}명</div>}
+      {testing > 0 && <div className="text-sm text-slate-400 mt-3">{testingLabel} {testing}명</div>}
     </div>
   );
 }

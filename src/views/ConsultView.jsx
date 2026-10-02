@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadFu } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -178,15 +178,15 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const undoFinishConsult = (p) => {
     const pk = patientKey(p);
     const someoneIn = allPatients.some(x => patientKey(x) !== pk && x.doctor === doctor && inConsult(x));
-    backToRoom(pk);
-    showToast(`${p.name} 진료 완료 취소, ${someoneIn ? '진료 대기로' : '다시 진료 중으로'}`, () => patch(pk, () => ({ seen: true, seenAt: p.seenAt || Date.now(), calledRoom: null })));
+    backToRoom(pk, x => unreleaseRedo(x));
+    showToast(`${p.name} 진료 완료 취소, ${someoneIn ? '진료 대기로' : '다시 진료 중으로'}`, () => patch(pk, x => ({ seen: true, seenAt: p.seenAt || Date.now(), calledRoom: null, ...releaseRedo(x) })));
   };
 
   const finishConsult = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
     patch(pk, x => ({ seen: true, seenAt: at, calledRoom: null, ...releaseRedo(x) }));
-    showToast(`${p.name} 진료 완료, 설명 대기로`, () => backToRoom(pk));
+    showToast(`${p.name} 진료 완료, 설명 대기로`, () => backToRoom(pk, x => unreleaseRedo(x)));
   };
 
   // 다시 진료 취소: 원래 있던 곳으로 (설명 대기에서 보냈으면 설명 대기, 진료 중에 보냈으면 진료 대기 맨 앞)
@@ -222,7 +222,12 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     // 설명 대기 중에 보낸 처치(진료 후 외래 간호사 입력): 설명 대기 순서는 그대로 두고 처치만 추가
     const already = !!p.seen;
     // '산동 필요' 처치(예: YAG)는 산동 예정을 켬 (이미 점안했으면 그 시각 그대로)
-    patch(pk, x => { const r = releaseRedo(x); return { seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, ...r, ...procDilatePatch(x, items), procedures: [...(r.procedures || x.procedures || []), ...items] }; });
+    patch(pk, x => {
+      const r = releaseRedo(x);
+      // 설명 대기에서 넣은 처치는 취소해도 설명 대기에 남도록 표시, 처치 때문에 켠 산동도 표시
+      const marked = markDilateSet(x, items.map(i => (already ? { ...i, fromExplain: true } : i)));
+      return { seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, ...r, ...procDilatePatch(x, items), procedures: [...(r.procedures || x.procedures || []), ...marked] };
+    });
     const where = items.some(i => i.performer === 'prof') ? '설명 대기에서 교수님 처치' : '처치실로';
     const removeItems = x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at), dilateOverride: p.dilateOverride });
     showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems)));
