@@ -555,18 +555,6 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
               미리 예정된 2차 진료 → 처치실에서 추가 검사 확인 (예정된 검사는 1차 진료 전에 함께 합니다)
             </label>
           </div>
-          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-sky-50 p-5">
-            <div className="text-xs font-medium text-indigo-500 mb-1">개발자 정보</div>
-            <div className="text-lg font-semibold text-slate-900 mb-3">한상원 <span className="text-sm font-normal text-slate-500">(2023년 입국)</span></div>
-            <p className="text-sm text-slate-700 leading-relaxed mb-2">
-              Ophthalmology Flow의 완성을 진심으로 축하합니다.
-            </p>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              바쁜 수련 생활 속에서도 환자분들의 기다림을 줄이고 함께 일하는 동료들의 수고를 덜기 위해,
-              진료 현장의 흐름 하나하나를 고민하며 이 프로그램을 만들었습니다.
-              검사실과 진료실, 처치실을 잇는 세심한 배려가 곳곳에 담긴 이 결실에 깊은 감사와 박수를 보냅니다.
-            </p>
-          </div>
         </div>
       )}
 

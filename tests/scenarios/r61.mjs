@@ -1,0 +1,24 @@
+import { chromium, SP, BASE, tester } from '../lib.mjs';
+// 메인 화면 맨 아래 [감사의 글] → 만든 사람의 글 창 (설정의 예전 개발자 정보 칸은 없앰)
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const { errors, ok, W, pick } = tester(page);
+await page.goto(`${BASE}/`); await W();
+const btn = page.getByRole('button', { name: '감사의 글' });
+ok(await btn.count() === 1, '메인 화면에 [감사의 글] 버튼');
+await btn.click(); await W(400);
+const dlg = page.getByRole('dialog', { name: '감사의 글' });
+const txt = await dlg.innerText();
+ok(/몸은 게으르고, 머리는 부지런해야 한다/.test(txt) && /한상원/.test(txt) && /2023년 입국/.test(txt), '창에 글·이름·입국 연도');
+ok(/습니다/.test(txt), '"~습니다"체');
+await dlg.screenshot({ path: `${SP}/r61-thanks.png` });
+await page.keyboard.press('Escape'); await W(300);
+ok(await page.getByRole('dialog').count() === 0, 'Esc로 닫힘');
+await btn.click(); await W(300);
+await page.getByRole('button', { name: '닫기' }).click(); await W(300);
+ok(await page.getByRole('dialog').count() === 0, '× 로 닫힘');
+await pick('설정');
+await page.getByRole('button', { name: '기타', exact: true }).click(); await W(300);
+ok(await page.getByText('개발자 정보').count() === 0, '설정의 예전 개발자 정보 칸은 없음');
+ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
+await browser.close();
