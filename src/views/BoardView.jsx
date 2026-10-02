@@ -59,11 +59,11 @@ export function BoardShell({ title, badge, onBack, extra, big, children }) {
       <div className="shrink-0 bg-slate-950 border-b border-slate-800">
         <div className={`${BOARD_WIDTH} py-4 flex items-center gap-6`}>
           {/* 제목은 낱말 단위로만 줄을 바꿈 (글자 중간에서 끊기지 않게). 진료실 번호는 옆에 배지로 */}
-          <h1 className={`min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 ${big ? 'text-5xl' : 'text-3xl'} font-bold text-white break-keep`}>
+          <h1 className={`min-w-0 flex-1 flex flex-wrap items-center ${big ? 'gap-x-5 gap-y-3 text-5xl leading-snug' : 'gap-x-4 gap-y-1 text-3xl'} font-bold text-white break-keep`}>
             <span>{title}</span>
-            {badge && <span className={`whitespace-nowrap rounded-xl bg-amber-400 px-3 py-0.5 ${big ? 'text-4xl' : 'text-2xl'} font-bold text-slate-950`}>{badge}</span>}
+            {badge && <span className={`whitespace-nowrap bg-amber-400 font-bold text-slate-950 ${big ? 'rounded-2xl px-5 py-1.5 text-4xl leading-snug' : 'rounded-xl px-3 py-0.5 text-2xl'}`}>{badge}</span>}
           </h1>
-          <span className="shrink-0 whitespace-nowrap text-3xl text-slate-300 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+          <span className={`shrink-0 whitespace-nowrap ${big ? 'text-2xl' : 'text-3xl'} text-slate-300 tabular-nums`}>{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
       </div>
       <div ref={scrollRef} tabIndex={0} aria-label="환자 대기 명단" className="board-scroll min-h-0 flex-1 overflow-y-auto" onWheel={() => setAutoScroll(false)} onTouchStart={() => setAutoScroll(false)}>
@@ -133,18 +133,23 @@ export function WaitNotice({ patients, kind, compact }) {
 }
 
 // 앞 순서 큰 칸 (진료실 앞 모니터·시력방 TV)
-function BigRow({ label, name, size, tone = 'amber', n }) {
+// 글자 위아래 여백: 맑은 고딕은 글자가 아래로 처져 보여서 줄 높이를 넉넉히(leading-snug) 주고 위아래 여백을 같게
+function BigRow({ label, name, size, tone = 'amber', n, muted = false }) {
   const c = DARK[tone] || DARK.amber;
   const S = {
-    xl: { box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1', num: 'w-16 h-16 text-4xl' },
+    xxl: { box: 'px-6 py-4 gap-5', name: 'text-7xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
+    xl: { box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
     lg: { box: 'px-5 py-3 gap-4', name: 'text-5xl', tag: 'text-xl px-3 py-1', num: 'w-14 h-14 text-3xl' },
-    md: { box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-0.5', num: 'w-12 h-12 text-2xl' },
+    md: { box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-1', num: 'w-12 h-12 text-2xl' },
   }[size];
+  // muted: 진료 중 (이미 진료실 안에 있어 덜 눈에 띄게, 회색 칸)
+  const box = muted ? 'bg-slate-800/60 border-slate-700' : label ? c.next : 'bg-slate-800 border-slate-600';
+  const tag = muted ? 'bg-slate-600 text-slate-100' : c.badge;
   return (
-    <div className={`flex items-center ${S.box} rounded-2xl border-2 ${label ? c.next : 'bg-slate-800 border-slate-600'}`}>
-      {label ? <span className={`shrink-0 whitespace-nowrap rounded-full ${c.badge} ${S.tag} font-bold`}>{label}</span>
+    <div className={`flex items-center ${S.box} rounded-2xl border-2 ${box}`}>
+      {label ? <span className={`shrink-0 whitespace-nowrap rounded-full ${tag} ${S.tag} leading-snug font-bold`}>{label}</span>
         : <span className={`${S.num} shrink-0 rounded-full ${c.num} flex items-center justify-center font-bold`}>{n}</span>}
-      <span className={`${S.name} min-w-0 font-bold text-white whitespace-nowrap`}>{name}</span>
+      <span className={`${S.name} leading-snug min-w-0 font-bold ${muted ? 'text-slate-200' : 'text-white'} whitespace-nowrap`}>{name}</span>
     </div>
   );
 }
@@ -304,10 +309,10 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
       <div>
         <BoardNotice text={notice} />
         <div className="space-y-3">
-          {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} size="xl" />}
-          {waiting[0] && <BigRow label="다음 순서" name={patientBoardName(waiting[0])} size="xl" />}
+          {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} size="md" muted />}
+          {waiting[0] && <BigRow label="다음 순서" name={patientBoardName(waiting[0])} size="xxl" />}
           {waiting.length > 1 && (
-            <div className="grid gap-3" style={boardGrid(22)}>
+            <div className="grid grid-cols-2 gap-3">
               {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="md" />)}
             </div>
           )}
@@ -430,7 +435,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
   if (kind.startsWith('consult:')) {
     const d = kind.slice('consult:'.length);
     return (
-      <BoardShell title={`${d} 교수님 진료`} big badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack} extra={<ChimeControl dark />}>
+      <BoardShell title={`${d} 교수님`} big badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack} extra={<ChimeControl dark />}>
         <ConsultBoardSection doctor={d} patients={patients} settings={settings} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
       </BoardShell>
     );

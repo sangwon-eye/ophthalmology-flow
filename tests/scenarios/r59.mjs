@@ -14,14 +14,19 @@ const openBoard = async (label) => {
 // 나상훈 진료실 앞 모니터
 await setP('신종희', () => ({ checkin: '08:50', done: { visionIop: true }, calledRoom: '나상훈', calledAt: Date.now() }));
 await openBoard(/^나상훈 진료실/);
-ok(await page.getByRole('heading', { name: /나상훈 교수님 진료/ }).count() === 1, '제목: 나상훈 교수님 진료');
-const title = await page.getByRole('heading', { name: /나상훈 교수님 진료/ }).evaluate(e => parseFloat(getComputedStyle(e).fontSize));
+ok(await page.getByRole('heading', { name: /나상훈 교수님/ }).count() === 1, '제목: 나상훈 교수님');
+const title = await page.getByRole('heading', { name: /나상훈 교수님/ }).evaluate(e => parseFloat(getComputedStyle(e).fontSize));
 ok(title >= 44, `교수님 이름 크게 (${title}px)`);
 const inRoom = page.locator('div.rounded-2xl').filter({ hasText: '진료 중' }).first();
 ok(/신\*희/.test(await inRoom.innerText()), '진료 중 환자 크게');
-const big = await inRoom.locator('span.font-bold').last().evaluate(e => parseFloat(getComputedStyle(e).fontSize));
-ok(big >= 56, `진료 중 이름 글씨 (${big}px)`);
-ok(await page.locator('div.rounded-2xl').filter({ hasText: '다음 순서' }).filter({ hasText: '권*은' }).count() === 1, '다음 순서 크게');
+const roomSize = await inRoom.locator('span.font-bold').last().evaluate(e => parseFloat(getComputedStyle(e).fontSize));
+const nextRow = page.locator('div.rounded-2xl').filter({ hasText: '다음 순서' }).filter({ hasText: '권*은' });
+ok(await nextRow.count() === 1, '다음 순서 칸');
+const nextSize = await nextRow.locator('span.font-bold').last().evaluate(e => parseFloat(getComputedStyle(e).fontSize));
+ok(nextSize >= 64 && roomSize >= 30 && roomSize < nextSize, `다음 순서가 가장 크게 (${nextSize}px), 진료 중은 조금 작게 (${roomSize}px)`);
+const h1 = await page.locator('h1').boundingBox();
+const badge = await page.locator('h1').getByText('5번 진료실', { exact: true }).boundingBox();
+ok(badge && h1 && badge.y >= h1.y && badge.y + badge.height <= h1.y + h1.height + 1, '진료실 번호 배지가 제목 줄 안에');
 await page.screenshot({ path: `${SP}/r59-consult.png` });
 // 띵동: 다른 PC에서 나상훈 진료 호출 → 띵동, 다른 교수님 호출은 소리 없음
 await W(2600);

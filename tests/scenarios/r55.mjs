@@ -13,10 +13,11 @@ for (const [w, h] of [[1024, 768], [1920, 1080]]) {
   const { errors, ok, W } = tester(page);
   await openBoard(page, W, '나상훈 진료실');
   const h1 = page.locator('h1');
-  ok((await h1.innerText()).replace(/\s+/g, ' ').includes('나상훈 교수님 진료'), `${w}px: 진료실 화면 제목`);
+  ok((await h1.innerText()).replace(/\s+/g, ' ').includes('나상훈 교수님'), `${w}px: 진료실 화면 제목`);
   ok(await h1.getByText('5번 진료실', { exact: true }).count() === 1, `${w}px: 진료실 번호는 제목 옆 배지`);
   const title = await h1.locator('span').first().boundingBox();
-  ok(title.height < 50, `${w}px: 제목이 한 줄 (높이 ${Math.round(title.height)})`);
+  const fs = await h1.evaluate(e => parseFloat(getComputedStyle(e).fontSize));
+  ok(title.height < fs * 1.6, `${w}px: 제목이 한 줄 (높이 ${Math.round(title.height)}, 글씨 ${fs})`);
   const clock = await page.getByText(/^(오전|오후) \d{1,2}:\d{2}$/).boundingBox();
   ok(clock && clock.height < 50, `${w}px: 시계가 한 줄`);
   const back = await page.getByRole('button', { name: '메인 화면' }).boundingBox();
