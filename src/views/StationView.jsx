@@ -1,7 +1,7 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, timeToMin, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, reservationQueueKey, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { TwoStepButton, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -102,11 +102,12 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const groupIdle = (g, list) => !list.some(p => groupPending(p, g) || g.tests.some(t => t.id === activeVf(p)));
   // VF 분류에서도 진행 중인 카드와 종료 버튼을 계속 보여준다.
   const shown = activeGroup ? roomList.filter(p => groupPending(p, activeGroup) || activeGroup.tests.some(t => t.id === activeVf(p))) : roomList;
-  const toggleFirstVisit = (pk) => patchPatient(mutatePatients, pk, x => ({ firstVisit: !x.firstVisit }));
+  // 초진 ↔ 재진: 화면에 보이던 값의 반대로 (두 PC가 동시에 눌러도 같은 결과)
+  const toggleFirstVisit = (pk, on) => patchPatient(mutatePatients, pk, () => ({ firstVisit: on }));
   const firstVisitChip = (p) => (
     <button
       type="button"
-      onClick={() => toggleFirstVisit(patientKey(p))}
+      onClick={() => toggleFirstVisit(patientKey(p), !p.firstVisit)}
       className={`text-xs px-2.5 py-1 rounded-full border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'bg-white border-slate-300 text-slate-400'}`}
     >
       {p.firstVisit ? '초진' : '재진'}
@@ -210,7 +211,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
     const pk = patientKey(p);
     mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? applyCheckin(x) : x)));
     showToast(`${p.name} 접수${p.skipVision ? ' (시력검사 없이 바로 진료)' : ''}`, () => mutatePatients(prev => prev.map(x => (patientKey(x) === pk
-      ? { ...x, checkin: '', late: !!p.late, queueKey: timeToMin(x.reservation), assigned: p.assigned, done: p.done, doneAt: p.doneAt, visionSkipped: false }
+      ? { ...x, checkin: '', late: !!p.late, queueKey: reservationQueueKey(x.reservation), assigned: p.assigned, done: p.done, doneAt: p.doneAt, visionSkipped: false }
       : x))));
   };
 
@@ -359,7 +360,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 handle={handle}
                 onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
                 onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
-                onToggleFirst={isVision ? () => toggleFirstVisit(pk) : undefined}
+                onToggleFirst={isVision ? () => toggleFirstVisit(pk, !p.firstVisit) : undefined}
                 stale={room?.builtin === 'treat' && !locked && !tests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t)) ? staleMinutes(p, settings) : 0}
               >
                 {/* 값이 있는 줄만 보여줌 (값 없음 줄은 생략) */}

@@ -1107,7 +1107,7 @@ export function LateChip({ p }) {
     <button
       type="button"
       aria-pressed={!!p.late}
-      onClick={() => patchPatient(mutatePatients, pk, x => setLate(x, !x.late))}
+      onClick={() => patchPatient(mutatePatients, pk, x => setLate(x, !p.late))}
       title={p.late ? '누르면 지각 취소' : '누르면 지각 표시 (지각은 대기 순서 뒤로)'}
       className={`text-xs px-2 py-0.5 rounded-full border ${p.late ? 'bg-red-50 border-red-300 text-red-600 font-semibold' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'}`}
     >
@@ -1416,7 +1416,7 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
         />
       )}
       {crAvail && !single && !dropsOnly && (cr || !compact) && (
-        <button type="button" onClick={() => patchPatient(mutatePatients, pk, x => ({ cr: !x.cr }))} className={chip(cr)}>
+        <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ cr: !cr }))} className={chip(cr)}>
           {cr ? 'CR' : 'CR 안 함'}
         </button>
       )}
@@ -1441,10 +1441,10 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
             key={i}
             type="button"
             onClick={() => {
-              if (!t) { toggleDrop(mutatePatients, pk, i); return; }
+              if (!t) { toggleDrop(mutatePatients, pk, i, true); return; }
               if (!isArmed) { setArmed(i); return; }
               setArmed(-1);
-              if (extraLast) undoExtraDrop(mutatePatients, pk); else toggleDrop(mutatePatients, pk, i);
+              if (extraLast) undoExtraDrop(mutatePatients, pk, extraLast); else toggleDrop(mutatePatients, pk, i, false);
             }}
             title={extraLast
               ? `점안 ${[t, ...st.extra].map(fmtClock).join(', ')} · 두 번 누르면 ${fmtClock(extraLast)} 추가 점안 취소`

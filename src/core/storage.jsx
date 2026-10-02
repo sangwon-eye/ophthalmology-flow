@@ -33,6 +33,16 @@ export async function loadKeySubset(key, ids) {
   if (!r) return {};
   try { return JSON.parse(r.value) || {}; } catch { return {}; }
 }
+// 환자 몇 명 것만 한 번 받기 (명단 올리기·환자 추가 때 그 환자들의 FU 확인용, 캐시 없이 최신 값)
+export async function loadEntries(key, ids) {
+  if (!ids.length) return {};
+  try {
+    return await window.storage.getEntries(key, ids);
+  } catch (e) {
+    if (e?.unsupported) return loadKey(key, {}); // 예전 서버: 전체를 받음
+    throw e;
+  }
+}
 export const loadDoctorPrefs = (meta) => loadKey('doctor-prefs', {}, meta);
 export const loadTodayOverride = (meta) => loadKey('today-override', null, meta);
 
@@ -100,6 +110,12 @@ export function useArchivedPatients(date) {
   return { isArchived, list: ready ? state.list : [], loading: isArchived && (!ready || state.loading), error: ready && state.error };
 }
 
+// 끝내 저장하지 못하면 화면에 알립니다 (ui/safety.jsx 의 빨간 띠). 접속 비밀번호 화면(401)으로 바뀌는 경우는 빼고
+function reportSaveFailure(key, e) {
+  if (e?.status === 401) return;
+  try { window.dispatchEvent(new CustomEvent('oph-save-failed', { detail: { key, message: String(e?.message || e) } })); } catch { /* 알림만 못 함 */ }
+}
+
 // 화면을 먼저 바꾸고, 저장은 뒤에서 순서대로 처리 (버튼이 즉시 반응하도록)
 export function useSharedStore(storageKey, loader, initial) {
   const [value, setValue] = useState(initial);
@@ -131,7 +147,7 @@ export function useSharedStore(storageKey, loader, initial) {
         pending.current -= 1;
       }
     });
-    queue.current = run.catch(() => undefined);
+    queue.current = run.catch(e => { reportSaveFailure(storageKey, e); });
     return run;
   }, [storageKey, loader]);
 
@@ -172,7 +188,7 @@ export function useSharedStore(storageKey, loader, initial) {
         pending.current -= 1;
       }
     });
-    queue.current = run.catch(() => undefined);
+    queue.current = run.catch(e => { reportSaveFailure(storageKey, e); });
     return run;
   }, [storageKey, loader]);
 

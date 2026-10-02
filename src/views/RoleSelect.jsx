@@ -270,6 +270,13 @@ export function AboutModal({ onClose }) {
 
 export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doctors = [], doctorPrefs }) {
   const [about, setAbout] = useState(false);
+  // 날짜 바꾸기는 모든 컴퓨터 명단이 바뀌므로 고른 뒤 [바꾸기]를 한 번 더 눌러야 적용 (실제 날짜로 되돌리는 것은 바로)
+  const [pendingDate, setPendingDate] = useState(null);
+  const pickDate = (v) => {
+    if (!v || v === todayISO()) { setPendingDate(null); return; }
+    if (v === realTodayISO()) { setPendingDate(null); onSetToday(null); return; }
+    setPendingDate(v);
+  };
   // 메인 화면: 매일 쓰는 직원 화면(진료 흐름)은 크게, 환자용 화면·관리는 작게 묶어서 한 화면에 모두
   // 방마다 대기 인원(각 화면 위쪽 '대기 N명'과 같은 숫자). 진료실은 교수님별로 한 줄
   // 오늘 명단에 환자가 없는 교수님은 빼기
@@ -318,9 +325,12 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
             <TextSizeControl />
             <span className="flex items-center gap-2 flex-wrap justify-center">
               <span className="text-slate-500">오늘 날짜</span>
-              <input type="date" aria-label="오늘 날짜" value={todayISO()} onChange={e => onSetToday(e.target.value)}
-                className={`border rounded-lg px-3 py-1.5 bg-white ${forcedToday ? 'border-amber-400' : 'border-slate-300'}`} />
-              {forcedToday ? <>
+              <input type="date" aria-label="오늘 날짜" value={pendingDate || todayISO()} onChange={e => pickDate(e.target.value)}
+                className={`border rounded-lg px-3 py-1.5 bg-white ${forcedToday || pendingDate ? 'border-amber-400' : 'border-slate-300'}`} />
+              {pendingDate ? <>
+                <button type="button" onClick={() => { onSetToday(pendingDate); setPendingDate(null); }} className="text-xs px-3 py-1.5 rounded-lg bg-amber-500 text-white font-semibold">모든 컴퓨터 {Number(pendingDate.slice(5, 7))}월 {Number(pendingDate.slice(8, 10))}일로 바꾸기</button>
+                <button type="button" onClick={() => setPendingDate(null)} className="text-xs underline text-slate-600">취소</button>
+              </> : forcedToday ? <>
                 <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300">직접 정함 · 모든 컴퓨터 적용 · 다음 날 자동 해제</span>
                 <button type="button" onClick={() => onSetToday(null)} className="text-xs underline text-slate-600">실제 날짜({realTodayISO()})로 되돌리기</button>
               </> : <span className="text-xs text-slate-400">컴퓨터 날짜 자동</span>}

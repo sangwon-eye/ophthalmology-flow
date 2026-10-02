@@ -35,7 +35,10 @@ for (const f of files) {
   const data = path.join(tmp, 'data');
   spawnSync(process.execPath, [path.join(here, 'seed.cjs')], { cwd: tmp });
   const env = { ...process.env, OPH_DATA_DIR: data, OPH_PORT: String(PORT), OPH_TEST_BASE: BASE };
-  const server = spawn(process.execPath, [path.join(root, 'server.js')], { cwd: root, env, stdio: 'ignore' });
+  // 서버 기록은 파일로 받아 둡니다: 화면 오류(흰 화면 대신 안내가 뜬 경우)가 기록되면 실패로 봄
+  const logFile = path.join(tmp, 'server-out.txt');
+  const logFd = fs.openSync(logFile, 'w');
+  const server = spawn(process.execPath, [path.join(root, 'server.js')], { cwd: root, env, stdio: ['ignore', logFd, logFd] });
   let out = '';
   let code = 1;
   if (await waitUp()) {
@@ -45,6 +48,12 @@ for (const f of files) {
   } else out = '테스트 서버가 켜지지 않았습니다';
   server.kill();
   await wait(300);
+  fs.closeSync(logFd);
+  // 일부러 화면 오류를 만드는 시나리오는 파일 안에 '화면오류-허용' 표시
+  const clientErrors = (fs.readFileSync(logFile, 'utf8').match(/\[화면 오류\][^\n]*/g) || []);
+  if (clientErrors.length && !fs.readFileSync(path.join(here, 'scenarios', f), 'utf8').includes('화면오류-허용')) {
+    out += clientErrors.map(l => `\nFAIL 서버에 기록된 화면 오류: ${l}`).join('');
+  }
   fs.rmSync(tmp, { recursive: true, force: true });
   const okN = (out.match(/^OK /gm) || []).length;
   const failN = (out.match(/^FAIL/gm) || []).length;

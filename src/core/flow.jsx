@@ -85,6 +85,13 @@ export function timeToMin(t) {
   if (!m) return 0;
   return Number(m[1]) * 60 + Number(m[2]);
 }
+// 예약시간(시:분)이 적혀 있는지. 없으면(명단에 없던 환자 등) 접수 전에는 맨 뒤, 접수하면 지각으로 맨 뒤
+export function hasReservation(p) {
+  return /\d{1,2}:\d{2}/.test(String(p?.reservation || ''));
+}
+export function reservationQueueKey(reservation) {
+  return hasReservation({ reservation }) ? timeToMin(reservation) : 24 * 60;
+}
 
 export function normalizeTime(v) {
   if (v === null || v === undefined || v === '') return '';
@@ -530,14 +537,23 @@ export function addExtraDrop(mutatePatients, pk) {
   const at = Date.now();
   patchPatient(mutatePatients, pk, x => ({ dropsExtra: [...(x.dropsExtra || []), at] }));
 }
-export function undoExtraDrop(mutatePatients, pk) {
-  patchPatient(mutatePatients, pk, x => ({ dropsExtra: (x.dropsExtra || []).slice(0, -1) }));
+// 점안 버튼은 '화면에 보이던 상태'대로 바꿉니다 (두 PC가 거의 동시에 누르면 서로 뒤집어 없던 일이 되는 것 방지)
+// at: 화면에 보이던 마지막 추가 점안 시각 (그 기록만 지움, 이미 지워졌으면 그대로)
+export function undoExtraDrop(mutatePatients, pk, at) {
+  patchPatient(mutatePatients, pk, x => {
+    const list = [...(x.dropsExtra || [])];
+    const i = at ? list.lastIndexOf(at) : list.length - 1;
+    if (i < 0) return {};
+    list.splice(i, 1);
+    return { dropsExtra: list };
+  });
 }
-export function toggleDrop(mutatePatients, pk, i) {
+// on: true = 점안 기록(이미 있으면 그 시각 그대로), false = 기록 취소
+export function toggleDrop(mutatePatients, pk, i, on) {
   const at = Date.now();
   patchPatient(mutatePatients, pk, x => {
     const drops = [...(x.drops || [])];
-    drops[i] = drops[i] ? null : at;
+    drops[i] = on ? (drops[i] || at) : null;
     return { drops };
   });
 }
@@ -660,15 +676,46 @@ export function makePreProcs(ids, settings) {
   return (ids || []).map(id => (settings.procedures || []).find(x => x.id === id)).filter(Boolean)
     .map(x => ({ uid: newId('pp'), procId: x.id, name: x.name, performer: x.performer, dilate: !!x.dilate, done: false, doneAt: null }));
 }
-export function buildPatient(raw, fuMap, settings) {
-  const fu = followupForDoctor(fuMap[raw.id], raw.doctor);
-  const preProcs = makePreProcs(fu?.preProcs, settings);
+// FU(다음 내원 지정)에서 오는 환자 기록 칸: 검사 지정·세부·산동·CR·진료 전 처치
+function followupFields(fu, settings) {
   const assigned = { [VISION_KEY]: true };
   const detail = {};
   settings.tests.forEach(t => {
     assigned[t.id] = !!fu?.[t.id];
     if (assigned[t.id] && fu?.detail?.[t.id]) detail[t.id] = cleanDetail(fu.detail[t.id]);
   });
+  return {
+    assigned,
+    detail,
+    dilateOverride: fu?.dilate === 'yes' ? true : fu?.dilate === 'no' ? false : undefined,
+    dilateEye: fu?.dilate === 'yes' ? dilateEyeOf(fu.dilateEye) : undefined,
+    cr: !!fu?.cr,
+    preProcs: makePreProcs(fu?.preProcs, settings),
+  };
+}
+// FU를 저장하면 이미 올라가 있는 다음 내원 명단에도 바로 적용합니다 (명단을 미리 올려 둔 경우):
+// 같은 환자·같은 교수님·from 날짜 이후(같은 날 포함)·아직 접수 전인 기록의 검사 지정·산동·CR·진료 전 처치를 새 FU로.
+// 2차 진료로 이어진 기록은 두 교수님 계획이 합쳐져 있어 건드리지 않고, 'FU 미지정' 표시는 이 환자 기록 모두에서 지웁니다.
+export function applyFollowupToList(list, id, doctor, fu, settings, from) {
+  let changed = false;
+  const next = list.map(x => {
+    if (x.id !== id) return x;
+    const linked = !!x.primaryKey || !!x.linkWaiting || list.some(y => y.primaryKey === patientKey(x));
+    if (doctor && x.doctor === doctor && !x.checkin && !x.consultDone && String(x.date || '') >= String(from || '') && !linked) {
+      const f = followupFields(fu, settings);
+      changed = true;
+      // 진료 전 처치가 있으면 시력검사 없이 (예전 FU의 진료 전 처치 때문에 켜졌던 것은 끔, 직접 켠 것은 그대로)
+      return { ...x, ...f, fuMissing: false, skipVision: f.preProcs.length ? true : (x.preProcs || []).length ? undefined : x.skipVision };
+    }
+    if (!x.fuMissing) return x;
+    changed = true;
+    return { ...x, fuMissing: false };
+  });
+  return changed ? next : list;
+}
+export function buildPatient(raw, fuMap, settings) {
+  const fu = followupForDoctor(fuMap[raw.id], raw.doctor);
+  const { assigned, detail, dilateOverride, dilateEye, cr, preProcs } = followupFields(fu, settings);
   return {
     id: raw.id,
     name: raw.name,
@@ -678,16 +725,16 @@ export function buildPatient(raw, fuMap, settings) {
     firstVisit: !!raw.firstVisit,
     checkin: '',
     late: false,
-    queueKey: timeToMin(raw.reservation),
+    queueKey: reservationQueueKey(raw.reservation),
     assigned,
     detail,
     done: { [VISION_KEY]: false },
     doneAt: {},
-    dilateOverride: fu?.dilate === 'yes' ? true : fu?.dilate === 'no' ? false : undefined,
-    dilateEye: fu?.dilate === 'yes' ? dilateEyeOf(fu.dilateEye) : undefined,
+    dilateOverride,
+    dilateEye,
     // 지난 진료에서 'FU 나중에'로 보내고 아직 지정하지 않은 환자
     fuMissing: !!fuMap[raw.id]?.fuLater && String(fuMap[raw.id].fuLater.date || '') < String(raw.date || ''),
-    cr: !!fu?.cr,
+    cr,
     drops: [],
     procedures: [],
     triageAssigned: false,
@@ -810,7 +857,7 @@ export function editPatientInfo(list, pk, { id, name, reservation }) {
     if (x.id !== rec.id || x.date !== rec.date) return x;
     let y = { ...x, id: newId, name: String(name || '').trim() || x.name };
     if (x === rec && reservation !== undefined && reservation !== x.reservation) {
-      y = x.checkin ? { ...y, reservation } : { ...y, reservation, queueKey: timeToMin(reservation) };
+      y = x.checkin ? { ...y, reservation } : { ...y, reservation, queueKey: reservationQueueKey(reservation) };
     }
     keyMap.set(patientKey(x), patientKey(y));
     return y;
@@ -837,7 +884,7 @@ export function mergePatientList(prev, news, prefs, settings) {
     if (np.reservation && np.reservation !== old.reservation) {
       list = list.map(x => (x !== old ? x : old.checkin
         ? { ...old, reservation: np.reservation }
-        : { ...old, reservation: np.reservation, queueKey: timeToMin(np.reservation) }));
+        : { ...old, reservation: np.reservation, queueKey: reservationQueueKey(np.reservation) }));
       stats.timeChanged.push({ ...old, newReservation: np.reservation });
       return;
     }
@@ -860,15 +907,16 @@ export function needsTestCheck(p, prefs) {
 
 // 지각: 직원 [접수]는 자동으로 정하지 않고 카드의 [지각]으로 표시합니다 (접수 전에 고른 값 유지).
 // 바코드 접수(autoLate)만 찍은 시각이 예약 + 유예시간보다 늦으면 자동으로 지각입니다.
-// 지각 환자는 제시간 환자들 뒤로 갑니다.
+// 예약시간이 없는 환자는 어느 접수든 지각 (나중에 예약시간을 넣어도 순서는 그대로 — 필요하면 직원이 끌어서 옮김).
+// 지각 환자는 제시간 환자들 뒤로 갑니다. 예약시간이 없으면 접수 시각을 예약시간처럼 씁니다 ([지각]을 풀면 접수 시각 순서로).
 export function lateQueueKey(p, late) {
-  return (late ? 100000 : 0) + timeToMin(p.reservation) + timeToMin(p.checkin) / 10000;
+  return (late ? 100000 : 0) + timeToMin(hasReservation(p) ? p.reservation : p.checkin) + timeToMin(p.checkin) / 10000;
 }
 export function applyCheckin(p, { autoLate = false, graceMin = 0 } = {}) {
   const checkin = nowHHMM();
-  const late = autoLate
-    ? !!p.late || (!!p.reservation && timeToMin(checkin) > timeToMin(p.reservation) + (Number(graceMin) || 0))
-    : !!p.late;
+  const late = !hasReservation(p) || (autoLate
+    ? !!p.late || timeToMin(checkin) > timeToMin(p.reservation) + (Number(graceMin) || 0)
+    : !!p.late);
   let next = { ...p, checkin, late, queueKey: lateQueueKey({ ...p, checkin }, late) };
   // 명단 관리에서 '시력검사 없이 바로 진료'로 정한 환자는 접수하자마자 시력/안압을 건너뜁니다.
   if (p.skipVision && !p.done?.[VISION_KEY]) {
@@ -888,7 +936,7 @@ export function setLate(p, late) {
 export function undoCheckin(p) {
   if (!p.checkin || p.consultDone || activeVf(p)) return p;
   if (p.done?.[VISION_KEY] && !p.visionSkipped) return p;
-  const undone = { ...p, checkin: '', late: false, queueKey: timeToMin(p.reservation) };
+  const undone = { ...p, checkin: '', late: false, queueKey: reservationQueueKey(p.reservation) };
   if (!p.visionSkipped) return undone;
   return { ...undone, done: { ...p.done, [VISION_KEY]: false }, doneAt: { ...(p.doneAt || {}), [VISION_KEY]: null }, visionSkipped: false };
 }

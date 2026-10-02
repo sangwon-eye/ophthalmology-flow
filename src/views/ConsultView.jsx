@@ -1,8 +1,8 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
-import { loadFu } from '../core/storage.jsx';
+import { applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
@@ -133,15 +133,23 @@ export function SendPatientModal({ patient, tests, settings, onConfirm, onCancel
   );
 }
 
-export function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, settings, history, mutatePatients, mutateFu, onBack, lastSync }) {
-  const [selectedDoctor, setSelectedDoctor] = useState('');
+// 진료실 PC마다 마지막으로 고른 교수님을 기억 (다시 열어도 그 교수님)
+const DOCTOR_KEY = 'oph-consult-doctor';
+const storedDoctor = () => { try { return localStorage.getItem(DOCTOR_KEY) || ''; } catch { return ''; } };
+
+export function ConsultView({ patients, allPatients = patients, doctors, doctorPrefs, settings, history, mutatePatients, updateFu, onBack, lastSync }) {
+  const [selectedDoctor, setDoctorState] = useState(storedDoctor);
+  const setSelectedDoctor = (d) => {
+    setDoctorState(d);
+    try { localStorage.setItem(DOCTOR_KEY, d); } catch { /* 기억 못 해도 지금은 그대로 */ }
+  };
   const [explainFor, setExplainFor] = useState(null);
   const [extraModalFor, setExtraModalFor] = useState(null);
   const [procFor, setProcFor] = useState(null);
   const [toastNode, showToast] = useUndoToast();
 
   useEffect(() => {
-    if (doctors.length && !doctors.includes(selectedDoctor)) setSelectedDoctor(doctors[0]);
+    if (doctors.length && !doctors.includes(selectedDoctor)) setDoctorState(doctors[0]);
   }, [doctors, selectedDoctor]);
 
   const allTests = sortedTests(settings);
@@ -250,51 +258,55 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     setExplainFor(null);
     // FU 없음(회송): 이 교수님 FU 지정과 'FU 나중에' 표시를 지움. 되돌리기용으로 지우기 전 기록을 보관
     let savedFu;
-    if (noFu) mutateFu(prev => { savedFu = prev[p.id]; return unmarkFollowupLater(deleteFollowup(prev, p.id, p.doctor), p.id, p.doctor); });
-    const restoreFu = () => { if (noFu) mutateFu(prev => { const n = { ...prev }; if (savedFu) n[p.id] = savedFu; else delete n[p.id]; return n; }); };
-    if (noFu) { /* FU 저장 안 함 */ } else if (later) mutateFu(prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
-    else mutateFu(prev => saveFollowup(prev, p.id, dil?.doctor || p.doctor, {
-        ...sel,
-        detail,
-        dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
-        dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
-        cr: dil?.cr || undefined,
-        preProcs: dil?.preProcs?.length ? dil.preProcs : undefined,
-        name: p.name,
-        visitDate: p.date,
-        updatedAt: at,
-    }));
+    if (noFu) updateFu(p.id, prev => { savedFu = prev[p.id]; return unmarkFollowupLater(deleteFollowup(prev, p.id, p.doctor), p.id, p.doctor); });
+    const restoreFu = () => { if (noFu) updateFu(p.id, () => (savedFu ? { [p.id]: savedFu } : {})); };
+    const fuDoctor = dil?.doctor || p.doctor;
+    const fuValue = noFu || later ? null : {
+      ...sel,
+      detail,
+      dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
+      dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
+      cr: dil?.cr || undefined,
+      preProcs: dil?.preProcs?.length ? dil.preProcs : undefined,
+      name: p.name,
+      visitDate: p.date,
+      updatedAt: at,
+    };
+    if (noFu) { /* FU 저장 안 함 */ } else if (later) updateFu(p.id, prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
+    else updateFu(p.id, prev => saveFollowup(prev, p.id, fuDoctor, fuValue));
+    // 이미 올라가 있는 다음 내원 명단(접수 전)에도 새 FU 적용
+    const withFu = (list) => (fuValue ? applyFollowupToList(list, p.id, fuDoctor, fuValue, settings, p.date) : list);
     // 오늘 다른 교수 진료 추가: 그 교수님의 이전 정보(FU)를 붙여 2차 진료로 연결
     let extra = null;
     if (linkDoctor) {
       let fu = {};
-      try { fu = await loadFu(); } catch { /* 이전 정보 없이 추가 */ }
+      try { fu = await loadEntries('fu-designations', [p.id]); } catch { /* 이전 정보 없이 추가 */ }
       extra = buildPatient({ id: p.id, name: p.name, date: p.date, doctor: linkDoctor, reservation: '', firstVisit: false }, fu, settings);
     }
     // 처치가 아직 남아 있으면: 설명만 끝내고 처치 후 [귀가] 로 마무리 (2차 진료도 귀가 때 시작)
     const current = allPatients.find(x => patientKey(x) === pk) || p;
     if (pendingProcedures(current).length) {
       mutatePatients(prev => {
-        let next = prev.map(x => (patientKey(x) === pk ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
-          : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x));
+        let next = withFu(prev.map(x => (patientKey(x) === pk ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
+          : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x)));
         if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
         return next;
       });
       showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : noFu ? ' (FU 없음 · 회송)' : ''}`, () => {
         patch(pk, () => ({ explainedEarly: null, fuLater: false, referred: undefined }));
-        if (later) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+        if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id));
         restoreFu();
       });
       return;
     }
     const undoDone = () => {
       mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false, referred: undefined } : x)), pk));
-      if (later) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+      if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id));
       restoreFu();
     };
     mutatePatients(prev => {
-      let next = prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined }
-        : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x));
+      let next = withFu(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined }
+        : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x)));
       if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
       return activateLinked(next, pk, settings, at);
     });
@@ -568,7 +580,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 {p.fuLater && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">FU 나중에</span>}
                 <UndoButton label="설명 완료 취소" onClick={() => {
                   mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === patientKey(p) ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false } : x)), patientKey(p)));
-                  if (p.fuLater) mutateFu(prev => unmarkFollowupLater(prev, p.id));
+                  if (p.fuLater) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id));
                 }} />
               </RecentRow>
             ))}

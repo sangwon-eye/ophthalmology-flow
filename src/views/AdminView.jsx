@@ -1,9 +1,9 @@
 // 관리자 화면(명단·FU·통계·안내문)
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw } from 'lucide-react';
-import { unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, cleanDetail, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
-import { loadFu, useArchivedPatients, visionNames } from '../core/storage.jsx';
+import { applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
+import { loadEntries, loadFu, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
 import { NOTICE_PRESETS, consultRoomLabel } from './BoardView.jsx';
@@ -331,7 +331,36 @@ export function BoardNoticeAdmin({ patients = [], settings, doctors, doctorPrefs
   );
 }
 
-export function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, mutatePatients, mutateFu, mutateDoctors, mutateDoctorPrefs, boardNotices, mutateBoardNotices, onBack, lastSync }) {
+// FU 지정 관리 탭을 연 동안만 FU 전체를 받습니다 (평소 화면은 명단에 있는 환자 것만 — App).
+// 고치면 이 목록에 바로 보이고, 저장은 그 환자 칸만 (updateFu). 저장 중에 시작한 새로 받기는 버림 (방금 고친 것이 잠깐 사라지지 않게)
+function useAllFollowups(active, updateFu) {
+  const [all, setAll] = useState(null);
+  const seq = useRef(0);
+  const pending = useRef(0);
+  const reload = useCallback(async () => {
+    const started = seq.current;
+    try {
+      const v = await loadFu();
+      if (pending.current === 0 && seq.current === started) setAll(v || {});
+    } catch { /* 서버 연결 안 됨: 지금 목록 그대로 */ }
+  }, []);
+  useEffect(() => {
+    if (!active) { setAll(null); return undefined; }
+    reload();
+    const t = setInterval(reload, 5000);
+    return () => clearInterval(t);
+  }, [active, reload]);
+  const edit = useCallback((id, mapFn) => {
+    seq.current += 1;
+    pending.current += 1;
+    setAll(prev => (prev ? mapFn(prev) : prev));
+    const done = () => { pending.current -= 1; reload(); };
+    return updateFu(id, mapFn).then(done, done);
+  }, [updateFu, reload]);
+  return [all, edit];
+}
+
+export function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, mutatePatients, updateFu, mutateDoctors, mutateDoctorPrefs, boardNotices, mutateBoardNotices, onBack, lastSync }) {
   const [todayDetail, setTodayDetail] = useState(null);
   const todayEdit = patients.find(p => patientKey(p) === todayDetail?.key);
   const todayTest = settings.tests.find(t => t.id === todayDetail?.testId);
@@ -350,6 +379,8 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
   const [fuSearch, setFuSearch] = useState('');
   const [fuEdit, setFuEdit] = useState(null);
   const [message, setMessage] = useState('');
+  const [allFu, editFu] = useAllFollowups(tab === 'fu', updateFu);
+  const fuAll = allFu || {};
 
   useEffect(() => {
     if (doctors.length && !doctors.includes(batchDoctor)) setBatchDoctor(doctors[0]);
@@ -384,7 +415,8 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       const lacking = Object.entries(ROSTER_HEADERS).filter(([k]) => roster.cols[k] === undefined).map(([, name]) => name);
       if (lacking.length) return fail(`엑셀에 ${lacking.map(n => `"${n}"`).join(', ')} 칸이 없어 등록하지 않았습니다. 제목 글자가 정확히 같은지 확인해주세요 (환자명 · 환자번호 · 예약 · 초재진 · 진료의).`);
       if (!roster.rows.length) return fail('환자를 찾지 못했습니다. 환자번호 칸이 비어 있지 않은지 확인해주세요.');
-      const currentFu = await loadFu();
+      // 이번 명단 환자들의 FU만 받아서 검사 지정에 씀
+      const currentFu = await loadEntries('fu-designations', [...new Set(roster.rows.map(r => String(r.id)))]);
       const rejected = [];
       const news = [];
       roster.rows.forEach(r => {
@@ -420,15 +452,12 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       docsNow = ['김안과 교수', '이안과 교수'];
       await mutateDoctors(() => docsNow);
     }
-    await mutateFu(prev => ({
-      ...prev,
-      '10001': { oct: true, vf: true, detail: { oct: { options: ['Macular', 'Disc'], note: '' }, vf: { options: [], note: '24-2C' } } },
-      '10004': { wfp: true, idra: true, gat: true },
-    }));
+    await updateFu('10001', prev => ({ ...prev, '10001': { oct: true, vf: true, detail: { oct: { options: ['Macular', 'Disc'], note: '' }, vf: { options: [], note: '24-2C' } } } }));
+    await updateFu('10004', prev => ({ ...prev, '10004': { wfp: true, idra: true, gat: true } }));
     if (docsNow[1] && !doctorPrefs?.[docsNow[1]]) {
       await mutateDoctorPrefs(prev => ({ ...prev, [docsNow[1]]: { dilate: true, cr: true } }));
     }
-    const freshFu = await loadFu();
+    const freshFu = await loadEntries('fu-designations', sampleRows().map(r => r.id));
     const news = sampleRows().map((r, i) => buildPatient({ ...r, firstVisit: r.id === '10003', date: todayISO(), doctor: docsNow[i % docsNow.length] }, freshFu, settings));
     await upsert(news);
     setUploadResult(null);
@@ -448,7 +477,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
   const handleManualAdd = async () => {
     if (!manual.id || !manual.name) { setMessage('환자번호와 이름을 입력해주세요.'); return; }
     if (!batchDoctor) { setMessage('먼저 담당 교수를 선택해주세요.'); return; }
-    const currentFu = await loadFu();
+    const currentFu = await loadEntries('fu-designations', [manual.id.trim()]);
     const np = buildPatient({ ...manual, id: manual.id.trim(), name: manual.name.trim(), reservation: normalizeTime(manual.reservation), date: batchDate, doctor: batchDoctor }, currentFu, settings);
     const stats = await upsert([np]);
     if (stats?.linked.length) {
@@ -530,7 +559,8 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     const pk = patientKey(p);
     mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, doctor } : x.primaryKey === pk ? { ...x, primaryDoctor: doctor } : x)));
   };
-  const toggleFirst = (pk) => updateOne(pk, p => ({ ...p, firstVisit: !p.firstVisit }));
+  // 초진 ↔ 재진: 화면에 보이던 값의 반대로 (두 PC가 동시에 눌러도 같은 결과)
+  const toggleFirst = (pk, on) => updateOne(pk, p => ({ ...p, firstVisit: on }));
   const [infoEdit, setInfoEdit] = useState(null);
   // 이전 시력 입력 (관리자에서만)
   const [prevFor, setPrevFor] = useState(null);
@@ -550,45 +580,34 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
   const crAnywhere = Object.values(doctorPrefs || {}).some(v => v?.cr);
 
   // FU 기록에 이름이 없으면 명단에서 찾아 보여줍니다
-  const nameOf = (id) => fuMap[id]?.name || patients.find(p => p.id === id)?.name || '';
+  const nameOf = (id) => fuAll[id]?.name || fuMap[id]?.name || patients.find(p => p.id === id)?.name || '';
   const fuQuery = fuSearch.trim();
-  const fuIds = Object.keys(fuMap).filter(id => !fuQuery || id.includes(fuQuery) || nameOf(id).includes(fuQuery)).slice(0, 30);
+  const fuIds = Object.keys(fuAll).filter(id => !fuQuery || id.includes(fuQuery) || nameOf(id).includes(fuQuery)).slice(0, 30);
   useEffect(() => {
-    // 명단에 있는 환자인데 FU 기록에 이름이 비어 있으면 채워 둡니다 (한 번만 저장)
-    if (patients.some(p => fuMap[p.id] && !fuMap[p.id].name && p.name)) mutateFu(prev => fillFollowupNames(prev, patients));
-  }, [patients, fuMap, mutateFu]);
+    // 명단에 있는 환자인데 FU 기록에 이름이 비어 있으면 채워 둡니다 (그 환자 칸만 한 번 저장)
+    const need = new Map(patients.filter(p => p.id && p.name && fuMap[p.id] && !fuMap[p.id].name).map(p => [p.id, p]));
+    need.forEach((p, id) => updateFu(id, prev => fillFollowupNames(prev, [p])));
+  }, [patients, fuMap, updateFu]);
   const saveFuEdit = (sel, detail, dil) => {
     const id = fuEdit.id;
+    const doctor = dil?.doctor || fuEdit.doctor || '';
     setFuEdit(null);
-    // 'FU 미지정'으로 이미 올라가 있는 다음 명단: 표시를 지우고, 접수 전이면 새로 정한 검사로 바꿉니다
-    if (patients.some(p => p.id === id && p.fuMissing)) {
-      mutatePatients(prev => prev.map(p => {
-        if (p.id !== id || !p.fuMissing) return p;
-        if (p.checkin || (fuEdit.doctor && p.doctor !== fuEdit.doctor)) return { ...p, fuMissing: false };
-        const assigned = { [VISION_KEY]: true };
-        const nextDetail = {};
-        settings.tests.forEach(t => { assigned[t.id] = !!sel[t.id]; if (sel[t.id] && detail?.[t.id]) nextDetail[t.id] = cleanDetail(detail[t.id]); });
-        return {
-          ...p, fuMissing: false, assigned, detail: nextDetail,
-          dilateOverride: dil?.mode === 'yes' ? true : dil?.mode === 'no' ? false : undefined,
-          dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
-          cr: !!dil?.cr,
-          preProcs: makePreProcs(dil?.preProcs, settings),
-          skipVision: (dil?.preProcs?.length ? true : p.skipVision) || undefined,
-        };
-      }));
+    const value = {
+      ...sel,
+      detail,
+      dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
+      dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
+      cr: dil?.cr || undefined,
+      preProcs: dil?.preProcs?.length ? dil.preProcs : undefined,
+      name: fuEdit.name || nameOf(id),
+      visitDate: fuEdit.visitDate || (fuAll[id] || fuMap[id])?.fuLater?.date,
+      updatedAt: Date.now(),
+    };
+    // 이미 올라가 있는 다음 명단(오늘 포함, 같은 교수님, 접수 전)에도 바로 적용, 'FU 미지정' 표시는 지움
+    if (patients.some(p => p.id === id && (p.fuMissing || (p.doctor === doctor && !p.checkin && p.date >= todayISO())))) {
+      mutatePatients(prev => applyFollowupToList(prev, id, doctor, value, settings, todayISO()));
     }
-    mutateFu(prev => saveFollowup(prev, id, dil?.doctor || fuEdit.doctor || '', {
-        ...sel,
-        detail,
-        dilate: dil?.mode === 'yes' || dil?.mode === 'no' ? dil.mode : undefined,
-        dilateEye: dil?.mode === 'yes' ? dilateEyeOf(dil.eye) : undefined,
-        cr: dil?.cr || undefined,
-        preProcs: dil?.preProcs?.length ? dil.preProcs : undefined,
-        name: fuEdit.name || nameOf(id),
-        visitDate: fuEdit.visitDate || fuMap[id]?.fuLater?.date,
-        updatedAt: Date.now(),
-    }));
+    editFu(id, prev => saveFollowup(prev, id, doctor, value));
   };
 
   // FU 지정 창의 'FU 없음 · FU 명단에서 삭제': 그 교수님 FU 지정과 'FU 나중에' 표시, 다음 명단의 'FU 미지정' 표시를 지움
@@ -597,7 +616,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     const doctor = chosenDoctor || e.doctor || '';
     setFuEdit(null);
     // 그 교수님 것만 지움. 교수님을 모르면 '나중에' 표시만 지우고 저장된 FU는 그대로 (다른 교수님 FU 보호)
-    mutateFu(prev => (doctor ? unmarkFollowupLater(deleteFollowup(prev, id, doctor), id, doctor) : unmarkFollowupLater(prev, id)));
+    editFu(id, prev => (doctor ? unmarkFollowupLater(deleteFollowup(prev, id, doctor), id, doctor) : unmarkFollowupLater(prev, id)));
     if (patients.some(p => p.id === id && p.fuMissing)) mutatePatients(prev => prev.map(p => (p.id === id && p.fuMissing ? { ...p, fuMissing: false } : p)));
     setMessage(`${e.name || nameOf(id) || id} FU 없음 · FU 명단에서 삭제했습니다.`);
   };
@@ -808,11 +827,11 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                   {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
                   {doctors.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
-                <button type="button" onClick={() => toggleFirst(patientKey(p))} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
+                <button type="button" onClick={() => toggleFirst(patientKey(p), !p.firstVisit)} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
                 </button>
                 {/* 소아 등 안압을 아예 재지 않는 환자: 시력방에 '안압 안 잼', NCT 칸 없음 */}
-                <button type="button" onClick={() => patchPatient(mutatePatients, patientKey(p), x => ({ noIop: !x.noIop }))} title="누르면 안압 잼 ↔ 안 잼"
+                <button type="button" onClick={() => patchPatient(mutatePatients, patientKey(p), () => ({ noIop: !p.noIop }))} title="누르면 안압 잼 ↔ 안 잼"
                   className={`text-xs px-3 py-1.5 rounded-lg border ${p.noIop ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'border-slate-300 text-slate-500'}`}>
                   {p.noIop ? '안압 안 잼' : '안압 잼'}
                 </button>
@@ -865,7 +884,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
             <input placeholder="환자번호 또는 이름으로 찾기" value={fuSearch} onChange={e => setFuSearch(e.target.value)} className="flex-1 outline-none text-sm" />
           </div>
           {(() => {
-            const later = Object.entries(fuMap).filter(([, r]) => r?.fuLater).sort((a, b) => String(a[1].fuLater.date).localeCompare(String(b[1].fuLater.date)));
+            const later = Object.entries(fuAll).filter(([, r]) => r?.fuLater).sort((a, b) => String(a[1].fuLater.date).localeCompare(String(b[1].fuLater.date)));
             if (!later.length) return null;
             return (
               <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-4 mb-4">
@@ -883,8 +902,9 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
               </div>
             );
           })()}
-          {fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
-          {fuIds.flatMap(id => followupRows(id, fuMap[id])).map(({ id, doctor: fuDoctor, fu }) => {
+          {!allFu && <EmptyState text="FU 지정을 불러오는 중…" />}
+          {allFu && fuIds.length === 0 && !fuSearch.trim() && <EmptyState text="저장된 FU 지정이 없습니다" />}
+          {fuIds.flatMap(id => followupRows(id, fuAll[id])).map(({ id, doctor: fuDoctor, fu }) => {
             const dilText = [fu.dilate === 'yes' ? `산동${dilateEyeOf(fu.dilateEye) ? ` (${DILATE_EYE_LABEL[fu.dilateEye]})` : ''}` : fu.dilate === 'no' ? '산동 안 함' : '', fu.cr ? 'CR' : ''].filter(Boolean).join(', ');
             const preText = (fu.preProcs || []).map(pid => (settings.procedures || []).find(x => x.id === pid)?.name).filter(Boolean).join(', ');
             const names = [preText && `진료 전 처치: ${preText}`, allTests.filter(t => fu[t.id]).map(t => testLabelWithOptions(t, fu.detail?.[t.id])).join(', '), dilText].filter(Boolean).join(' / ');
@@ -907,12 +927,12 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button type="button" onClick={() => setFuEdit({ ...fu, id, doctor: fuDoctor, name: nameOf(id) })} className="text-sm px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600">수정</button>
-                  <ConfirmButton label="삭제" onConfirm={() => { mutateFu(prev => deleteFollowup(prev, id, fuDoctor)); setMessage(`${nameOf(id) || id}${fuDoctor ? ` ${fuDoctor}` : ''} 다음 내원 지정을 삭제했습니다.`); }} />
+                  <ConfirmButton label="삭제" onConfirm={() => { editFu(id, prev => deleteFollowup(prev, id, fuDoctor)); setMessage(`${nameOf(id) || id}${fuDoctor ? ` ${fuDoctor}` : ''} 다음 내원 지정을 삭제했습니다.`); }} />
                 </div>
               </div>
             );
           })}
-          {fuQuery && !fuMap[fuQuery] && /^[0-9A-Za-z-]+$/.test(fuQuery) && (
+          {allFu && fuQuery && !fuAll[fuQuery] && /^[0-9A-Za-z-]+$/.test(fuQuery) && (
             <button type="button" onClick={() => setFuEdit({ id: fuQuery, name: nameOf(fuQuery) })} className="mt-3 text-sm px-4 py-2 rounded-lg bg-slate-800 text-white">
               {fuSearch.trim()} 새로 지정하기
             </button>
@@ -946,7 +966,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
           key={`fu-${fuEdit.id}`}
           title={`${fuEdit.name || nameOf(fuEdit.id) ? `${fuEdit.name || nameOf(fuEdit.id)}님 (${fuEdit.id})` : `환자 ${fuEdit.id}`} 다음 내원 검사`}
           subtitle="다음 내원 때 필요한 검사를 체크하고 저장을 누르세요"
-          followup={{ doctor: fuEdit.doctor || fuMap[fuEdit.id]?.doctor || patients.find(p => p.id === fuEdit.id)?.doctor || '', doctors, prefs: doctorPrefs }}
+          followup={{ doctor: fuEdit.doctor || (fuAll[fuEdit.id] || fuMap[fuEdit.id])?.doctor || patients.find(p => p.id === fuEdit.id)?.doctor || '', doctors, prefs: doctorPrefs }}
           onDelete={(d) => deleteFuEdit(fuEdit, d)}
           tests={allTests}
           settings={settings}

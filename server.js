@@ -15,7 +15,7 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const DATA_DIR = process.env.OPH_DATA_DIR || path.join(ROOT, 'data');
 const KEYS_DIR = path.join(DATA_DIR, 'keys');
 const OLD_STORE_FILE = path.join(DATA_DIR, 'store.json');
-// 백업 폴더. 공유폴더에 백업하려면 서버설정.txt 에서 BACKUP_DIR 을 지정하세요.
+// 하루 백업 폴더. 서버설정.txt 에 BACKUP_DIR 을 적으면 data\backups 대신 그 폴더에만 백업합니다 (두 곳에 함께 남지 않음).
 // 테스트(OPH_DATA_DIR)일 때는 실제 백업 폴더를 절대 건드리지 않도록 테스트 폴더 안에만
 const BACKUP_DIR = process.env.OPH_DATA_DIR ? path.join(DATA_DIR, 'backups') : (CONFIG.BACKUP_DIR || process.env.BACKUP_DIR || path.join(DATA_DIR, 'backups'));
 // 종료 코드: 0 = 정상 종료(서버끄기), 2 = 데이터 파일 손상, 3 = 이미 켜져 있음. 그 외에는 자동으로 다시 켭니다.
@@ -102,30 +102,95 @@ function writeShard(key, shard, obj) {
 }
 function readItem(key) {
   if (cache.has(key)) return cache.get(key);
+  if (brokenKeys.has(key)) throw new DataFileError(`${key} 파일 손상`); // 복구 못 한 항목은 서버를 다시 켤 때까지 그대로 멈춤
   const file = keyFile(key);
   let item = null;
   if (fs.existsSync(file)) {
     try {
       item = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch {
-      console.error(`\n[오류] ${file} 파일이 손상되어 읽을 수 없습니다.`);
-      console.error('데이터를 덮어쓰지 않도록 서버를 멈춥니다.');
-      console.error(`백업 폴더(${BACKUP_DIR})의 가장 최근 날짜 폴더에서 같은 이름의 파일을 복사해 넣은 뒤 다시 실행하세요.\n`);
-      process.exit(EXIT_DATA_ERROR);
+      item = recoverItem(key, file); // 복구하지 못하면 오류를 던져 그 항목만 쓰지 못하게 함 (빈 값으로 덮어쓰지 않도록)
     }
   }
   cache.set(key, item);
   return item;
 }
 
-function writeFileSafely(file, text) {
+// 데이터 파일 문제 기록 (자동으로 복구했거나, 복구하지 못한 것). 모든 화면 위쪽 안내에 씁니다 (/api/health 로 항목 이름만 알림)
+const dataProblems = [];
+function noteProblem(key, kind, from = '') {
+  dataProblems.push({ key: String(key).split('/')[0], kind, from, at: Date.now() });
+  if (dataProblems.length > 20) dataProblems.shift();
+}
+class DataFileError extends Error {}
+const brokenKeys = new Set();
+const stamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+// 손상된 데이터 파일 자동 복구: 직전 저장본(.prev) → 오늘·어제 시간별 사본 → 하루 백업(최근 날짜부터)
+// 손상된 파일은 지우지 않고 '.손상-날짜시각' 이름으로 따로 남깁니다. 복구한 항목은 버전을 크게 올려 화면들이 새로 받게 합니다.
+function recoverItem(key, file) {
+  try { fs.copyFileSync(file, `${file}.손상-${stamp()}`); } catch { /* 복사 못 해도 복구는 계속 */ }
+  const base = String(key).split('/')[0];
+  const rel = path.relative(KEYS_DIR, file);
+  const candidates = [{ file: `${file}.prev`, from: '직전 저장본' }];
+  if (HOURLY_KEYS.includes(base) && fs.existsSync(HOURLY_DIR)) {
+    for (const day of fs.readdirSync(HOURLY_DIR).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse()) {
+      const files = fs.readdirSync(path.join(HOURLY_DIR, day)).filter(f => f.startsWith(`${base}-`) && f.endsWith('.json')).sort().reverse();
+      for (const f of files) candidates.push({ file: path.join(HOURLY_DIR, day, f), from: `${day} ${f.slice(base.length + 1, -5)} 사본` });
+    }
+  }
+  if (fs.existsSync(BACKUP_DIR)) {
+    for (const day of fs.readdirSync(BACKUP_DIR).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse()) {
+      candidates.push({ file: path.join(BACKUP_DIR, day, rel), from: `${day} 백업` });
+    }
+  }
+  for (const c of candidates) {
+    let item;
+    try { item = JSON.parse(fs.readFileSync(c.file, 'utf8')); } catch { continue; }
+    if (!item || typeof item !== 'object') continue;
+    item = { ...item, version: Math.max(Number(item.version) || 0, Date.now()) };
+    const text = JSON.stringify(item);
+    writeFileSafely(file, text, false); // 손상된 파일을 직전 저장본으로 남기지 않음
+    try { writeDurable(`${file}.prev`, text); lastPrev.set(file, Date.now()); } catch { /* 직전 저장본은 다음 저장 때 */ }
+    console.error(`[복구] ${file} 파일이 손상되어 ${c.from}(${c.file})으로 되돌렸습니다. 최근 입력이 조금 빠졌을 수 있습니다.`);
+    noteProblem(key, 'recovered', c.from);
+    return item;
+  }
+  console.error(`[오류] ${file} 파일이 손상되었고 되돌릴 백업도 없습니다. 이 항목은 저장·읽기를 멈춥니다 (덮어쓰지 않도록).`);
+  console.error('백업복구.bat 으로 복구하거나, 백업 폴더에서 같은 이름의 파일을 복사해 넣은 뒤 서버를 다시 켜세요.');
+  noteProblem(key, 'broken');
+  brokenKeys.add(key);
+  throw new DataFileError(`${key} 파일 손상`);
+}
+
+// 정전·강제 종료에도 파일이 깨지지 않도록: 임시 파일에 쓰고 디스크에 확실히 기록(fsync)한 뒤 이름을 바꿉니다.
+// 바꾸기 전 파일은 '.prev' 로 남겨 둡니다 (1분에 한 번까지, 손상 시 자동 복구용).
+const PREV_EVERY_MS = 60 * 1000;
+const lastPrev = new Map();
+function writeDurable(file, text) {
+  const fd = fs.openSync(file, 'w');
+  try {
+    fs.writeFileSync(fd, text);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+function keepPrevious(file) {
+  const now = Date.now();
+  if (now - (lastPrev.get(file) || 0) < PREV_EVERY_MS) return;
+  try {
+    if (fs.existsSync(file)) { fs.copyFileSync(file, `${file}.prev`); lastPrev.set(file, now); }
+  } catch { /* 직전 저장본을 못 남겨도 저장은 계속 */ }
+}
+function writeFileSafely(file, text, keepPrev = true) {
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, text);
+  writeDurable(tmp, text);
+  if (keepPrev) keepPrevious(file);
   try {
     fs.renameSync(tmp, file);
   } catch {
     // 백신 프로그램 등이 파일을 잡고 있으면 이름 바꾸기가 실패할 수 있어 직접 씁니다.
-    fs.writeFileSync(file, text);
+    writeDurable(file, text);
     fs.rmSync(tmp, { force: true });
   }
 }
@@ -174,6 +239,34 @@ function backupOncePerDay() {
   } catch (e) {
     console.error(`[경고] 백업에 실패했습니다 (${BACKUP_DIR}): ${e.message}`);
   }
+}
+
+// 진료 중에 문제가 생겨도 오늘 입력을 되살릴 수 있게, 명단과 FU를 1시간마다 따로 복사해 둡니다 (오늘·어제만 보관).
+const HOURLY_DIR = path.join(DATA_DIR, 'backups-hourly');
+const HOURLY_KEYS = [LIVE_PATIENTS_KEY, 'fu-designations'];
+const HOURLY_KEEP_DAYS = 2;
+const hourlyVersion = new Map();
+function hourlySnapshot() {
+  const day = localDate();
+  const hour = `${String(new Date().getHours()).padStart(2, '0')}시`;
+  const dir = path.join(HOURLY_DIR, day);
+  for (const key of HOURLY_KEYS) {
+    try {
+      const item = readItem(key);
+      if (!item || hourlyVersion.get(key) === item.version) continue;
+      const target = path.join(dir, `${key}-${hour}.json`);
+      if (fs.existsSync(target)) continue; // 이 시간 사본은 이미 있음 (다음 시간에 다시)
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(keyFile(key), target);
+      hourlyVersion.set(key, item.version);
+    } catch (e) {
+      console.error(`[경고] 시간별 사본 실패 (${key}): ${e.message}`);
+    }
+  }
+  try {
+    const days = fs.existsSync(HOURLY_DIR) ? fs.readdirSync(HOURLY_DIR).filter(f => /^\d{4}-\d{2}-\d{2}$/.test(f)).sort() : [];
+    for (const d of days.slice(0, Math.max(0, days.length - HOURLY_KEEP_DAYS))) fs.rmSync(path.join(HOURLY_DIR, d), { recursive: true, force: true });
+  } catch { /* 지우지 못해도 다음에 다시 */ }
 }
 
 function localDate(offsetDays = 0) {
@@ -247,9 +340,11 @@ setInterval(() => { for (const res of eventClients) sendEvent(res, ': ping\n\n')
 
 fs.mkdirSync(KEYS_DIR, { recursive: true });
 migrateOldStore();
-archiveOldPatients();
+try { archiveOldPatients(); } catch (e) { console.error(`[경고] 지난 명단 보관 실패: ${e.message}`); }
+hourlySnapshot();
 setInterval(() => {
   try { archiveOldPatients(); } catch (e) { console.error(`[경고] 지난 명단 보관 실패: ${e.message}`); }
+  hourlySnapshot();
 }, 10 * 60 * 1000);
 
 /* ---------------- HTTP ---------------- */
@@ -419,12 +514,31 @@ async function handleAccess(req, res, pathname) {
   return sendJson(res, 404, { error: 'not found' });
 }
 
+// 화면 오류(흰 화면 대신 오류 안내가 뜬 경우)를 서버 기록에 남깁니다. 같은 컴퓨터는 1시간에 30건까지
+const clientErrors = new Map();
+async function handleClientError(req, res) {
+  const ip = req.socket.remoteAddress || '';
+  const now = Date.now();
+  const c = clientErrors.get(ip) || { n: 0, reset: now + 3600 * 1000 };
+  if (now > c.reset) { c.n = 0; c.reset = now + 3600 * 1000; }
+  c.n += 1;
+  clientErrors.set(ip, c);
+  let body = {};
+  try { body = JSON.parse(await readBody(req)); } catch { /* 내용 없이 기록 */ }
+  if (c.n <= 30) {
+    const cut = (v, n) => String(v ?? '').slice(0, n);
+    console.error(`[화면 오류] ${ip} · ${cut(body.where, 80)} · ${cut(body.message, 300)}\n${cut(body.stack, 1500)}`);
+  }
+  return sendJson(res, 200, { ok: true });
+}
+
 async function handleApi(req, res, pathname) {
-  if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId() });
+  if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId(), problems: dataProblems });
   if (pathname === '/api/access' || pathname.startsWith('/api/access/')) return handleAccess(req, res, pathname);
   // 접속 비밀번호가 있으면 통행증 없는 요청은 모두 거절 (서버끄기는 서버 PC 자신만 되므로 그대로)
   if (pathname !== '/api/shutdown' && !accessOk(req)) return sendJson(res, 401, { error: 'access' });
   if (pathname.startsWith('/api/settings-lock')) return handleLock(req, res, pathname);
+  if (pathname === '/api/client-error' && req.method === 'POST') return handleClientError(req, res);
   if (pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res);
 
   // 서버끄기.bat 에서 사용. 서버 PC 자신에서만 끌 수 있습니다.
@@ -591,8 +705,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
     serveStatic(req, res, decodeURIComponent(pathname));
   } catch (e) {
-    console.error(e);
-    if (!res.headersSent) sendJson(res, 500, { error: 'server error' });
+    // 손상된 파일(복구 못 함)은 처음 발견할 때 한 번만 기록 (모든 화면이 4초마다 물어보므로 매번 쓰면 기록이 넘침)
+    if (!(e instanceof DataFileError)) console.error(e);
+    if (!res.headersSent) sendJson(res, 500, { error: e instanceof DataFileError ? 'data file broken' : 'server error' });
   }
 });
 

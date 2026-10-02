@@ -10,6 +10,7 @@ import { ProcedureRoomView } from './views/TreatView.jsx';
 import { AdminView } from './views/AdminView.jsx';
 import { BoardSelect, BoardView, NOTICE_PRESETS, NoticeContext, loadNotices } from './views/BoardView.jsx';
 import { SettingsView } from './views/SettingsView.jsx';
+import { ErrorBoundary, rememberRole, rememberedRole, setCurrentRole } from './ui/safety.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 최상위 App                                                          */
@@ -139,7 +140,9 @@ export function PatientDirectory({ patients, settings, doctorPrefs, lastSync, on
 }
 
 export default function App() {
-  const [role, setRole] = useState(null);
+  // 이 PC가 마지막으로 연 화면에서 시작 (환자용 화면 PC를 다시 켜거나 새로고침해도 그 화면으로)
+  const [role, setRole] = useState(rememberedRole);
+  useEffect(() => { setCurrentRole(role); rememberRole(role); }, [role]);
   useApplyTextSize();
   const [askPassword, setAskPassword] = useState(false);
   const [lockError, setLockError] = useState('');
@@ -155,7 +158,10 @@ export default function App() {
     setRole(key);
   };
   const [patients, mutatePatients, syncPatients, markPatients] = useSharedStore('daily-patients', loadDaily, []);
-  const [fuMap, mutateFu, syncFu, markFu] = useSharedStore('fu-designations', loadFu, {});
+  // FU 지정: 평소에는 명단에 있는 환자 것만 받고, 고칠 때도 그 환자 칸만 저장 (관리자 'FU 지정 관리' 탭은 연 동안만 전체)
+  const [fuMap, , syncFu, markFu, mutateFuEntry] = useSharedStore('fu-designations', loadFu, {});
+  // mapFn: FU 묶음({ [id]: 기록 })을 받아 새 묶음을 돌려주는 함수 (saveFollowup 등). 그 환자 칸만 서버에 저장
+  const updateFu = useCallback((id, mapFn) => mutateFuEntry(id, rec => mapFn(rec ? { [id]: rec } : {})[id] ?? null), [mutateFuEntry]);
   const [doctors, mutateDoctors, syncDoctors, markDoctors] = useSharedStore('doctors', loadDoctors, []);
   const [settings, mutateSettings, syncSettings, markSettings] = useSharedStore('settings', loadSettings, DEFAULT_SETTINGS);
   const [history, , syncHistory, markHistory, mutateHistoryEntry] = useSharedStore('measure-history', loadHistory, {});
@@ -171,24 +177,22 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     const marks = [markPatients(), markFu(), markDoctors(), markSettings(), markHistory(), markDoctorPrefs(), markTodayOverride(), markBoardNotices()];
-    let p, f, d, s, h, dp, to, bn;
-    try {
-      [p, f, d, s, dp, to, bn] = await Promise.all([loadDaily(), loadFu(), loadDoctors(), loadSettings(), loadDoctorPrefs(), loadTodayOverride(), loadNotices()]);
-      // 이전 시력은 명단에 있는 환자(다음 주 차트리뷰 환자 포함) 것만
-      const ids = [...new Set((Array.isArray(p) ? p : []).map(x => x.id).filter(Boolean))].sort();
-      h = await loadKeySubset('measure-history', ids);
-    } catch {
-      return; // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다.
-    }
-    syncPatients(p, marks[0]);
-    syncFu(f, marks[1]);
-    syncDoctors(d, marks[2]);
-    syncSettings(s, marks[3]);
-    syncHistory(h, marks[4]);
-    syncDoctorPrefs(dp, marks[5]);
-    syncTodayOverride(to, marks[6]);
-    syncBoardNotices(bn, marks[7]);
-    setLastSync(new Date());
+    // 항목마다 따로 받습니다: 서버의 한 파일이 손상돼 그 항목만 못 받아도 나머지는 계속 맞춰짐 (못 받은 항목은 지금 화면 그대로)
+    const got = (pr) => pr.then(v => ({ ok: true, v }), () => ({ ok: false }));
+    const [p, d, s, dp, to, bn] = await Promise.all([loadDaily(), loadDoctors(), loadSettings(), loadDoctorPrefs(), loadTodayOverride(), loadNotices()].map(got));
+    // 이전 시력·FU는 명단에 있는 환자(다음 주 차트리뷰 환자 포함) 것만
+    const ids = p.ok ? [...new Set((Array.isArray(p.v) ? p.v : []).map(x => x.id).filter(Boolean))].sort() : null;
+    const [h, f] = ids ? await Promise.all([loadKeySubset('measure-history', ids), loadKeySubset('fu-designations', ids)].map(got)) : [{ ok: false }, { ok: false }];
+    if (p.ok) syncPatients(p.v, marks[0]);
+    if (f.ok) syncFu(f.v, marks[1]);
+    if (d.ok) syncDoctors(d.v, marks[2]);
+    if (s.ok) syncSettings(s.v, marks[3]);
+    if (h.ok) syncHistory(h.v, marks[4]);
+    if (dp.ok) syncDoctorPrefs(dp.v, marks[5]);
+    if (to.ok) syncTodayOverride(to.v, marks[6]);
+    if (bn.ok) syncBoardNotices(bn.v, marks[7]);
+    // 서버 연결이 끊기면 지금 화면을 그대로 두고 다음에 다시 시도합니다. 명단·설정을 받아야 '받음'으로 표시
+    if (p.ok && s.ok) setLastSync(new Date());
   }, [markPatients, markFu, markDoctors, markSettings, markHistory, markDoctorPrefs, markTodayOverride, markBoardNotices, syncPatients, syncFu, syncDoctors, syncSettings, syncHistory, syncDoctorPrefs, syncTodayOverride, syncBoardNotices]);
 
   // 새로 받기는 한 번에 하나씩 (늦게 도착한 옛 내용이 새 내용을 덮지 않도록). 받는 중에 또 요청되면 끝난 뒤 한 번 더
@@ -203,6 +207,13 @@ export default function App() {
       refreshing.current = false;
     }
   }, [refresh]);
+
+  // 저장에 실패하면 바로 새로 받아 화면을 서버에 저장된 내용으로 되돌림 (위쪽 빨간 띠로 안내 — ui/safety.jsx)
+  useEffect(() => {
+    const onFail = () => { runRefresh(); };
+    window.addEventListener('oph-save-failed', onFail);
+    return () => window.removeEventListener('oph-save-failed', onFail);
+  }, [runRefresh]);
 
   // 4초마다 스스로 확인 (서버 알림이 막혀도 이것으로 맞춰짐)
   useEffect(() => {
@@ -243,6 +254,10 @@ export default function App() {
   const patientsToday = patients.filter(p => p.date === today && !p.linkWaiting);
   const main = <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} patients={patientsToday} doctors={doctors} doctorPrefs={doctorPrefs} />;
   if (!role) return main;
+  // 기억해 둔 화면으로 다시 열 때: 서버에서 처음 받을 때까지 기다림 (설정이 오기 전에는 검사실 이름 등을 모름)
+  if (!lastSync) {
+    return <div className={`min-h-screen flex items-center justify-center text-sm ${role.startsWith('board:') ? 'bg-slate-900 text-slate-500' : 'bg-slate-50 text-slate-400'}`}>불러오는 중…</div>;
+  }
 
   const onBack = () => setRole(null);
 
@@ -288,7 +303,7 @@ export default function App() {
         settings={settings}
         history={history}
         mutatePatients={mutatePatients}
-        mutateFu={mutateFu}
+        updateFu={updateFu}
         onBack={onBack}
         lastSync={lastSync}
         allPatients={patients.filter(p => p.date === today)}
@@ -308,7 +323,7 @@ export default function App() {
         settings={settings}
         fuMap={fuMap}
         mutatePatients={mutatePatients}
-        mutateFu={mutateFu}
+        updateFu={updateFu}
         mutateDoctors={mutateDoctors}
         mutateDoctorPrefs={mutateDoctorPrefs}
         boardNotices={boardNotices}
@@ -353,7 +368,10 @@ export default function App() {
   return <PatientMemoContext.Provider value={mutatePatients}>
     <NoticeContext.Provider value={boardNotices || { notices: {} }}>
       <HxContext.Provider value={{ fuMap, measure: history, fields: hxFieldsOf(settings) }}>
-        {renderView()}
+        {/* 화면 오류: 흰 화면 대신 안내 (화면을 바꾸면 새로 시작) */}
+        <ErrorBoundary key={role || 'main'} where="화면" onHome={role ? () => setRole(null) : undefined}>
+          {renderView()}
+        </ErrorBoundary>
       </HxContext.Provider>
     </NoticeContext.Provider>
     {askPassword && <PasswordModal onOk={() => { setAskPassword(false); setRole('settings'); }} onCancel={() => setAskPassword(false)} />}

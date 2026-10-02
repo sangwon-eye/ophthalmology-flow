@@ -22,8 +22,10 @@ export const { chromium } = await loadPlaywright();
 const api = `${BASE}/api/storage/`;
 export async function getKey(k) { const r = await fetch(api + k); if (r.status !== 200) return { value: null, version: undefined }; const c = await r.json(); return { value: JSON.parse(c.value), version: c.version }; }
 export async function editKey(k, fn) { const { value, version } = await getKey(k); const next = fn(value); const r = await fetch(api + k, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: JSON.stringify(next), version }) }); if (!r.ok) throw new Error('put ' + r.status); }
-export function tester(page) {
+// keepRole: 마지막 화면 기억을 확인하는 시나리오만 true. 평소에는 주소를 열 때마다 메인 화면에서 시작 (예전 시나리오들의 전제)
+export function tester(page, { keepRole = false } = {}) {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
+  if (!keepRole) page.addInitScript(() => { try { localStorage.removeItem('oph-role'); } catch { /* 없음 */ } });
   let fails = 0;
   const ok = (c, m) => { console.log(`${c ? 'OK  ' : 'FAIL'} ${m}`); if (!c) { fails++; process.exitCode = 1; } };
   const W = (ms = 600) => page.waitForTimeout(ms);

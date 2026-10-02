@@ -16,9 +16,15 @@ ok(await dateInput(pcA).inputValue() === today, `처음엔 컴퓨터 날짜 (${t
 await pcB.getByRole('button', { name: /^31번방/ }).first().click(); await wait(pcB);
 const countB = async () => (await pcB.locator('h1').innerText()).match(/대기 (\d+)명/)?.[1];
 ok(await countB() === '5', '31번방 오늘 대기 5명');
-// PC A에서 내일로
+// PC A에서 내일로: 고르기만 하면 아직 안 바뀜 → [모든 컴퓨터 M월 D일로 바꾸기]를 눌러야 적용 ([취소]도 확인)
 await dateInput(pcA).fill(tomorrow); await wait(pcA, 800);
-ok(await pcA.getByText('직접 정함 · 모든 컴퓨터 적용').count() === 1, 'PC A: 직접 정함 표시');
+const applyBtn = pcA.getByRole('button', { name: `모든 컴퓨터 ${Number(tomorrow.slice(5, 7))}월 ${Number(tomorrow.slice(8, 10))}일로 바꾸기` });
+ok(await applyBtn.count() === 1 && await pcA.getByText('직접 정함 · 모든 컴퓨터 적용').count() === 0, 'PC A: 날짜를 고르기만 하면 아직 안 바뀜 ([바꾸기] 버튼)');
+await pcA.getByRole('button', { name: '취소', exact: true }).click(); await wait(pcA, 300);
+ok(await dateInput(pcA).inputValue() === today && await applyBtn.count() === 0, 'PC A: [취소] → 그대로 오늘');
+await dateInput(pcA).fill(tomorrow); await wait(pcA, 300);
+await applyBtn.click(); await wait(pcA, 800);
+ok(await pcA.getByText('직접 정함 · 모든 컴퓨터 적용').count() === 1, 'PC A: [바꾸기] → 직접 정함 표시');
 await pcA.screenshot({ path: `${SP}/r9-main.png`, clip: { x: 283, y: 0, width: 800, height: 260 } });
 await wait(pcB, 5000);
 ok(await countB() === '0', 'PC B(31번방): 몇 초 뒤 내일 명단(0명)으로 바뀜');
