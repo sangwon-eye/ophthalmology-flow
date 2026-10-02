@@ -342,6 +342,7 @@ export default function App() {
         settings={settings}
         doctors={doctors}
         doctorPrefs={doctorPrefs}
+        ready={!!lastSync}
         onBack={() => setRole('board')}
       />
     );

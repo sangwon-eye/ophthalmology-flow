@@ -111,7 +111,7 @@ export function useChime(keys, { ready = true, context = '' } = {}) {
 }
 
 // 화면 위쪽: 소리 켜기/끄기 버튼 + 소리가 막혀 있으면 안내
-export function ChimeControl() {
+export function ChimeControl({ dark = false } = {}) {
   const [, rerender] = useState(0);
   useEffect(() => {
     const fn = () => rerender(n => n + 1);
@@ -123,14 +123,14 @@ export function ChimeControl() {
   return (
     <span className="flex items-center gap-2">
       {blocked && (
-        <span className="text-xs px-2 py-1 rounded-lg bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+        <span className={`text-xs px-2 py-1 rounded-lg border flex items-center gap-1 ${dark ? 'bg-amber-400/15 text-amber-200 border-amber-400/50' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>
           <Bell size={12} /> 소리를 켜려면 화면을 한 번 눌러 주세요
         </span>
       )}
       <button type="button" onClick={() => setChimeOff(!off)} aria-label={off ? '띵동 소리 켜기' : '띵동 소리 끄기'} aria-pressed={!off}
         title={off ? '띵동 소리 꺼짐 · 누르면 켜기 (이 컴퓨터만)' : '새 일이 생기면 띵동 · 누르면 끄기 (이 컴퓨터만)'}
-        className={`px-2 py-2 rounded-lg border bg-white ${off ? 'border-slate-300 text-slate-400' : 'border-slate-300 text-slate-600'}`}>
-        {off ? <BellOff size={16} /> : <Bell size={16} />}
+        className={dark ? `px-1.5 py-1 rounded border border-slate-700 bg-slate-800 ${off ? 'text-slate-600' : 'text-slate-400'}` : `px-2 py-2 rounded-lg border bg-white ${off ? 'border-slate-300 text-slate-400' : 'border-slate-300 text-slate-600'}`}>
+        {off ? <BellOff size={dark ? 14 : 16} /> : <Bell size={dark ? 14 : 16} />}
       </button>
     </span>
   );

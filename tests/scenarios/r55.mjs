@@ -13,7 +13,7 @@ for (const [w, h] of [[1024, 768], [1920, 1080]]) {
   const { errors, ok, W } = tester(page);
   await openBoard(page, W, '나상훈 진료실');
   const h1 = page.locator('h1');
-  ok((await h1.innerText()).replace(/\s+/g, ' ').includes('나상훈 진료 대기 순서'), `${w}px: 진료실 화면 제목`);
+  ok((await h1.innerText()).replace(/\s+/g, ' ').includes('나상훈 교수님 진료'), `${w}px: 진료실 화면 제목`);
   ok(await h1.getByText('5번 진료실', { exact: true }).count() === 1, `${w}px: 진료실 번호는 제목 옆 배지`);
   const title = await h1.locator('span').first().boundingBox();
   ok(title.height < 50, `${w}px: 제목이 한 줄 (높이 ${Math.round(title.height)})`);
@@ -26,11 +26,11 @@ for (const [w, h] of [[1024, 768], [1920, 1080]]) {
   ok(await page.getByText('다음 순서', { exact: true }).count() === 1, `${w}px: 1번 칸에 '다음 순서' 배지`);
   ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.documentElement.scrollHeight <= window.innerHeight), `${w}px: 화면 밖으로 넘치지 않음`);
   await page.screenshot({ path: `${SP}/r55-consult-${w}.png` });
-  // 시력방: 1번 칸('다음 순서')과 옆 칸의 높이가 같음
+  // 시력방: 1번('다음 순서')은 가장 크게, 2~5번 큰 칸은 높이가 모두 같음
   await openBoard(page, W, '시력검사실 대기 명단');
-  const rows = page.locator('div.relative.flex.items-center');
+  const rows = page.locator('div.rounded-2xl.border-2');
   const hs = [];
-  for (let i = 0; i < Math.min(3, await rows.count()); i++) hs.push(Math.round((await rows.nth(i).boundingBox()).height));
+  for (let i = 1; i < Math.min(5, await rows.count()); i++) hs.push(Math.round((await rows.nth(i).boundingBox()).height));
   ok(hs.length >= 2 && new Set(hs).size === 1, `${w}px: 시력방 칸 높이가 모두 같음 (${hs.join(', ')})`);
   // 검사실: 이름은 윗줄, 검사실·검사는 아랫줄
   await openBoard(page, W, '검사실 대기 명단');

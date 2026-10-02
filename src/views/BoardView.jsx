@@ -1,9 +1,10 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone } from 'lucide-react';
-import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultWaiting, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl } from '../ui/common.jsx';
+import { ChimeControl, useChime } from '../ui/chime.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 환자용 화면                                                          */
@@ -131,7 +132,6 @@ export function WaitNotice({ patients, kind, compact }) {
   return n ? <BoardNotice text={WAIT_TEXT[kind].replace('{n}', n)} compact={compact} /> : null;
 }
 
-const previewVariant = () => { try { return localStorage.getItem('board-preview') || ''; } catch { return ''; } };
 // 앞 순서 큰 칸 (진료실 앞 모니터·시력방 TV)
 function BigRow({ label, name, size, tone = 'amber', n }) {
   const c = DARK[tone] || DARK.amber;
@@ -167,7 +167,7 @@ export function VisionBoardList({ patients, compact, big }) {
     <div>
       <WaitNotice patients={patients} kind="vision" compact={compact} />
       <BoardNotice text={notice} compact={compact} />
-      {!list.length ? <BoardEmpty /> : big && previewVariant() ? (
+      {!list.length ? <BoardEmpty /> : big ? (
         <div>
           <BigRow label="다음 순서" name={patientBoardName(list[0])} size="xl" tone="blue" />
           {list.length > 1 && (
@@ -238,6 +238,38 @@ export function ExamBoardList({ patients, settings, compact }) {
   );
 }
 
+// 검사실 한 곳 대기 명단 (검사실 문 앞 모니터용): 그 검사실에서 할 검사만
+export function RoomBoardList({ room, patients, settings }) {
+  const notice = useNotice(`room:${room.id}`);
+  const list = patients
+    .filter(p => !p.consultDone && roomPending(p, settings, room.id))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+  return (
+    <div>
+      <BoardNotice text={notice} />
+      {list.length === 0 ? <BoardEmpty /> : (
+        <div className="grid gap-2.5" style={boardGrid(20)}>
+          {list.map(p => {
+            const vf = activeVf(p);
+            const vfTest = vf && settings.tests.find(t => t.id === vf);
+            return (
+              <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
+                <div className="text-2xl font-bold text-white">{patientBoardName(p)}</div>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {vfTest && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{vfTest.name || '시야검사'} 검사 중</span>}
+                  <span className={`text-sm px-3 py-1 rounded-xl border font-medium ${darkChip(roomColor(settings, room.id))}`}>
+                    {pendingTests(p, settings, room.id).map(t => t.name || t.short).join(', ')}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 진찰실 번호: 숫자만 적으면 'N번 진료실', 글자를 적으면 그대로 표시
 export function consultRoomLabel(prefs, doctor) {
   const v = String(prefs?.[doctor]?.roomNo ?? '').trim();
@@ -266,8 +298,8 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
   const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
   const testing = mine.filter(p => !p.seen && !allDone(p, settings)).length;
   const notice = useNotice(`doctor:${doctor}`);
-  const v = plain ? previewVariant() : '';
-  if (v === 'A') {
+  // 진료실 앞 모니터(교수님 한 분): 진료 중·다음 순서는 가장 크게, 2·3번은 크게, 그다음은 작게
+  if (plain) {
     return (
       <div>
         <BoardNotice text={notice} />
@@ -283,27 +315,6 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
         {!waiting.length && <div className="text-2xl text-slate-500 py-4">진료 대기 환자가 없습니다</div>}
         <SmallRest list={waiting.slice(3)} start={4} color="amber" />
         {testing > 0 && <div className="text-lg text-slate-400 mt-4">검사 진행 중 {testing}명</div>}
-      </div>
-    );
-  }
-  if (v === 'B') {
-    return (
-      <div>
-        <BoardNotice text={notice} />
-        <div className="grid gap-5" style={{ gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)' }}>
-          <div className="space-y-3">
-            {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} size="lg" />}
-            {waiting[0] && <BigRow label="다음 순서" name={patientBoardName(waiting[0])} size="lg" />}
-            {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="md" />)}
-          </div>
-          <div>
-            <div className="text-lg text-slate-400 mb-2">그다음 순서</div>
-            <div className="space-y-2">
-              {waiting.slice(3).map((p, i) => <BoardNumberRow key={patientKey(p)} n={i + 4} name={patientBoardName(p)} color="amber" compact />)}
-            </div>
-            {testing > 0 && <div className="text-lg text-slate-400 mt-4">검사 진행 중 {testing}명</div>}
-          </div>
-        </div>
       </div>
     );
   }
@@ -350,6 +361,7 @@ export function BoardSelect({ doctors, settings, onSelect, onBack }) {
   const options = [
     { key: 'vision', label: `${vName} 대기 명단`, sub: '순번 표시' },
     { key: 'exam', label: '검사실 대기 명단', sub: '순번 없이 검사실·검사 안내' },
+    ...settings.rooms.filter(r => !r.builtin).map(r => ({ key: `room:${r.id}`, label: `${r.patientName || r.name} 대기 명단`, sub: `${r.name} 검사실 앞 모니터용 (이 검사실 검사만)` })),
     { key: 'vision-exam', label: `${vName} + 검사실`, sub: '두 명단을 한 화면에' },
     { key: 'consult-all', label: '진료실 대기 명단 (전체)', sub: '교수님별 구역으로 나눠 표시' },
     ...doctors.map(d => ({ key: `consult:${d}`, label: `${d} 진료실`, sub: '진료실 앞 모니터용' })),
@@ -370,10 +382,13 @@ export function BoardSelect({ doctors, settings, onSelect, onBack }) {
   );
 }
 
-export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBack }) {
+export function BoardView({ kind, patients, settings, doctors, doctorPrefs, ready = true, onBack }) {
   const [layout, setLayout] = useState('horizontal');
   const activeDoctors = Array.from(new Set([...doctors, ...patients.map(p => p.doctor).filter(Boolean)]))
     .filter(d => patients.some(p => p.doctor === d && !p.consultDone));
+  // 진료실 앞 모니터: 직원 진료실 화면처럼 그 교수님 진료 호출이 생기면 띵동 (오른쪽 아래 종 버튼으로 이 컴퓨터만 끄기)
+  const chimeDoctor = kind.startsWith('consult:') ? kind.slice('consult:'.length) : '';
+  useChime(chimeDoctor ? patients.filter(p => p.doctor === chimeDoctor && inConsult(p)).map(patientKey) : [], { ready: ready && !!chimeDoctor, context: chimeDoctor });
 
   if (kind === 'vision') {
     return <BoardShell title={`${visionNames(settings).patientName} 대기 순서`} onBack={onBack}><VisionBoardList patients={patients} big /></BoardShell>;
@@ -391,6 +406,16 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
       </BoardShell>
     );
   }
+  if (kind.startsWith('room:')) {
+    const room = settings.rooms.find(r => r.id === kind.slice('room:'.length));
+    if (!room) return <BoardShell title="검사실 대기 명단" onBack={onBack}><BoardEmpty text="설정에서 이 검사실을 찾을 수 없습니다" /></BoardShell>;
+    const label = room.patientName || room.name;
+    return (
+      <BoardShell title={`${label} 대기 명단`} badge={room.patientName && room.patientName !== room.name ? room.name : ''} onBack={onBack}>
+        <RoomBoardList room={room} patients={patients} settings={settings} />
+      </BoardShell>
+    );
+  }
   if (kind === 'consult-all') {
     return (
       <BoardShell title="진료 대기 순서" onBack={onBack}>
@@ -405,7 +430,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
   if (kind.startsWith('consult:')) {
     const d = kind.slice('consult:'.length);
     return (
-      <BoardShell title={previewVariant() ? `${d} 교수님 진료` : `${d} 진료 대기 순서`} big={!!previewVariant()} badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack}>
+      <BoardShell title={`${d} 교수님 진료`} big badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack} extra={<ChimeControl dark />}>
         <ConsultBoardSection doctor={d} patients={patients} settings={settings} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
       </BoardShell>
     );
