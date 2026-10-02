@@ -100,28 +100,6 @@ function writeShard(key, shard, obj) {
   const saved = writeItem(k, JSON.stringify(obj));
   parsed.set(k, { version: saved.version, obj });
 }
-// 예전 한 파일(measure-history.json)은 서버를 켤 때 100개 파일로 나눠 옮깁니다 (원본은 백업 폴더에 남김).
-function splitOldShardedFiles() {
-  for (const key of SHARDED) {
-    const file = keyFile(key);
-    if (!fs.existsSync(file)) continue;
-    const item = readItem(key);
-    let obj;
-    try { obj = JSON.parse(item.value) || {}; } catch {
-      console.error(`\n[오류] ${file} 파일을 읽을 수 없어 나눠 옮기지 못했습니다. 서버를 멈춥니다.\n`);
-      process.exit(EXIT_DATA_ERROR);
-    }
-    const byShard = {};
-    for (const [id, v] of Object.entries(obj)) (byShard[shardOf(id)] ||= {})[id] = v;
-    for (const [sh, part] of Object.entries(byShard)) writeShard(key, sh, { ...shardData(key, sh), ...part });
-    const keep = path.join(BACKUP_DIR, localDate());
-    fs.mkdirSync(keep, { recursive: true });
-    if (!fs.existsSync(path.join(keep, `${key}.json`))) fs.copyFileSync(file, path.join(keep, `${key}.json`));
-    fs.rmSync(file, { force: true });
-    cache.delete(key);
-    console.log(`${key}: ${Object.keys(obj).length}명 기록을 100개 파일로 나눠 옮겼습니다.`);
-  }
-}
 function readItem(key) {
   if (cache.has(key)) return cache.get(key);
   const file = keyFile(key);
@@ -269,7 +247,6 @@ setInterval(() => { for (const res of eventClients) sendEvent(res, ': ping\n\n')
 
 fs.mkdirSync(KEYS_DIR, { recursive: true });
 migrateOldStore();
-splitOldShardedFiles();
 archiveOldPatients();
 setInterval(() => {
   try { archiveOldPatients(); } catch (e) { console.error(`[경고] 지난 명단 보관 실패: ${e.message}`); }
@@ -347,9 +324,107 @@ async function handleLock(req, res, pathname) {
   return sendJson(res, 404, { error: 'not found' });
 }
 
+// 접속 비밀번호: 정해 두면 서버가 모든 읽기·저장 요청에서 통행증(쿠키)을 확인합니다.
+// 화면만 막는 것이 아니라 서버가 막으므로, 주소를 알아도 비밀번호 없이는 데이터를 읽거나 바꿀 수 없습니다.
+// 비밀번호는 해시로만 저장. 비밀번호를 바꾸면 secret 이 바뀌어 모든 컴퓨터가 다시 입력해야 합니다.
+// 잊어버리면 접속비밀번호초기화.bat 으로 이 파일을 지우면 됩니다 (지우면 잠금 없음).
+const ACCESS_FILE = path.join(DATA_DIR, 'access-lock.json');
+const ACCESS_COOKIE = 'oph_access';
+const ACCESS_MAX_AGE = 400 * 24 * 3600; // 크롬이 허용하는 최대(400일). 화면을 열 때마다 다시 늘어남
+const ACCESS_MAX_FAILS = 5;
+const ACCESS_LOCK_MS = 60 * 1000;
+const accessFails = new Map(); // 컴퓨터(주소)별 틀린 횟수
+function readAccess() {
+  try {
+    const l = JSON.parse(fs.readFileSync(ACCESS_FILE, 'utf8'));
+    return l?.salt && l?.hash && l?.secret ? l : null;
+  } catch { return null; }
+}
+const accessToken = (lock) => crypto.createHmac('sha256', lock.secret).update('oph-access').digest('hex');
+function cookieOf(req, name) {
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return '';
+}
+function accessOk(req, lock = readAccess()) {
+  if (!lock) return true;
+  const a = Buffer.from(cookieOf(req, ACCESS_COOKIE));
+  const b = Buffer.from(accessToken(lock));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+const accessCookie = (lock) => `${ACCESS_COOKIE}=${accessToken(lock)}; Path=/; Max-Age=${ACCESS_MAX_AGE}; HttpOnly; SameSite=Strict`;
+function sendJsonCookie(res, status, body, cookie) {
+  res.writeHead(status, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store', ...(cookie ? { 'Set-Cookie': cookie } : {}) });
+  res.end(JSON.stringify(body));
+}
+// 여러 번 틀리면 그 컴퓨터는 1분 동안 잠금 (비밀번호를 하나씩 맞춰보지 못하도록)
+function accessBlocked(req) {
+  const f = accessFails.get(req.socket.remoteAddress || '');
+  return f && f.until > Date.now() ? Math.ceil((f.until - Date.now()) / 1000) : 0;
+}
+function accessFailed(req) {
+  const ip = req.socket.remoteAddress || '';
+  const f = accessFails.get(ip) || { n: 0, until: 0 };
+  f.n += 1;
+  if (f.n >= ACCESS_MAX_FAILS) { f.n = 0; f.until = Date.now() + ACCESS_LOCK_MS; }
+  accessFails.set(ip, f);
+}
+async function handleAccess(req, res, pathname) {
+  const lock = readAccess();
+  if (pathname === '/api/access' && req.method === 'GET') {
+    const ok = accessOk(req, lock);
+    // 들어와 있는 컴퓨터는 통행증 기간을 다시 늘림
+    return sendJsonCookie(res, 200, { enabled: !!lock, ok }, lock && ok ? accessCookie(lock) : '');
+  }
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'method' });
+  let body;
+  try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
+  if (pathname === '/api/access/login') {
+    if (!lock) return sendJson(res, 200, { ok: true });
+    const wait = accessBlocked(req);
+    if (wait) return sendJson(res, 429, { error: 'locked', wait });
+    if (!lockMatches(lock, body?.password)) {
+      accessFailed(req);
+      await delay(800);
+      const after = accessBlocked(req);
+      return sendJson(res, after ? 429 : 403, { error: after ? 'locked' : 'wrong', wait: after });
+    }
+    accessFails.delete(req.socket.remoteAddress || '');
+    return sendJsonCookie(res, 200, { ok: true }, accessCookie(lock));
+  }
+  if (pathname === '/api/access/set') {
+    // 바꾸기·없애기: 들어와 있는 컴퓨터에서 현재 비밀번호를 알아야 함
+    if (lock) {
+      if (!accessOk(req, lock)) return sendJson(res, 401, { error: 'access' });
+      const wait = accessBlocked(req);
+      if (wait) return sendJson(res, 429, { error: 'locked', wait });
+      if (!lockMatches(lock, body?.current)) { accessFailed(req); await delay(800); return sendJson(res, 403, { error: 'wrong' }); }
+    }
+    const next = String(body?.next ?? '');
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!next) {
+      try { fs.unlinkSync(ACCESS_FILE); } catch { /* 이미 없음 */ }
+      console.log('접속 비밀번호를 없앴습니다.');
+      return sendJson(res, 200, { enabled: false });
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const nextLock = { salt, hash: hashPassword(next, salt), secret: crypto.randomBytes(32).toString('hex') };
+    fs.writeFileSync(ACCESS_FILE, JSON.stringify(nextLock));
+    console.log('접속 비밀번호를 정했습니다 (모든 컴퓨터가 한 번씩 다시 입력).');
+    // 바꾼 이 컴퓨터는 다시 묻지 않도록 새 통행증
+    return sendJsonCookie(res, 200, { enabled: true }, accessCookie(nextLock));
+  }
+  return sendJson(res, 404, { error: 'not found' });
+}
+
 async function handleApi(req, res, pathname) {
-  if (pathname.startsWith('/api/settings-lock')) return handleLock(req, res, pathname);
   if (pathname === '/api/health') return sendJson(res, 200, { ok: true, build: buildId() });
+  if (pathname === '/api/access' || pathname.startsWith('/api/access/')) return handleAccess(req, res, pathname);
+  // 접속 비밀번호가 있으면 통행증 없는 요청은 모두 거절 (서버끄기는 서버 PC 자신만 되므로 그대로)
+  if (pathname !== '/api/shutdown' && !accessOk(req)) return sendJson(res, 401, { error: 'access' });
+  if (pathname.startsWith('/api/settings-lock')) return handleLock(req, res, pathname);
   if (pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res);
 
   // 서버끄기.bat 에서 사용. 서버 PC 자신에서만 끌 수 있습니다.

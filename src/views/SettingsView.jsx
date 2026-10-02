@@ -5,6 +5,7 @@ import { RESULT_FIELDS, COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machin
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';
+import { AccessPasswordCard } from './AccessGate.jsx';
 import { DoctorRoomInput } from './BoardView.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -484,6 +485,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
 
       {tab === 'etc' && (
         <div className="space-y-4">
+          <AccessPasswordCard />
           <SettingsPasswordCard />
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="font-medium text-slate-900 mb-1">History 양식</div>

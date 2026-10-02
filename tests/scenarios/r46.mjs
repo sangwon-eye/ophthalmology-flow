@@ -1,9 +1,6 @@
 import { chromium, SP, BASE, DATA, getKey, editKey, tester , measureVision } from '../lib.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 // 이전 시력: 한 환자 칸만 저장 (오늘 + 지난 1회), 서버 칸 저장 충돌 처리
 const api = (k) => `${BASE}/api/storage-entries/${k}`;
 const post = (k, entries) => fetch(api(k), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entries }) });
@@ -32,24 +29,5 @@ ok(Array.isArray(h.other), '다른 환자 칸은 그대로');
 const shardFile = path.join(DATA, 'keys', 'measure-history', `${String(pid).slice(-2)}.json`);
 ok(fs.existsSync(shardFile) && JSON.parse(JSON.parse(fs.readFileSync(shardFile, 'utf8')).value)[pid], `환자 기록이 ${String(pid).slice(-2)}.json 에 저장됨`);
 ok(!fs.existsSync(path.join(DATA, 'keys', 'measure-history.json')), '예전 한 파일은 없음');
-// 예전 한 파일(measure-history.json)은 서버를 켤 때 100개 파일로 나눠 옮김 (따로 켠 서버로 확인)
-{
-  const dir = fs.mkdtempSync(path.join(DATA, '..', 'split-'));
-  fs.mkdirSync(path.join(dir, 'keys'), { recursive: true });
-  const value = JSON.stringify({ '1000007': [{ date: '2026-01-01' }], '2000042': [{ date: '2026-02-02' }] });
-  fs.writeFileSync(path.join(dir, 'keys', 'measure-history.json'), JSON.stringify({ version: 3, value }));
-  const srv = spawn(process.execPath, [path.join(ROOT, 'server.js')], { env: { ...process.env, OPH_DATA_DIR: dir, OPH_PORT: '3197' }, stdio: 'ignore' });
-  let got = null;
-  for (let i = 0; i < 40 && !got; i++) {
-    await new Promise(r => setTimeout(r, 250));
-    try { const r = await fetch('http://127.0.0.1:3197/api/storage/measure-history'); if (r.ok) got = JSON.parse((await r.json()).value); } catch { /* 켜지는 중 */ }
-  }
-  srv.kill();
-  ok(got?.['1000007'] && got?.['2000042'], '나눠 옮긴 뒤에도 전체가 그대로 보임');
-  ok(fs.existsSync(path.join(dir, 'keys', 'measure-history', '07.json')) && fs.existsSync(path.join(dir, 'keys', 'measure-history', '42.json')) && !fs.existsSync(path.join(dir, 'keys', 'measure-history.json')), '07.json · 42.json 으로 나뉘고 예전 파일은 없어짐');
-  const backups = fs.existsSync(path.join(dir, 'backups')) ? fs.readdirSync(path.join(dir, 'backups')) : [];
-  ok(backups.some(d => fs.existsSync(path.join(dir, 'backups', d, 'measure-history.json'))), '예전 파일은 백업 폴더에 남김');
-  fs.rmSync(dir, { recursive: true, force: true });
-}
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

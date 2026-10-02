@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import { AccessGate } from './views/AccessGate.jsx';
 import './style.css';
 
 /* ------------------------------------------------------------------ */
@@ -15,12 +16,22 @@ function setConnected(v) {
   listeners.forEach(fn => fn(v));
 }
 
+// 접속 비밀번호: 서버가 통행증 없는 요청을 거절(401)하면 비밀번호 화면을 띄움
+let accessNeeded = false;
+const accessListeners = new Set();
+function setAccessNeeded() {
+  if (accessNeeded) return;
+  accessNeeded = true;
+  accessListeners.forEach(fn => fn(true));
+}
+
 async function request(url, options) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(url, { ...options, signal: ctrl.signal, cache: 'no-store' });
     setConnected(true);
+    if (res.status === 401) setAccessNeeded();
     return res;
   } catch (e) {
     setConnected(false);
@@ -159,9 +170,26 @@ function StatusBar() {
   return null;
 }
 
-createRoot(document.getElementById('root')).render(
-  <>
-    <StatusBar />
-    <App />
-  </>
-);
+// 처음 열 때 접속 비밀번호가 필요한지 확인 (서버에 연결되지 않으면 예전처럼 화면을 열고 연결 안내만)
+function Root() {
+  const [state, setState] = useState(accessNeeded ? 'locked' : 'checking');
+  useEffect(() => {
+    const onNeed = () => setState('locked');
+    accessListeners.add(onNeed);
+    request('/api/access').then(r => r.json()).then(r => {
+      if (r?.enabled && !r.ok) setAccessNeeded();
+      else setState(s => (s === 'locked' ? s : 'open'));
+    }).catch(() => setState(s => (s === 'locked' ? s : 'open')));
+    return () => { accessListeners.delete(onNeed); };
+  }, []);
+  if (state === 'checking') return null;
+  if (state === 'locked') return <AccessGate onOk={() => location.reload()} />;
+  return (
+    <>
+      <StatusBar />
+      <App />
+    </>
+  );
+}
+
+createRoot(document.getElementById('root')).render(<Root />);
