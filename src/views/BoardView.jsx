@@ -23,7 +23,7 @@ const DARK = {
   slate: { chip: 'bg-slate-400/15 text-slate-100 border-slate-400/50' },
 };
 const darkChip = (color) => (DARK[color] || DARK.slate).chip;
-export function BoardShell({ title, badge, onBack, extra, children }) {
+export function BoardShell({ title, badge, onBack, extra, big, children }) {
   const [now, setNow] = useState(new Date());
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef(null);
@@ -58,9 +58,9 @@ export function BoardShell({ title, badge, onBack, extra, children }) {
       <div className="shrink-0 bg-slate-950 border-b border-slate-800">
         <div className={`${BOARD_WIDTH} py-4 flex items-center gap-6`}>
           {/* 제목은 낱말 단위로만 줄을 바꿈 (글자 중간에서 끊기지 않게). 진료실 번호는 옆에 배지로 */}
-          <h1 className="min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-3xl font-bold text-white break-keep">
+          <h1 className={`min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 ${big ? 'text-5xl' : 'text-3xl'} font-bold text-white break-keep`}>
             <span>{title}</span>
-            {badge && <span className="whitespace-nowrap rounded-xl bg-amber-400 px-3 py-0.5 text-2xl font-bold text-slate-950">{badge}</span>}
+            {badge && <span className={`whitespace-nowrap rounded-xl bg-amber-400 px-3 py-0.5 ${big ? 'text-4xl' : 'text-2xl'} font-bold text-slate-950`}>{badge}</span>}
           </h1>
           <span className="shrink-0 whitespace-nowrap text-3xl text-slate-300 tabular-nums">{now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
@@ -131,14 +131,53 @@ export function WaitNotice({ patients, kind, compact }) {
   return n ? <BoardNotice text={WAIT_TEXT[kind].replace('{n}', n)} compact={compact} /> : null;
 }
 
-export function VisionBoardList({ patients, compact }) {
+const previewVariant = () => { try { return localStorage.getItem('board-preview') || ''; } catch { return ''; } };
+// 앞 순서 큰 칸 (진료실 앞 모니터·시력방 TV)
+function BigRow({ label, name, size, tone = 'amber', n }) {
+  const c = DARK[tone] || DARK.amber;
+  const S = {
+    xl: { box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1', num: 'w-16 h-16 text-4xl' },
+    lg: { box: 'px-5 py-3 gap-4', name: 'text-5xl', tag: 'text-xl px-3 py-1', num: 'w-14 h-14 text-3xl' },
+    md: { box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-0.5', num: 'w-12 h-12 text-2xl' },
+  }[size];
+  return (
+    <div className={`flex items-center ${S.box} rounded-2xl border-2 ${label ? c.next : 'bg-slate-800 border-slate-600'}`}>
+      {label ? <span className={`shrink-0 whitespace-nowrap rounded-full ${c.badge} ${S.tag} font-bold`}>{label}</span>
+        : <span className={`${S.num} shrink-0 rounded-full ${c.num} flex items-center justify-center font-bold`}>{n}</span>}
+      <span className={`${S.name} min-w-0 font-bold text-white whitespace-nowrap`}>{name}</span>
+    </div>
+  );
+}
+function SmallRest({ list, start, color }) {
+  if (!list.length) return null;
+  return (
+    <div className="mt-4">
+      <div className="text-lg text-slate-400 mb-2">그다음 순서</div>
+      <div className="grid gap-2" style={boardGrid(15)}>
+        {list.map((p, i) => <BoardNumberRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} color={color} compact />)}
+      </div>
+    </div>
+  );
+}
+
+export function VisionBoardList({ patients, compact, big }) {
   const notice = useNotice('vision');
   const list = patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p)).sort(byQueue);
   return (
     <div>
       <WaitNotice patients={patients} kind="vision" compact={compact} />
       <BoardNotice text={notice} compact={compact} />
-      {!list.length ? <BoardEmpty /> : (
+      {!list.length ? <BoardEmpty /> : big && previewVariant() ? (
+        <div>
+          <BigRow label="다음 순서" name={patientBoardName(list[0])} size="xl" tone="blue" />
+          {list.length > 1 && (
+            <div className="grid gap-3 mt-3" style={boardGrid(24)}>
+              {list.slice(1, 5).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="lg" tone="blue" />)}
+            </div>
+          )}
+          <SmallRest list={list.slice(5)} start={6} color="blue" />
+        </div>
+      ) : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>
           {list.map((p, i) => (
             <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="blue" compact={compact} note={i === 0 ? '다음 순서' : ''} />
@@ -227,6 +266,47 @@ export function ConsultBoardSection({ doctor, patients, settings, compact, plain
   const waiting = mine.filter(p => consultWaiting(p, settings)).sort(byQueue);
   const testing = mine.filter(p => !p.seen && !allDone(p, settings)).length;
   const notice = useNotice(`doctor:${doctor}`);
+  const v = plain ? previewVariant() : '';
+  if (v === 'A') {
+    return (
+      <div>
+        <BoardNotice text={notice} />
+        <div className="space-y-3">
+          {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} size="xl" />}
+          {waiting[0] && <BigRow label="다음 순서" name={patientBoardName(waiting[0])} size="xl" />}
+          {waiting.length > 1 && (
+            <div className="grid gap-3" style={boardGrid(22)}>
+              {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="md" />)}
+            </div>
+          )}
+        </div>
+        {!waiting.length && <div className="text-2xl text-slate-500 py-4">진료 대기 환자가 없습니다</div>}
+        <SmallRest list={waiting.slice(3)} start={4} color="amber" />
+        {testing > 0 && <div className="text-lg text-slate-400 mt-4">검사 진행 중 {testing}명</div>}
+      </div>
+    );
+  }
+  if (v === 'B') {
+    return (
+      <div>
+        <BoardNotice text={notice} />
+        <div className="grid gap-5" style={{ gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)' }}>
+          <div className="space-y-3">
+            {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} size="lg" />}
+            {waiting[0] && <BigRow label="다음 순서" name={patientBoardName(waiting[0])} size="lg" />}
+            {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="md" />)}
+          </div>
+          <div>
+            <div className="text-lg text-slate-400 mb-2">그다음 순서</div>
+            <div className="space-y-2">
+              {waiting.slice(3).map((p, i) => <BoardNumberRow key={patientKey(p)} n={i + 4} name={patientBoardName(p)} color="amber" compact />)}
+            </div>
+            {testing > 0 && <div className="text-lg text-slate-400 mt-4">검사 진행 중 {testing}명</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={plain ? '' : 'bg-slate-800/50 border border-slate-700 rounded-2xl p-4'}>
       {!plain && (
@@ -296,7 +376,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
     .filter(d => patients.some(p => p.doctor === d && !p.consultDone));
 
   if (kind === 'vision') {
-    return <BoardShell title={`${visionNames(settings).patientName} 대기 순서`} onBack={onBack}><VisionBoardList patients={patients} /></BoardShell>;
+    return <BoardShell title={`${visionNames(settings).patientName} 대기 순서`} onBack={onBack}><VisionBoardList patients={patients} big /></BoardShell>;
   }
   if (kind === 'exam') {
     return <BoardShell title="검사실 대기 명단" onBack={onBack}><ExamBoardList patients={patients} settings={settings} /></BoardShell>;
@@ -305,7 +385,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
     return (
       <BoardShell title="검사 대기 현황" onBack={onBack} extra={<label className="text-xs text-slate-500">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
         <div className="grid gap-6" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
-          <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} /></BoardColumn>
+          <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} big /></BoardColumn>
           <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} /></BoardColumn>
         </div>
       </BoardShell>
@@ -325,7 +405,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, onBa
   if (kind.startsWith('consult:')) {
     const d = kind.slice('consult:'.length);
     return (
-      <BoardShell title={`${d} 진료 대기 순서`} badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack}>
+      <BoardShell title={previewVariant() ? `${d} 교수님 진료` : `${d} 진료 대기 순서`} big={!!previewVariant()} badge={consultRoomLabel(doctorPrefs, d)} onBack={onBack}>
         <ConsultBoardSection doctor={d} patients={patients} settings={settings} plain roomLabel={consultRoomLabel(doctorPrefs, d)} />
       </BoardShell>
     );
