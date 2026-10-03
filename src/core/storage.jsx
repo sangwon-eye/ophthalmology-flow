@@ -118,6 +118,10 @@ export function useArchivedPatients(date, live = []) {
   return { isArchived, list: [...merged.values()], loading: isArchived && (!ready || state.loading), error: ready && state.error };
 }
 
+// 다른 컴퓨터와 동시에 저장해 부딪혔을 때: 아주 잠깐 무작위로 기다렸다가 다시 (여러 대가 같은 순간에 다시 부딪히지 않게)
+const MAX_CONFLICT_RETRY = 15;
+const conflictPause = (attempt) => new Promise(r => setTimeout(r, 20 + Math.random() * 60 * Math.min(attempt + 1, 5)));
+
 // 끝내 저장하지 못하면 화면에 알립니다 (ui/safety.jsx 의 빨간 띠). 접속 비밀번호 화면(401)으로 바뀌는 경우는 빼고
 function reportSaveFailure(key, e) {
   if (e?.status === 401) return;
@@ -145,7 +149,7 @@ export function useSharedStore(storageKey, loader, initial) {
           try {
             await saveKey(storageKey, next, meta.version);
           } catch (e) {
-            if (e?.conflict && attempt < 5) continue;
+            if (e?.conflict && attempt < MAX_CONFLICT_RETRY) { await conflictPause(attempt); continue; }
             throw e;
           }
           if (pending.current === 1) setValue(next);
@@ -186,7 +190,7 @@ export function useSharedStore(storageKey, loader, initial) {
           try {
             await window.storage.setEntries(storageKey, [{ id, prev, next }]);
           } catch (e) {
-            if (e?.conflict && attempt < 5) continue;
+            if (e?.conflict && attempt < MAX_CONFLICT_RETRY) { await conflictPause(attempt); continue; }
             throw e;
           }
           if (pending.current === 1) setValue(v => { const out = { ...(v || {}) }; if (next === null) delete out[id]; else out[id] = next; return out; });

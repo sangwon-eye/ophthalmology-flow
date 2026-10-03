@@ -34,12 +34,13 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   // 진료실 요청 처리. 여러 가지를 함께 할 수 있습니다: 검사 추가, 시력/안압 다시, 예진 추가
   const finishRequest = (p, testIds = [], detail = {}, { vision = false, triage = false } = {}) => {
     const pk = patientKey(p);
-    const before = { treatRequest: p.treatRequest, assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, extraTriage: p.extraTriage, triageDone: p.triageDone, triageAt: p.triageAt, orders: p.orders };
+    const before = { measureOk: p.measureOk ?? null, vaOk: p.vaOk ?? null, nctOk: p.nctOk ?? null, treatRequest: p.treatRequest, assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, extraTriage: p.extraTriage, triageDone: p.triageDone, triageAt: p.triageAt, orders: p.orders };
     patchPatient(mutatePatients, pk, x => {
       const assigned = { ...x.assigned }, done = { ...x.done }, doneAt = { ...x.doneAt }, nd = { ...(x.detail || {}) };
       testIds.forEach(id => { assigned[id] = true; done[id] = false; if (detail?.[id]) nd[id] = detail[id]; });
       if (vision) { done[VISION_KEY] = false; doneAt[VISION_KEY] = null; }
       return {
+        ...(vision ? { measureOk: null, vaOk: null, nctOk: null } : {}),
         treatRequest: null, assigned, done, doneAt, detail: nd, orders: clearOrders(x, testIds),
         ...(triage ? { extraTriage: true, triageDone: false, triageAt: null } : {}),
       };

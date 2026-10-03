@@ -253,7 +253,9 @@ export default function App() {
   const today = todayISO();
   // 1차 진료 설명 완료를 기다리는 2차 진료는 관리자·전체 명단에서만 보입니다.
   const patientsToday = patients.filter(p => p.date === today && !p.linkWaiting);
-  const main = <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} patients={patientsToday} doctors={doctors} doctorPrefs={doctorPrefs} />;
+  // 설정에서 교수님을 지우거나 이름을 바꿔도 오늘 명단에 남은 그 교수님 환자는 진료실에서 고를 수 있게
+  const doctorsToday = [...new Set([...doctors, ...patients.filter(p => p.date === today).map(p => p.doctor).filter(Boolean)])];
+  const main = <RoleSelect settings={settings} onSelect={selectRole} onSetToday={setToday} patients={patientsToday} doctors={doctorsToday} doctorPrefs={doctorPrefs} />;
   if (!role) return main;
   // 기억해 둔 화면으로 다시 열 때: 서버에서 처음 받을 때까지 기다림 (설정이 오기 전에는 검사실 이름 등을 모름)
   if (!lastSync) {
@@ -299,7 +301,7 @@ export default function App() {
     return (
       <ConsultView
         patients={patientsToday}
-        doctors={doctors}
+        doctors={doctorsToday}
         doctorPrefs={doctorPrefs}
         settings={settings}
         history={history}

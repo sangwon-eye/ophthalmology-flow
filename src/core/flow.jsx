@@ -303,6 +303,10 @@ export function setNoDilateTests(v) { NO_DILATE_TESTS = v; }
 export function dilationBlockers(p) {
   return NO_DILATE_TESTS.filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
 }
+// 시력/안압을 다시 재도록 시력방으로 되돌림 (측정 완료 표시도 지워야 시력방 화면이 저절로 다시 완료로 넘기지 않음)
+export function revisionPatch(x) {
+  return { done: { ...x.done, [VISION_KEY]: false }, doneAt: { ...(x.doneAt || {}), [VISION_KEY]: null }, measureOk: null, vaOk: null, nctOk: null };
+}
 export function visionComplete(p) {
   return !!p.done?.[VISION_KEY] && VISION_TEST_IDS.every(id => !p.assigned?.[id] || !!p.done?.[id]);
 }
@@ -612,7 +616,9 @@ export function saveFollowup(prev, id, doctor, value) {
   if (old.doctor && !byDoctor[old.doctor]) { const { byDoctor: ignored, ...legacy } = old; byDoctor[old.doctor] = legacy; }
   const next = { ...value, doctor };
   if (doctor) byDoctor[doctor] = next;
-  return { ...prev, [id]: { ...next, name: value.name || old.name, byDoctor } };
+  // 다른 교수님의 'FU 나중에' 표시는 남김 (그 교수님 FU는 아직 정해지지 않았으므로)
+  const keepLater = old.fuLater && doctor && old.fuLater.doctor && old.fuLater.doctor !== doctor ? { fuLater: old.fuLater } : {};
+  return { ...prev, [id]: { ...next, name: value.name || old.name, byDoctor, ...keepLater } };
 }
 // 바빠서 다음 내원 검사를 못 정하고 보낸 환자: FU 기록에 '나중에 지정' 표시만 남깁니다 (기존 지정은 그대로).
 // FU 지정 관리에서 지정해 저장하면 saveFollowup 이 이 표시를 지웁니다.

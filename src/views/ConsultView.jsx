@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, VISION_KEY, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -362,7 +362,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const at = Date.now();
     setSendFor(null);
     const sendNote = note ? { text: note, from: doctor, at } : null;
-    const before = { done: p.done, doneAt: p.doneAt, assigned: p.assigned, detail: p.detail, queueKey: p.queueKey, calledRoom: p.calledRoom, consultHold: p.consultHold, sendNote: p.sendNote, treatRequest: p.treatRequest };
+    const before = { measureOk: p.measureOk ?? null, vaOk: p.vaOk ?? null, nctOk: p.nctOk ?? null, done: p.done, doneAt: p.doneAt, assigned: p.assigned, detail: p.detail, queueKey: p.queueKey, calledRoom: p.calledRoom, consultHold: p.consultHold, sendNote: p.sendNote, treatRequest: p.treatRequest };
     const undo = () => patch(pk, () => before);
     if (dest === 'exam') {
       const ids = allTests.filter(t => sel[t.id]).map(t => t.id);
@@ -371,7 +371,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       return;
     }
     patch(pk, x => (dest === 'vision'
-      ? { calledRoom: null, consultHold: true, sendNote, done: { ...x.done, [VISION_KEY]: false }, doneAt: { ...x.doneAt, [VISION_KEY]: null } }
+      ? { calledRoom: null, consultHold: true, sendNote, ...revisionPatch(x) }
       : { calledRoom: null, consultHold: true, sendNote, treatRequest: { at, from: doctor } }));
     showToast(`${p.name} ${dest === 'vision' ? '시력/안압 검사실' : '처치실'}로 보냈습니다`, undo);
   };
