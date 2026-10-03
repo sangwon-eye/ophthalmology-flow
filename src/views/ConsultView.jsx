@@ -179,10 +179,11 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const doctor = selectedDoctor;
 
   // 되돌릴 때, 진료실이 비어 있으면 다시 진료 중으로, 아니면 진료 대기 맨 앞으로
-  const backToRoom = (pk, extra = () => ({})) => mutatePatients(prev => {
+  // only: 서버의 최신 기록이 아직 이 버튼이 바꾼 그대로일 때만 (그사이 다른 PC가 다른 일을 했으면 되돌리지 않음)
+  const backToRoom = (pk, extra = () => ({}), only = () => true) => mutatePatients(prev => {
     const someoneIn = prev.some(x => patientKey(x) !== pk && x.doctor === doctor && inConsult(x));
     // 그사이 다른 PC가 설명 완료(귀가)까지 했으면 되돌리지 않음
-    return prev.map(x => (patientKey(x) === pk && !x.consultDone ? { ...x, ...extra(x), seen: false, seenAt: null, calledRoom: someoneIn ? null : doctor } : x));
+    return prev.map(x => (patientKey(x) === pk && !x.consultDone && only(x) ? { ...x, ...extra(x), seen: false, seenAt: null, calledRoom: someoneIn ? null : doctor } : x));
   });
 
   // 진료 호출: 서버의 최신 명단으로 다시 확인 (다른 PC가 1~2초 사이에 다른 환자를 먼저 불렀거나, 이 환자를 다른 곳으로 보냈으면 부르지 않음)
@@ -207,29 +208,40 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const undoFinishConsult = (p) => {
     const pk = patientKey(p);
     const someoneIn = allPatients.some(x => patientKey(x) !== pk && x.doctor === doctor && inConsult(x));
-    backToRoom(pk, x => unreleaseRedo(x));
-    showToast(`${p.name} 진료 완료 취소, ${someoneIn ? '진료 대기로' : '다시 진료 중으로'}`, () => patch(pk, x => ({ seen: true, seenAt: p.seenAt || Date.now(), calledRoom: null, ...releaseRedo(x) })));
+    // 아직 설명 대기일 때만 (그사이 다른 PC가 다시 진료로 보냈으면 그대로)
+    backToRoom(pk, x => unreleaseRedo(x), x => !!x.seen);
+    showToast(`${p.name} 진료 완료 취소, ${someoneIn ? '진료 대기로' : '다시 진료 중으로'}`, () => patch(pk, x => (x.seen || x.consultDone ? {}
+      : { seen: true, seenAt: p.seenAt || Date.now(), calledRoom: null, ...releaseRedo(x) })));
   };
 
   const finishConsult = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
-    patch(pk, x => ({ seen: true, seenAt: at, calledRoom: null, ...releaseRedo(x) }));
-    showToast(`${p.name} 진료 완료, 설명 대기로`, () => backToRoom(pk, x => unreleaseRedo(x)));
+    // 다른 PC가 먼저 진료 완료했으면 그대로 (설명 대기 순서 유지), 되돌리기도 이 버튼으로 바뀐 경우에만
+    patch(pk, x => (x.seen || x.consultDone ? {} : { seen: true, seenAt: at, calledRoom: null, ...releaseRedo(x) }));
+    showToast(`${p.name} 진료 완료, 설명 대기로`, () => backToRoom(pk, x => unreleaseRedo(x), x => x.seenAt === at));
   };
 
   // 다시 진료 취소: 원래 있던 곳으로 (설명 대기에서 보냈으면 설명 대기, 진료 중에 보냈으면 진료 대기 맨 앞)
-  const cancelRedo = (p) => {
+  const cancelRedo = async (p) => {
     const pk = patientKey(p);
+    const at = Date.now();
     const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'explainedEarly', 'cr', 'dilateOverride', 'drops', 'dropsExtra', 'dropsBefore', 'procOrderedAt'];
     const before = Object.fromEntries(keys.map(k => [k, p[k]]));
     // 취소하면서 시작한 처치(설명 대기에서 보냈던 경우)는 되돌릴 때 그 처치만 다시 빼기 (다른 처치 기록은 그대로)
     const added = new Set((p.redo?.prev?.seen ? (p.redo?.pending || []) : []).map(i => i.uid));
-    patch(pk, x => cancelRedoPatch(x));
-    showToast(`${p.name} 다시 진료 취소, ${p.redo?.prev?.seen ? '설명 대기로' : '진료 대기로'}`, () => patch(pk, x => ({ ...before, procedures: (x.procedures || []).filter(i => !added.has(i.uid)) })));
+    // 서버의 최신 기록으로 다시 확인: 그사이 진료 호출됐거나 다른 PC가 먼저 취소했으면 그대로
+    const next = await patch(pk, x => (redoActive(x) && !x.calledRoom ? cancelRedoPatch(x, at) : {})).catch(() => null);
+    if (!Array.isArray(next)) return; // 저장 실패: 위쪽 빨간 띠로 안내
+    if (next.find(x => patientKey(x) === pk)?.redo?.cancelledAt !== at) {
+      showToast(`다시 진료 취소 안 됨 · ${p.name} 환자는 이미 다른 곳에서 처리되었습니다`);
+      return;
+    }
+    showToast(`${p.name} 다시 진료 취소, ${p.redo?.prev?.seen ? '설명 대기로' : '진료 대기로'}`,
+      () => patch(pk, x => (x.redo?.cancelledAt === at ? { ...before, procedures: (x.procedures || []).filter(i => !added.has(i.uid)) } : {})));
   };
 
-  const orderProcedures = (chosen, redoKind) => {
+  const orderProcedures = async (chosen, redoKind) => {
     const p = procFor;
     const pk = patientKey(p);
     const at = Date.now();
@@ -238,30 +250,57 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       uid: newId('pr'), procId: c.id, name: c.name, performer: c.performer, note: c.note || '', done: false, doneAt: null, orderedAt: at,
       ...(c.eye ? { eye: c.eye } : {}), ...(c.dilate ? { dilate: true } : {}),
     }));
+    // 설명 대기 중에 보낸 처치(진료 후 외래 간호사 입력): 설명 대기 순서는 그대로 두고 처치만 추가
+    const already = !!p.seen;
+    // 서버의 최신 기록으로 다시 확인: 그사이 다른 PC가 설명 완료(귀가)했거나 다른 곳으로 보냈으면 넣지 않음
+    // (귀가한 환자에게 넣은 처치는 처치실·설명 대기 어디에도 보이지 않아 빠지게 됨)
+    const changed = (x) => !x || x.consultDone || (already ? !x.seen : redoActive(x));
+    const notApplied = (next, ok) => {
+      if (!Array.isArray(next)) return true; // 저장 실패: 위쪽 빨간 띠로 안내
+      const rec = next.find(x => patientKey(x) === pk);
+      if (rec && ok(rec)) return false;
+      showToast(`처치 지정 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 설명 완료(귀가)되었습니다' : '이미 다른 곳에서 처리되었습니다'}`);
+      return true;
+    };
     // CR·산동 후 다시 진료: 진료실 'CR·산동 점안' 칸으로, 같이 고른 처치는 다시 진료가 끝난 뒤 시작. 점안이 끝나면 진료 대기 맨 앞
     if (redoKind) {
       const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'dropsBefore', 'drops', 'dropsExtra', 'cr', 'dilateOverride', 'queueKey'];
       const before = Object.fromEntries(keys.map(k => [k, p[k]]));
-      mutatePatients(prev => {
+      const next = await mutatePatients(prev => {
+        const cur = prev.find(x => patientKey(x) === pk);
+        if (changed(cur)) return prev;
         const others = prev.filter(x => patientKey(x) !== pk && x.date === p.date && x.doctor === p.doctor && !x.consultDone && !x.seen && typeof x.queueKey === 'number');
         const frontKey = others.length ? Math.min(...others.map(x => x.queueKey)) - 0.001 : undefined;
-        return prev.map(x => (patientKey(x) === pk ? { ...x, ...redoPatch(x, redoKind, { at, from: doctor, pending: items, frontKey }) } : x));
-      });
-      showToast(`${p.name} ${REDO_SHORT[redoKind]}: 진료실 'CR·산동 점안' 칸으로`, () => patch(pk, () => before));
+        return prev.map(x => (x === cur ? { ...x, ...redoPatch(x, redoKind, { at, from: doctor, pending: items, frontKey }) } : x));
+      }).catch(() => null);
+      if (notApplied(next, rec => rec.redo?.at === at)) return;
+      // 되돌리기: 아직 이 다시 진료 그대로일 때만
+      showToast(`${p.name} ${REDO_SHORT[redoKind]}: 진료실 'CR·산동 점안' 칸으로`, () => patch(pk, x => (x.redo?.at === at && !x.redo.cancelledAt && !x.consultDone ? before : {})));
       return;
     }
-    // 설명 대기 중에 보낸 처치(진료 후 외래 간호사 입력): 설명 대기 순서는 그대로 두고 처치만 추가
-    const already = !!p.seen;
     // '산동 필요' 처치(예: YAG)는 산동 예정을 켬 (이미 점안했으면 그 시각 그대로)
-    patch(pk, x => {
-      const r = releaseRedo(x);
-      // 설명 대기에서 넣은 처치는 취소해도 설명 대기에 남도록 표시, 처치 때문에 켠 산동도 표시
-      const marked = markDilateSet(x, items.map(i => (already ? { ...i, fromExplain: true } : i)));
-      return { seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, ...r, ...procDilatePatch(x, items), procedures: [...(r.procedures || x.procedures || []), ...marked] };
-    });
+    const next = await mutatePatients(prev => {
+      const cur = prev.find(x => patientKey(x) === pk);
+      if (changed(cur)) return prev;
+      return prev.map(x => {
+        if (x !== cur) return x;
+        const r = releaseRedo(x);
+        // 설명 대기에서 넣은 처치는 취소해도 설명 대기에 남도록 표시, 처치 때문에 켠 산동도 표시
+        const marked = markDilateSet(x, items.map(i => (already ? { ...i, fromExplain: true } : i)));
+        return { ...x, seen: true, seenAt: x.seen ? x.seenAt : at, calledRoom: null, procOrderedAt: at, ...r, ...procDilatePatch(x, items), procedures: [...(r.procedures || x.procedures || []), ...marked] };
+      });
+    }).catch(() => null);
+    if (notApplied(next, rec => (rec.procedures || []).some(i => i.orderedAt === at))) return;
     const where = items.some(i => i.performer === 'prof') ? '설명 대기에서 교수님 처치' : '처치실로';
-    const removeItems = x => ({ procedures: (x.procedures || []).filter(i => i.orderedAt !== at), dilateOverride: p.dilateOverride });
-    showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems)));
+    // 되돌리기: 이번에 넣은 처치만 빼고, 이 처치 때문에 켠 산동은 아직 점안 전이면 원래대로
+    const removeItems = x => {
+      const setBy = (x.procedures || []).find(i => i.orderedAt === at && i.dilateSet);
+      return {
+        procedures: (x.procedures || []).filter(i => i.orderedAt !== at),
+        ...(setBy && !(x.drops || []).some(Boolean) ? { dilateOverride: typeof setBy.dilateWas === 'boolean' ? setBy.dilateWas : undefined } : {}),
+      };
+    };
+    showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems, x => x.procOrderedAt === at)));
   };
 
   const finishProfProcedure = (p) => {
@@ -328,30 +367,57 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     else if (later) updateFu(p.id, prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
     else updateFu(p.id, prev => saveFollowup(prev, p.id, fuDoctor, fuValue));
     const restoreFu = () => { if (noFu) updateFu(p.id, () => (savedFu ? { [p.id]: savedFu } : {})); };
-    if (asEarly) {
-      showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : noFu ? ' (FU 없음 · 회송)' : ''}`, () => {
-        patch(pk, () => ({ explainedEarly: null, fuLater: false, referred: undefined }));
-        if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id, p.doctor));
-        restoreFu();
-      });
-      return;
-    }
-    const undoDone = () => {
-      mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false, referred: undefined } : x)), pk));
+    // 되돌리기: 서버 기록이 아직 이 설명 완료 그대로일 때만 (그사이 귀가 처리 등 다른 일이 있었으면 그대로 두고 FU도 건드리지 않음)
+    // mine: 아직 이 버튼이 바꾼 그대로인지, reverted: 저장된 결과가 되돌려진 상태인지 (그때만 FU도 되돌림)
+    const undoWhen = (mine, apply, reverted) => mutatePatients(prev => {
+      const cur = prev.find(x => patientKey(x) === pk);
+      return cur && mine(cur) ? apply(prev, cur) : prev;
+    }).then(list => {
+      const r = Array.isArray(list) ? list.find(x => patientKey(x) === pk) : null;
+      if (!r || !reverted(r)) return; // 되돌리지 못함 (다른 PC가 그사이 바꿈)
       if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id, p.doctor));
       restoreFu();
-    };
+    }, () => {});
+    if (asEarly) {
+      showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : noFu ? ' (FU 없음 · 회송)' : ''}`, () => undoWhen(
+        x => x.explainedEarly === at && !x.consultDone,
+        (prev, cur) => prev.map(x => (x === cur ? { ...x, explainedEarly: null, fuLater: false, referred: undefined } : x)),
+        r => !r.explainedEarly && !r.consultDone,
+      ));
+      return;
+    }
+    const undoDone = () => undoWhen(
+      x => x.consultDone && x.consultDoneAt === at,
+      (prev, cur) => deactivateLinked(prev.map(x => (x === cur ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false, referred: undefined } : x)), pk),
+      r => !r.consultDone,
+    );
     const nextVisit = linkDoctor || next.find(x => x.primaryKey === pk && x.linkActivatedAt === at)?.doctor;
     const via = settings.linkCheckAdded !== false && linkDoctor ? '처치실 추가 검사 확인 후 ' : '';
     showToast(`${p.name} 설명 완료${later ? ' · FU는 관리자 > FU 지정 관리에서 나중에' : noFu ? ' · FU 없음 (회송)' : ''}${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
   };
 
-  const goHome = (p) => {
+  // 귀가: 서버의 최신 기록으로 다시 확인 (그사이 다른 PC가 처치를 새로 보냈으면 귀가 처리하지 않음 — 처치가 빠지지 않게,
+  // 이미 귀가 처리됐으면 다시 하지 않음). 되돌리기도 이 버튼의 귀가일 때만
+  const goHome = async (p) => {
     const pk = patientKey(p);
     const at = Date.now();
-    mutatePatients(prev => activateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at } : x)), pk, settings, at));
-    const nextVisit = allPatients.find(x => x.primaryKey === pk && x.linkWaiting)?.doctor;
-    showToast(`${p.name} 귀가${nextVisit ? `, ${nextVisit} 2차 진료로` : ''}`, () => mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null } : x)), pk)));
+    const next = await mutatePatients(prev => {
+      const cur = prev.find(x => patientKey(x) === pk);
+      if (!cur || cur.consultDone || !cur.explainedEarly || pendingProcedures(cur).length) return prev;
+      return activateLinked(prev.map(x => (x === cur ? { ...x, consultDone: true, consultDoneAt: at } : x)), pk, settings, at);
+    }).catch(() => null);
+    if (!Array.isArray(next)) return; // 저장 실패: 위쪽 빨간 띠로 안내
+    const rec = next.find(x => patientKey(x) === pk);
+    if (rec?.consultDoneAt !== at) {
+      showToast(`귀가 처리 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 귀가 처리되었습니다' : rec && pendingProcedures(rec).length ? '처치가 새로 들어와 있습니다' : '이미 다른 곳에서 처리되었습니다'}`);
+      return;
+    }
+    const nextVisit = next.find(x => x.primaryKey === pk && x.linkActivatedAt === at)?.doctor;
+    showToast(`${p.name} 귀가${nextVisit ? `, ${nextVisit} 2차 진료로` : ''}`, () => mutatePatients(prev => {
+      const cur = prev.find(x => patientKey(x) === pk);
+      if (!cur || cur.consultDoneAt !== at) return prev;
+      return deactivateLinked(prev.map(x => (x === cur ? { ...x, consultDone: false, consultDoneAt: null } : x)), pk);
+    }));
   };
 
   const confirmExtra = (sel, detail) => {
