@@ -31,3 +31,6 @@ node tests/run.mjs r29 hx     # 파일 이름에 r29·hx 가 들어간 것만
 - `tester(page)` 는 주소를 열 때마다 '마지막 화면 기억'을 지워 메인 화면에서 시작합니다.
   기억 기능을 확인할 때만 `tester(page, { keepRole: true })`.
 - 전체 실행을 두 개 동시에 돌리지 마세요 (같은 포트를 씀). 하나만 따로 돌릴 때는 `OPH_TEST_PORT=3207 node tests/run.mjs r66`.
+- 동시 사용 시험: `node tests/chaos.mjs` (기본 5분). 시력방 2·검사실 2·처치실·진료실 4 화면을 동시에 띄워 업무 버튼을 무작위로 누르고
+  QR 접수도 계속 들어오게 한 뒤, 흐름이 깨진 환자(어느 화면에도 없음·진료 중 겹침 등)·화면 오류·저장 실패가 없는지 확인합니다.
+  `SECONDS_RUN=600 SEED=7 node tests/chaos.mjs` 처럼 시간·무작위 순서를 바꿀 수 있습니다. 전체 실행(run.mjs)과 동시에 돌리지 마세요.

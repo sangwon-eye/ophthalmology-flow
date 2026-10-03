@@ -69,7 +69,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const at = Date.now();
     setTriageFor(null);
     const chosen = allTests.filter(t => sel[t.id]);
-    patchPatient(mutatePatients, pk, x => {
+    const saving = patchPatient(mutatePatients, pk, x => {
       if (!needsTriageAssign(x)) return {};
       const assigned = { ...x.assigned };
       const done = { ...x.done };
@@ -84,13 +84,22 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     });
     const pending = chosen.filter(t => !p.done?.[t.id]);
     const withTriage = assignAtTreat(p) && triageRequired;
-    showToast(`${p.name} ${assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'} 완료, ${pending.length ? (withTriage ? '검사 후 처치실 예진으로' : '검사 후 진료 대기로') : (withTriage ? '처치 대기에서 예진' : '진료 대기로')}`, () => patchPatient(mutatePatients, pk, x => (!activeVf(x) && !x.triageDone ? { triageAssigned: false, triageAssignedAt: null, triageRequired: p.triageRequired } : {})));
+    // 다른 PC가 먼저 검사 지정을 했으면 바꾸지 않고 안내만
+    const applied = (next) => Array.isArray(next) && next.find(x => patientKey(x) === pk)?.triageAssignedAt === at;
+    const notice = (next) => { if (Array.isArray(next) && !applied(next)) showToast(`${p.name} 환자는 이미 다른 곳에서 검사 지정되었습니다 · 바꾸지 않았습니다`); };
+    showToast(`${p.name} ${assignAtTreat(p) ? '검사 지정' : '추가 검사 확인'} 완료, ${pending.length ? (withTriage ? '검사 후 처치실 예진으로' : '검사 후 진료 대기로') : (withTriage ? '처치 대기에서 예진' : '진료 대기로')}`, () => patchPatient(mutatePatients, pk, x => (x.triageAssignedAt === at && !activeVf(x) && !x.triageDone ? { triageAssigned: false, triageAssignedAt: null, triageRequired: p.triageRequired } : {})));
+    saving.then(notice, () => {});
   };
 
   const finishTriage = (p) => {
     const at = Date.now();
-    patchPatient(mutatePatients, patientKey(p), x => needsTriageExam(x, settings) ? { triageDone: true, triageAt: at } : {});
-    showToast(p.name + ' 예진 완료, 진료 대기로', () => patchPatient(mutatePatients, patientKey(p), () => ({ triageDone: false, triageAt: null })));
+    const pk = patientKey(p);
+    // 다른 PC가 먼저 예진 완료했으면 바꾸지 않고 안내만 (되돌리기도 그 예진 완료를 지우지 않게)
+    patchPatient(mutatePatients, pk, x => needsTriageExam(x, settings) ? { triageDone: true, triageAt: at } : {}).then(next => {
+      if (!Array.isArray(next)) return;
+      if (next.find(x => patientKey(x) === pk)?.triageAt !== at) { showToast(`${p.name} 환자는 이미 예진 완료되었습니다`); return; }
+      showToast(p.name + ' 예진 완료, 진료 대기로', () => patchPatient(mutatePatients, pk, x => (x.triageAt === at ? { triageDone: false, triageAt: null } : {})));
+    }, () => {});
   };
 
   // 검사 준비 (예: FAG 동의서 · skin test): 시작 → 대기 시간 → 음성이면 검사실로, 양성이면 보류

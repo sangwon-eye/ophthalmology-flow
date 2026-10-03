@@ -181,7 +181,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   // 되돌릴 때, 진료실이 비어 있으면 다시 진료 중으로, 아니면 진료 대기 맨 앞으로
   const backToRoom = (pk, extra = () => ({})) => mutatePatients(prev => {
     const someoneIn = prev.some(x => patientKey(x) !== pk && x.doctor === doctor && inConsult(x));
-    return prev.map(x => (patientKey(x) === pk ? { ...x, ...extra(x), seen: false, seenAt: null, calledRoom: someoneIn ? null : doctor } : x));
+    // 그사이 다른 PC가 설명 완료(귀가)까지 했으면 되돌리지 않음
+    return prev.map(x => (patientKey(x) === pk && !x.consultDone ? { ...x, ...extra(x), seen: false, seenAt: null, calledRoom: someoneIn ? null : doctor } : x));
   });
 
   // 진료 호출: 서버의 최신 명단으로 다시 확인 (다른 PC가 1~2초 사이에 다른 환자를 먼저 불렀거나, 이 환자를 다른 곳으로 보냈으면 부르지 않음)
@@ -278,10 +279,6 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const pk = patientKey(p);
     const at = Date.now();
     setExplainFor(null);
-    // FU 없음(회송): 이 교수님 FU 지정과 'FU 나중에' 표시를 지움. 되돌리기용으로 지우기 전 기록을 보관
-    let savedFu;
-    if (noFu) updateFu(p.id, prev => { savedFu = prev[p.id]; return unmarkFollowupLater(deleteFollowup(prev, p.id, p.doctor), p.id, p.doctor); });
-    const restoreFu = () => { if (noFu) updateFu(p.id, () => (savedFu ? { [p.id]: savedFu } : {})); };
     const fuDoctor = dil?.doctor || p.doctor;
     const fuValue = noFu || later ? null : {
       ...sel,
@@ -294,10 +291,10 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       visitDate: p.date,
       updatedAt: at,
     };
-    if (noFu) { /* FU 저장 안 함 */ } else if (later) updateFu(p.id, prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
-    else updateFu(p.id, prev => saveFollowup(prev, p.id, fuDoctor, fuValue));
     // 이미 올라가 있는 다음 내원 명단(접수 전)에도 새 FU 적용
     const withFu = (list) => (fuValue ? applyFollowupToList(list, p.id, fuDoctor, fuValue, settings, p.date) : list);
+    // 'FU 나중에': 다음 명단의 그 교수님 기록에 'FU 미지정'
+    const markFuture = (x) => (later && x.id === p.id && x.doctor === p.doctor && x.date > p.date ? { ...x, fuMissing: true } : x);
     // 오늘 다른 교수 진료 추가: 그 교수님의 이전 정보(FU)를 붙여 2차 진료로 연결
     let extra = null;
     if (linkDoctor) {
@@ -305,15 +302,33 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       try { fu = await loadEntries('fu-designations', [p.id]); } catch { /* 이전 정보 없이 추가 */ }
       extra = buildPatient({ id: p.id, name: p.name, date: p.date, doctor: linkDoctor, reservation: '', firstVisit: false }, fu, settings);
     }
+    // 서버의 최신 명단으로 다시 확인: 다른 PC가 먼저 설명 완료했으면 아무것도 바꾸지 않음 (FU도 다시 저장하지 않음 — 먼저 정한 FU를 덮어쓰지 않게)
     // 처치가 아직 남아 있으면: 설명만 끝내고 처치 후 [귀가] 로 마무리 (2차 진료도 귀가 때 시작)
-    const current = allPatients.find(x => patientKey(x) === pk) || p;
-    if (pendingProcedures(current).length) {
-      mutatePatients(prev => {
-        let next = withFu(prev.map(x => (patientKey(x) === pk ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
-          : later && x.id === p.id && x.doctor === p.doctor && x.date > p.date ? { ...x, fuMissing: true } : x)));
-        if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
-        return next;
-      });
+    const next = await mutatePatients(prev => {
+      const cur = prev.find(x => patientKey(x) === pk);
+      if (!cur || cur.consultDone || cur.explainedEarly || !cur.seen) return prev;
+      const early = pendingProcedures(cur).length > 0;
+      let list = withFu(prev.map(x => (x !== cur ? markFuture(x) : early
+        ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
+        : { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined })));
+      if (extra) list = mergePatientList(list, [extra], doctorPrefs, settings).next;
+      return early ? list : activateLinked(list, pk, settings, at);
+    }).catch(() => null);
+    if (!Array.isArray(next)) return; // 저장 실패: 위쪽 빨간 띠로 안내
+    const rec = next.find(x => patientKey(x) === pk);
+    const asEarly = rec?.explainedEarly === at;
+    if (!asEarly && rec?.consultDoneAt !== at) {
+      showToast(`${p.name} 환자는 이미 다른 곳에서 설명 완료되었습니다 · 다시 저장하지 않았습니다`);
+      return;
+    }
+    // FU: 환자 기록이 들어간 뒤에만 저장
+    // FU 없음(회송): 이 교수님 FU 지정과 'FU 나중에' 표시를 지움. 되돌리기용으로 지우기 전 기록을 보관
+    let savedFu;
+    if (noFu) updateFu(p.id, prev => { savedFu = prev[p.id]; return unmarkFollowupLater(deleteFollowup(prev, p.id, p.doctor), p.id, p.doctor); });
+    else if (later) updateFu(p.id, prev => markFollowupLater(prev, p.id, { doctor: p.doctor, name: p.name, date: p.date, at }));
+    else updateFu(p.id, prev => saveFollowup(prev, p.id, fuDoctor, fuValue));
+    const restoreFu = () => { if (noFu) updateFu(p.id, () => (savedFu ? { [p.id]: savedFu } : {})); };
+    if (asEarly) {
       showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : noFu ? ' (FU 없음 · 회송)' : ''}`, () => {
         patch(pk, () => ({ explainedEarly: null, fuLater: false, referred: undefined }));
         if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id, p.doctor));
@@ -326,13 +341,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id, p.doctor));
       restoreFu();
     };
-    mutatePatients(prev => {
-      let next = withFu(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined }
-        : later && x.id === p.id && x.doctor === p.doctor && x.date > p.date ? { ...x, fuMissing: true } : x)));
-      if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
-      return activateLinked(next, pk, settings, at);
-    });
-    const nextVisit = linkDoctor || allPatients.find(x => x.primaryKey === pk && x.linkWaiting)?.doctor;
+    const nextVisit = linkDoctor || next.find(x => x.primaryKey === pk && x.linkActivatedAt === at)?.doctor;
     const via = settings.linkCheckAdded !== false && linkDoctor ? '처치실 추가 검사 확인 후 ' : '';
     showToast(`${p.name} 설명 완료${later ? ' · FU는 관리자 > FU 지정 관리에서 나중에' : noFu ? ' · FU 없음 (회송)' : ''}${nextVisit ? `, ${via}${nextVisit} 2차 진료로` : ''}`, undoDone);
   };

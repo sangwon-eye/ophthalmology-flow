@@ -548,8 +548,9 @@ export function restoreKeys(x, before, ids) {
   });
   return out;
 }
+// 저장이 끝나면 서버에 저장된 명단으로 끝나는 약속(Promise)을 돌려줌 (실제로 반영됐는지 확인할 때)
 export function patchPatient(mutatePatients, pk, fn) {
-  mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, ...fn(x) } : x)));
+  return mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, ...fn(x) } : x)));
 }
 // 추가 점안 기록 / 마지막 추가 점안만 취소 (처음 점안 기록 drops 는 건드리지 않음)
 export function addExtraDrop(mutatePatients, pk) {
