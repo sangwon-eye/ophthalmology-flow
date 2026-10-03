@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { REDO_LABEL, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { REDO_LABEL, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -1324,6 +1324,7 @@ export function DilationBadge({ st, large = false }) {
   }
   // 기다리는 중에는 점안 시각(버튼)만 보여주고 남은 시간은 표시하지 않음
   if (st.status === 'waiting') return null;
+  if (st.status === 'due') return null; // 확인 버튼이 대신 보임
   return <span className={`${sz} rounded-full bg-green-100 text-green-800`}>산동 완료</span>;
 }
 
@@ -1381,7 +1382,7 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
   if (crStatusOnly && cr && !togglesOnly) {
     return (
       <span title="CR 점안은 진료실 화면에서 기록합니다" className={`${large ? 'text-sm px-3 py-1.5' : 'text-xs px-2.5 py-1'} rounded-full border bg-rose-50 border-rose-300 text-rose-700`}>
-        CR {st.given}/{st.total}{st.status === 'ready' ? ' · 완료' : ' · 진료실'}
+        CR {st.given}/{st.total}{st.status === 'ready' ? ' · 완료' : st.status === 'due' ? ' · 확인 대기' : ' · 진료실'}
       </span>
     );
   }
@@ -1432,8 +1433,9 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
         // 산동 완료: 따로 칸을 두지 않고 마지막 점안 버튼이 초록 '산동 완료 11:18' (CR은 '4회 … · 완료')
         const doneHere = st.status === 'ready' && i === st.total - 1;
         const isArmed = armed === i && !!t;
+        const undoOk = doneHere && st.ok; // 확인으로 완료된 것: 두 번 누르면 확인만 취소 (점안 기록은 그대로)
         const base = single ? (cr ? `CR ${i + 1}회` : `산동${eyeText}`) : (cr ? `${i + 1}회 점안` : '점안');
-        const label = isArmed ? '누르면 취소'
+        const label = isArmed ? (undoOk ? '누르면 확인 취소' : '누르면 취소')
           : doneHere && !cr ? `산동 완료${eyeText}${shown ? ` ${fmtClock(shown)}` : ''}${extraLast ? ` · ${st.extra.length + 1}회` : ''}`
             : `${base}${shown ? ` ${fmtClock(shown)}` : ''}${extraLast ? ` · ${st.extra.length + 1}회` : ''}${doneHere ? ' · 완료' : ''}`;
         return (
@@ -1444,9 +1446,10 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
               if (!t) { toggleDrop(mutatePatients, pk, i, true); return; }
               if (!isArmed) { setArmed(i); return; }
               setArmed(-1);
+              if (undoOk) { const okAt = p.dilateOkAt; patchPatient(mutatePatients, pk, x => (x.dilateOkAt === okAt ? { dilateOkAt: null } : {})); return; }
               if (extraLast) undoExtraDrop(mutatePatients, pk, extraLast); else toggleDrop(mutatePatients, pk, i, false);
             }}
-            title={extraLast
+            title={undoOk ? `산동 확인 ${fmtClock(p.dilateOkAt)} · 두 번 누르면 확인 취소` : extraLast
               ? `점안 ${[t, ...st.extra].map(fmtClock).join(', ')} · 두 번 누르면 ${fmtClock(extraLast)} 추가 점안 취소`
               : t ? '두 번 누르면 기록 취소' : '누르면 지금 시각으로 기록'}
             className={`${sz} rounded-lg border ${isArmed
@@ -1460,8 +1463,16 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
         );
       })}
       {st.need && !togglesOnly && !blocked && !(showDrops && st.status === 'ready') && <DilationBadge st={st} large={large} />}
+      {/* 산동 확인(10-03): 시간 전이면 작은 [산동 확인 · 완료](일찍 완료), CR·다시 진료는 시간이 지나면 노란 [N분 지남 · 확인] (눌러야 진료 대기로) */}
+      {showDrops && st.need && !blocked && (st.status === 'waiting' || st.status === 'due') && (
+        <button type="button" onClick={() => { const at = Date.now(); patchPatient(mutatePatients, pk, x => confirmDilationPatch(x, prefs, waitMin, st.last, at)); }}
+          title={st.status === 'due' ? '동공을 확인했으면 눌러 주세요 (누르면 진료 대기로)' : '산동이 이미 충분하면 시간 전이라도 지금 완료'}
+          className={st.status === 'due' ? `${sz} rounded-lg border bg-amber-300 border-amber-400 text-amber-950 font-semibold` : 'text-xs text-green-700 underline'}>
+          {st.status === 'due' ? `${st.mins}분 지남 · ${cr ? 'CR' : '산동'} 확인` : `${cr ? 'CR' : '산동'} 확인 · 완료`}
+        </button>
+      )}
       {/* 산동 완료인데 덜 됐을 때: 한 번 더 점안 (CR 제외, 산동 금지 검사가 남아 있으면 숨김) */}
-      {showDrops && st.need && !cr && st.status === 'ready' && blockers.length === 0 && (
+      {showDrops && st.need && !cr && (st.status === 'ready' || st.status === 'due') && blockers.length === 0 && (
         <button type="button" onClick={() => addExtraDrop(mutatePatients, pk)} title="산동이 덜 됐으면 한 번 더 점안 (이 시각부터 다시 시간을 잽니다)"
           className="text-xs text-rose-700 underline">추가 점안</button>
       )}

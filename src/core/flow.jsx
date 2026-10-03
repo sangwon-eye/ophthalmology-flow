@@ -538,10 +538,22 @@ export function dilationState(p, prefs, waitMin, now = Date.now()) {
   const extra = !cr && given === total ? (p.dropsExtra || []).filter(Boolean) : [];
   const last = Math.max(0, ...drops.filter(Boolean), ...extra);
   const mins = last ? Math.floor((now - last) / 60000) : 0;
-  const base = { need: true, cr, total, drops, given, mins, extra };
+  // 산동 확인(10-03): 직원이 [산동 확인 · 완료]를 누른 시각 dilateOkAt. 마지막 점안 뒤에 누른 것만 유효
+  // (추가 점안·다시 진료로 새로 점안하면 다시 확인). 확인하면 시간 전이어도 완료
+  const ok = !!last && Number(p.dilateOkAt) >= last;
+  // 진료실 'CR·산동 점안' 칸(CR, CR·산동 후 다시 진료)은 시간이 지나도 확인해야 진료 대기로: 시간이 되면 'due'
+  const gate = !p.consultDone && !p.seen && (cr || redoActive(p));
+  const base = { need: true, cr, total, drops, given, mins, extra, last, ok, gate };
   if (given === 0) return { ...base, status: 'todo' };
   if (given < total) return { ...base, status: 'progress' };
-  return { ...base, status: mins >= (Number(waitMin) || 15) ? 'ready' : 'waiting' };
+  if (ok) return { ...base, status: 'ready' };
+  if (mins < (Number(waitMin) || 15)) return { ...base, status: 'waiting' };
+  return { ...base, status: gate ? 'due' : 'ready' };
+}
+// [산동 확인 · 완료]: 화면에 보이던 마지막 점안(last) 그대로일 때만 (그사이 추가 점안·취소가 있으면 안 함)
+export function confirmDilationPatch(x, prefs, waitMin, last, at) {
+  const st = dilationState(x, prefs, waitMin);
+  return st.need && st.given === st.total && st.last === last && !st.ok ? { dilateOkAt: at } : {};
 }
 // 되돌리기: 그 버튼이 바꾼 검사 칸만 원래대로 (그사이 다른 컴퓨터가 완료한 다른 검사·칸은 그대로 둠)
 // before: 누르기 전 { done, doneAt, assigned, detail, prep } 중 일부, ids: 그 버튼이 바꾼 검사 id

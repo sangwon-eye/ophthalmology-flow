@@ -159,11 +159,11 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const inRoom = mine.find(inConsult);
   // 안전망: 어떤 이유로든 '진료 중'이 두 명 이상이면 나머지도 보이게 (화면에서 사라지지 않도록)
   const extraInRoom = mine.filter(inConsult).filter(x => x !== inRoom);
-  // CR(진료실 간호사 담당)·점안 후 다시 진료: 점안이 끝날 때까지 'CR·산동 점안' 칸에 (시간이 지나면 저절로 진료 대기로)
+  // CR(진료실 간호사 담당)·점안 후 다시 진료: 점안이 끝날 때까지 'CR·산동 점안' 칸에 (시간이 되면 띵동 + 노란 [확인], 눌러야 진료 대기로)
   const [, setTick] = useState(0);
   useEffect(() => { const i = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(i); }, []);
   const dropsList = mine.filter(p => p.checkin && !inConsult(p) && dropsPending(p, doctorPrefs, waitMin)).sort(byQueue);
-  const dropsReady = mine.filter(p => p.checkin && !p.consultDone && !p.seen && (redoActive(p) || crActive(p, doctorPrefs)) && dilationState(p, doctorPrefs, waitMin).status === 'ready');
+  const dropsReady = mine.filter(p => p.checkin && !p.consultDone && !p.seen && (redoActive(p) || crActive(p, doctorPrefs)) && ['due', 'ready'].includes(dilationState(p, doctorPrefs, waitMin).status));
   // 띵동: 이 교수님 진료실에 진료 호출이 생기면 (진료실 앞 PC 등), CR·산동 점안 시간이 되면. 교수님을 바꾸면 기준만 다시 잡음
   useChime([...mine.filter(inConsult).map(patientKey), ...dropsReady.map(p => `drop:${patientKey(p)}`)], { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
   const waiting = mine.filter(p => consultWaiting(p, settings, doctorPrefs)).sort(byQueue);
