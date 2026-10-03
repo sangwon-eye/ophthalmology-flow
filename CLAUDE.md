@@ -60,6 +60,7 @@
   - 저장: 임시 파일 + fsync + 이름 바꾸기, 직전 저장본 `.prev`(1분마다). 시간별 사본 `data/backups-hourly/<날짜>/<키>-HH시.json`(명단·FU, 오늘·어제)
   - 읽다가 손상 발견 → `.prev` → 시간별 사본 → 하루 백업 순 자동 복구(손상본은 `.손상-시각`으로 보관, 버전은 지금 시각). 없으면 그 키만 500(`brokenKeys`, 덮어쓰지 않음). `/api/health`의 `problems`로 화면에 알림
   - `/api/client-error`: 화면 오류 기록(IP당 시간 30건)
+  - 큰 응답(명단·부분 조회, 16KB 이상)은 gzip 압축(`sendBig`, 같은 항목·버전은 한 번만 압축해 캐시) — 버튼 하나에 모든 PC가 명단을 다시 받으므로(600명 약 260KB → 15KB)
   - 이전 시력 `measure-history`는 환자번호 끝 두 자리로 **100개 파일**(`data/keys/measure-history/00~99.json`)
 - `src/core/flow.jsx` 진료 흐름 규칙·계산, `src/core/storage.jsx` 저장소·공유 상태 훅
 - `src/ui/common.jsx` 공용 카드·버튼·창, `src/views/*` 화면별(시력방·검사실=StationView, 진료실, 처치실, 관리자, 설정, 환자용, 메인)

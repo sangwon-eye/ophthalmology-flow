@@ -6,6 +6,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { ROOT, loadConfig, configuredPort, lanAddresses } from './scripts/common.js';
 
 const CONFIG = loadConfig();
@@ -353,6 +354,27 @@ function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(body));
 }
+// 큰 응답(명단·이전 기록 등)은 압축해서 보냄: 버튼 하나에 모든 PC가 다시 받으므로 바쁜 시간에 네트워크가 막히지 않게
+// (명단 600명 약 400KB → 수십 KB). 같은 항목·같은 버전은 한 번만 압축해 두고 여러 PC에 그대로 보냄
+const GZIP_MIN = 16 * 1024;
+const gzipCache = new Map(); // 항목 이름 → { version, buf }
+function sendBig(req, res, body, cacheKey, version) {
+  const text = JSON.stringify(body);
+  if (text.length < GZIP_MIN || !/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) {
+    res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+    res.end(text);
+    return;
+  }
+  let buf;
+  const cached = cacheKey ? gzipCache.get(cacheKey) : null;
+  if (cached && cached.version === version) buf = cached.buf;
+  else {
+    buf = zlib.gzipSync(text);
+    if (cacheKey) gzipCache.set(cacheKey, { version, buf });
+  }
+  res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+  res.end(buf);
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -575,7 +597,7 @@ async function handleApi(req, res, pathname) {
       const obj = sharded ? shardData(key, shardOf(id)) : parsedOf(key, item).obj;
       if (Object.prototype.hasOwnProperty.call(obj, id)) out[id] = obj[id];
     });
-    return sendJson(res, 200, { key, value: JSON.stringify(out), version });
+    return sendBig(req, res, { key, value: JSON.stringify(out), version });
   }
 
   // 환자별 기록을 환자 한 명 칸만 바꿔 저장합니다 (파일 전체를 주고받지 않도록).
@@ -627,7 +649,7 @@ async function handleApi(req, res, pathname) {
       if (have !== null && Number(have) === version) { res.writeHead(304, { 'Cache-Control': 'no-store' }); res.end(); return; }
       const all = {};
       SHARD_IDS.forEach(sh => Object.assign(all, shardData(key, sh)));
-      return sendJson(res, 200, { key, value: JSON.stringify(all), version });
+      return sendBig(req, res, { key, value: JSON.stringify(all), version });
     }
     let body;
     try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'bad body' }); }
@@ -658,7 +680,7 @@ async function handleApi(req, res, pathname) {
       res.end();
       return;
     }
-    return sendJson(res, 200, { key, value: item.value, version: item.version });
+    return sendBig(req, res, { key, value: item.value, version: item.version }, key, item.version);
   }
 
   if (req.method === 'PUT') {
