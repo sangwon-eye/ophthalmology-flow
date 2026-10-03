@@ -288,25 +288,25 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     if (pendingProcedures(current).length) {
       mutatePatients(prev => {
         let next = withFu(prev.map(x => (patientKey(x) === pk ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
-          : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x)));
+          : later && x.id === p.id && x.doctor === p.doctor && x.date > p.date ? { ...x, fuMissing: true } : x)));
         if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
         return next;
       });
       showToast(`${p.name} 설명 완료 · 처치 후 귀가${later ? ' (FU 나중에)' : noFu ? ' (FU 없음 · 회송)' : ''}`, () => {
         patch(pk, () => ({ explainedEarly: null, fuLater: false, referred: undefined }));
-        if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id));
+        if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id, p.doctor));
         restoreFu();
       });
       return;
     }
     const undoDone = () => {
       mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false, referred: undefined } : x)), pk));
-      if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id));
+      if (later) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id, p.doctor));
       restoreFu();
     };
     mutatePatients(prev => {
       let next = withFu(prev.map(x => (patientKey(x) === pk ? { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined }
-        : later && x.id === p.id && x.date > p.date ? { ...x, fuMissing: true } : x)));
+        : later && x.id === p.id && x.doctor === p.doctor && x.date > p.date ? { ...x, fuMissing: true } : x)));
       if (extra) next = mergePatientList(next, [extra], doctorPrefs, settings).next;
       return activateLinked(next, pk, settings, at);
     });
@@ -580,7 +580,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 {p.fuLater && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">FU 나중에</span>}
                 <UndoButton label="설명 완료 취소" onClick={() => {
                   mutatePatients(prev => deactivateLinked(prev.map(x => (patientKey(x) === patientKey(p) ? { ...x, consultDone: false, consultDoneAt: null, fuLater: false } : x)), patientKey(p)));
-                  if (p.fuLater) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id));
+                  if (p.fuLater) updateFu(p.id, prev => unmarkFollowupLater(prev, p.id, p.doctor));
                 }} />
               </RecentRow>
             ))}

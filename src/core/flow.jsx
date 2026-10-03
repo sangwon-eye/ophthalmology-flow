@@ -610,6 +610,24 @@ export function updateVf(p, key, action, at) {
 export function followupForDoctor(record, doctor) {
   return record?.byDoctor?.[doctor] || (!record?.doctor || record.doctor === doctor ? record : undefined);
 }
+// 'FU 나중에' 표시: 교수님별로 fuLaterBy { [교수]: { doctor, date, at } } (두 교수님이 같은 날 눌러도 둘 다 남음).
+// 예전 기록의 fuLater(한 칸)도 그대로 읽고, fuLater 에는 가장 최근 표시 하나를 같이 남겨 둠 (예전 형식과 호환)
+export function laterEntries(rec) {
+  const map = { ...(rec?.fuLaterBy || {}) };
+  const legacy = rec?.fuLater;
+  if (legacy && !map[legacy.doctor || '']) map[legacy.doctor || ''] = legacy;
+  return Object.values(map).filter(Boolean);
+}
+// 그 교수님의 'FU 나중에' 표시 (교수님을 모르는 예전 표시는 어느 교수님에게나 해당)
+export function laterFor(rec, doctor) {
+  return laterEntries(rec).find(e => !e.doctor || !doctor || e.doctor === doctor) || null;
+}
+function withLater(rec, entries) {
+  const { fuLater: ignoredL, fuLaterBy: ignoredB, ...rest } = rec;
+  if (!entries.length) return rest;
+  const latest = [...entries].sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+  return { ...rest, fuLaterBy: Object.fromEntries(entries.map(e => [e.doctor || '', e])), fuLater: latest };
+}
 export function saveFollowup(prev, id, doctor, value) {
   const old = prev[id] || {};
   const byDoctor = { ...old.byDoctor };
@@ -617,21 +635,23 @@ export function saveFollowup(prev, id, doctor, value) {
   const next = { ...value, doctor };
   if (doctor) byDoctor[doctor] = next;
   // 다른 교수님의 'FU 나중에' 표시는 남김 (그 교수님 FU는 아직 정해지지 않았으므로)
-  const keepLater = old.fuLater && doctor && old.fuLater.doctor && old.fuLater.doctor !== doctor ? { fuLater: old.fuLater } : {};
-  return { ...prev, [id]: { ...next, name: value.name || old.name, byDoctor, ...keepLater } };
+  const keep = doctor ? laterEntries(old).filter(e => e.doctor && e.doctor !== doctor) : [];
+  return { ...prev, [id]: withLater({ ...next, name: value.name || old.name, byDoctor }, keep) };
 }
 // 바빠서 다음 내원 검사를 못 정하고 보낸 환자: FU 기록에 '나중에 지정' 표시만 남깁니다 (기존 지정은 그대로).
 // FU 지정 관리에서 지정해 저장하면 saveFollowup 이 이 표시를 지웁니다.
 export function markFollowupLater(prev, id, { doctor, name, date, at }) {
   const old = prev[id] || {};
-  return { ...prev, [id]: { ...old, name: name || old.name, fuLater: { doctor, date, at } } };
+  const others = laterEntries(old).filter(e => (e.doctor || '') !== (doctor || ''));
+  return { ...prev, [id]: withLater({ ...old, name: name || old.name }, [...others, { doctor, date, at }]) };
 }
-// doctor 를 주면 그 교수님의 '나중에' 표시만 지움 (다른 교수님 것은 그대로)
+// doctor 를 주면 그 교수님의 '나중에' 표시만 지움 (다른 교수님 것은 그대로, 교수님을 모르는 예전 표시는 지움). 없으면 모두 지움
 export function unmarkFollowupLater(prev, id, doctor) {
-  if (!prev[id]?.fuLater) return prev;
-  if (doctor && prev[id].fuLater.doctor && prev[id].fuLater.doctor !== doctor) return prev;
-  const { fuLater, ...rest } = prev[id];
-  return { ...prev, [id]: rest };
+  const all = laterEntries(prev[id]);
+  if (!all.length) return prev;
+  const keep = doctor ? all.filter(e => e.doctor && e.doctor !== doctor) : [];
+  if (keep.length === all.length) return prev;
+  return { ...prev, [id]: withLater(prev[id], keep) };
 }
 
 // 한 교수님의 FU 지정만 지웁니다. 다른 교수님 기록이 남아 있으면 그중 가장 최근 것이 대표 기록이 됩니다.
@@ -644,15 +664,16 @@ export function deleteFollowup(prev, id, doctor) {
   const byDoctor = { ...old.byDoctor };
   if (old.doctor && !byDoctor[old.doctor]) { const { byDoctor: ignoredB, fuLater: ignoredL, name: ignoredN, ...legacy } = old; byDoctor[old.doctor] = legacy; }
   delete byDoctor[doctor];
-  const keepLater = old.fuLater && old.fuLater.doctor !== doctor ? old.fuLater : null;
+  const keepLater = laterEntries(old).filter(e => (e.doctor || '') !== doctor);
   const rest = Object.values(byDoctor);
   if (!rest.length) {
-    if (keepLater) next[id] = { name: old.name, fuLater: keepLater };
+    if (keepLater.length) next[id] = withLater({ name: old.name }, keepLater);
     else delete next[id];
     return next;
   }
   const latest = [...rest].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-  next[id] = { ...latest, name: old.name, byDoctor, ...(keepLater ? { fuLater: keepLater } : {}) };
+  const { fuLater: ignoredL, fuLaterBy: ignoredB, ...latestRest } = latest;
+  next[id] = withLater({ ...latestRest, name: old.name, byDoctor }, keepLater);
   return next;
 }
 export function fuVisitDate(fu) {
@@ -701,7 +722,7 @@ function followupFields(fu, settings) {
 }
 // FU를 저장하면 이미 올라가 있는 다음 내원 명단에도 바로 적용합니다 (명단을 미리 올려 둔 경우):
 // 같은 환자·같은 교수님·from 날짜 이후(같은 날 포함)·아직 접수 전인 기록의 검사 지정·산동·CR·진료 전 처치를 새 FU로.
-// 2차 진료로 이어진 기록은 두 교수님 계획이 합쳐져 있어 건드리지 않고, 'FU 미지정' 표시는 이 환자 기록 모두에서 지웁니다.
+// 2차 진료로 이어진 기록은 두 교수님 계획이 합쳐져 있어 건드리지 않고, 'FU 미지정' 표시는 이 환자의 그 교수님 기록에서 지웁니다.
 export function applyFollowupToList(list, id, doctor, fu, settings, from) {
   let changed = false;
   const next = list.map(x => {
@@ -713,7 +734,8 @@ export function applyFollowupToList(list, id, doctor, fu, settings, from) {
       // 진료 전 처치가 있으면 시력검사 없이 (예전 FU의 진료 전 처치 때문에 켜졌던 것은 끔, 직접 켠 것은 그대로)
       return { ...x, ...f, fuMissing: false, skipVision: f.preProcs.length ? true : (x.preProcs || []).length ? undefined : x.skipVision };
     }
-    if (!x.fuMissing) return x;
+    // 'FU 미지정'은 그 교수님 기록에서만 지움 (다른 교수님 FU 나중에는 아직 남아 있을 수 있음)
+    if (!x.fuMissing || (doctor && x.doctor !== doctor)) return x;
     changed = true;
     return { ...x, fuMissing: false };
   });
@@ -739,7 +761,7 @@ export function buildPatient(raw, fuMap, settings) {
     dilateOverride,
     dilateEye,
     // 지난 진료에서 'FU 나중에'로 보내고 아직 지정하지 않은 환자
-    fuMissing: !!fuMap[raw.id]?.fuLater && String(fuMap[raw.id].fuLater.date || '') < String(raw.date || ''),
+    fuMissing: laterEntries(fuMap[raw.id]).some(e => (!e.doctor || e.doctor === raw.doctor) && String(e.date || '') < String(raw.date || '')),
     cr,
     drops: [],
     procedures: [],

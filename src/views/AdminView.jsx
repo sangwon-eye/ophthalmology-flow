@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw } from 'lucide-react';
-import { applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
+import { laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
@@ -605,7 +605,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       cr: dil?.cr || undefined,
       preProcs: dil?.preProcs?.length ? dil.preProcs : undefined,
       name: fuEdit.name || nameOf(id),
-      visitDate: fuEdit.visitDate || (fuAll[id] || fuMap[id])?.fuLater?.date,
+      visitDate: fuEdit.visitDate || laterFor(fuAll[id] || fuMap[id], doctor)?.date,
       updatedAt: Date.now(),
     };
     // 이미 올라가 있는 다음 명단(오늘 포함, 같은 교수님, 접수 전)에도 바로 적용, 'FU 미지정' 표시는 지움
@@ -622,7 +622,9 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     setFuEdit(null);
     // 그 교수님 것만 지움. 교수님을 모르면 '나중에' 표시만 지우고 저장된 FU는 그대로 (다른 교수님 FU 보호)
     editFu(id, prev => (doctor ? unmarkFollowupLater(deleteFollowup(prev, id, doctor), id, doctor) : unmarkFollowupLater(prev, id)));
-    if (patients.some(p => p.id === id && p.fuMissing)) mutatePatients(prev => prev.map(p => (p.id === id && p.fuMissing ? { ...p, fuMissing: false } : p)));
+    // 'FU 미지정'은 그 교수님 기록에서만 지움 (교수님을 모르면 모두)
+    const mine = (p) => p.id === id && p.fuMissing && (!doctor || p.doctor === doctor);
+    if (patients.some(mine)) mutatePatients(prev => prev.map(p => (mine(p) ? { ...p, fuMissing: false } : p)));
     setMessage(`${e.name || nameOf(id) || id} FU 없음 · FU 명단에서 삭제했습니다.`);
   };
 
@@ -889,18 +891,20 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
             <input placeholder="환자번호 또는 이름으로 찾기" value={fuSearch} onChange={e => setFuSearch(e.target.value)} className="flex-1 outline-none text-sm" />
           </div>
           {(() => {
-            const later = Object.entries(fuAll).filter(([, r]) => r?.fuLater).sort((a, b) => String(a[1].fuLater.date).localeCompare(String(b[1].fuLater.date)));
+            // 교수님별로 한 줄 (두 교수님이 모두 'FU 나중에'를 눌렀으면 두 줄)
+            const later = Object.entries(fuAll).flatMap(([id, r]) => laterEntries(r).map(e => ({ id, r, e })))
+              .sort((a, b) => String(a.e.date).localeCompare(String(b.e.date)));
             if (!later.length) return null;
             return (
               <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-4 mb-4">
-                <div className="font-medium text-orange-900 mb-1">FU 나중에 지정할 환자 · {later.length}명</div>
-                {later.map(([id, r]) => (
-                  <div key={id} className="flex items-center justify-between gap-2 py-1.5 border-t border-orange-200 first:border-t-0">
+                <div className="font-medium text-orange-900 mb-1">FU 나중에 지정할 환자 · {new Set(later.map(x => x.id)).size}명</div>
+                {later.map(({ id, r, e }) => (
+                  <div key={`${id}-${e.doctor || ''}`} className="flex items-center justify-between gap-2 py-1.5 border-t border-orange-200 first:border-t-0">
                     <span className="flex items-center gap-2 flex-wrap">
                       <span className="t-name">{r.name || nameOf(id) || '이름 정보 없음'}</span>
-                      <span className="text-xs text-slate-500">{id} · 최근 진료 {r.fuLater.date} · {r.fuLater.doctor}</span>
+                      <span className="text-xs text-slate-500">{id} · 최근 진료 {e.date} · {e.doctor}</span>
                     </span>
-                    <button type="button" onClick={() => setFuEdit({ ...(r.byDoctor?.[r.fuLater.doctor] || {}), id, doctor: r.fuLater.doctor, name: r.name || nameOf(id), visitDate: r.fuLater.date })}
+                    <button type="button" onClick={() => setFuEdit({ ...(r.byDoctor?.[e.doctor] || {}), id, doctor: e.doctor, name: r.name || nameOf(id), visitDate: e.date })}
                       className="text-sm px-3 py-1.5 rounded-lg bg-orange-500 text-white font-medium shrink-0">지정</button>
                   </div>
                 ))}
