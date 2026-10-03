@@ -1377,6 +1377,8 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
   // VF처럼 산동 금지 검사가 남아 있으면 점안을 아예 막음 (이미 기록한 점안이 있으면 그대로 보여줌)
   const blockers = dilationBlockers(p);
   const blocked = blockers.length > 0 && st.given === 0;
+  // 산동 확인: 화면에 보이던 마지막 점안 그대로일 때만 (그사이 추가 점안·취소가 있으면 안 함)
+  const confirmDrops = () => { const at = Date.now(); patchPatient(mutatePatients, pk, x => confirmDilationPatch(x, prefs, waitMin, st.last, at)); };
   if (compact && !dil && !cr) return null;
   // CR은 진료실 간호사 담당: 처치실 등에서는 몇 회째인지만 보여 줌 (점안 버튼 없음)
   if (crStatusOnly && cr && !togglesOnly) {
@@ -1434,8 +1436,22 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
         const doneHere = st.status === 'ready' && i === st.total - 1;
         const isArmed = armed === i && !!t;
         const undoOk = doneHere && st.ok; // 확인으로 완료된 것: 두 번 누르면 확인만 취소 (점안 기록은 그대로)
+        // 산동 확인(10-03): 버튼을 늘리지 않음. 시간 전 마지막 점안 버튼을 한 번 누르면 3초 동안 [지금 완료] [점안 취소],
+        // CR·다시 진료는 시간이 지나면 그 버튼이 노란 'N분 지남 · 확인'(누르면 확인 → 진료 대기로)
+        const isLast = i === st.total - 1;
+        const dueHere = isLast && st.status === 'due';
+        const cancelDrop = () => { if (extraLast) undoExtraDrop(mutatePatients, pk, extraLast); else toggleDrop(mutatePatients, pk, i, false); };
+        if (isArmed && isLast && st.status === 'waiting') {
+          return (
+            <span key={i} className="inline-flex gap-1">
+              <button type="button" onClick={() => { setArmed(-1); confirmDrops(); }} title="산동이 이미 충분하면 시간 전이라도 지금 완료"
+                className={`${sz} rounded-lg border bg-green-600 border-green-600 text-white font-semibold`}>지금 완료</button>
+              <button type="button" onClick={() => { setArmed(-1); cancelDrop(); }} className={`${sz} rounded-lg border bg-white border-rose-400 text-rose-700`}>누르면 취소</button>
+            </span>
+          );
+        }
         const base = single ? (cr ? `CR ${i + 1}회` : `산동${eyeText}`) : (cr ? `${i + 1}회 점안` : '점안');
-        const label = isArmed ? (undoOk ? '누르면 확인 취소' : '누르면 취소')
+        const label = dueHere ? `${st.mins}분 지남 · 확인` : isArmed ? (undoOk ? '누르면 확인 취소' : '누르면 취소')
           : doneHere && !cr ? `산동 완료${eyeText}${shown ? ` ${fmtClock(shown)}` : ''}${extraLast ? ` · ${st.extra.length + 1}회` : ''}`
             : `${base}${shown ? ` ${fmtClock(shown)}` : ''}${extraLast ? ` · ${st.extra.length + 1}회` : ''}${doneHere ? ' · 완료' : ''}`;
         return (
@@ -1444,15 +1460,16 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
             type="button"
             onClick={() => {
               if (!t) { toggleDrop(mutatePatients, pk, i, true); return; }
+              if (dueHere) { confirmDrops(); return; }
               if (!isArmed) { setArmed(i); return; }
               setArmed(-1);
               if (undoOk) { const okAt = p.dilateOkAt; patchPatient(mutatePatients, pk, x => (x.dilateOkAt === okAt ? { dilateOkAt: null } : {})); return; }
-              if (extraLast) undoExtraDrop(mutatePatients, pk, extraLast); else toggleDrop(mutatePatients, pk, i, false);
+              cancelDrop();
             }}
-            title={undoOk ? `산동 확인 ${fmtClock(p.dilateOkAt)} · 두 번 누르면 확인 취소` : extraLast
+            title={dueHere ? `점안 ${[...st.drops, ...st.extra].filter(Boolean).map(fmtClock).join(', ')} · 동공을 확인했으면 누르세요 (진료 대기로)` : undoOk ? `산동 확인 ${fmtClock(p.dilateOkAt)} · 두 번 누르면 확인 취소` : extraLast
               ? `점안 ${[t, ...st.extra].map(fmtClock).join(', ')} · 두 번 누르면 ${fmtClock(extraLast)} 추가 점안 취소`
-              : t ? '두 번 누르면 기록 취소' : '누르면 지금 시각으로 기록'}
-            className={`${sz} rounded-lg border ${isArmed
+              : t ? (isLast && st.status === 'waiting' ? '누르면 [지금 완료] · [누르면 취소]' : '두 번 누르면 기록 취소') : '누르면 지금 시각으로 기록'}
+            className={`${sz} rounded-lg border ${dueHere ? 'bg-amber-300 border-amber-400 text-amber-950 font-semibold' : isArmed
               ? 'bg-white border-rose-400 text-rose-700'
               : doneHere ? 'bg-green-100 border-green-300 text-green-800'
                 : t ? 'bg-slate-100 border-slate-200 text-slate-500'
@@ -1463,14 +1480,6 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
         );
       })}
       {st.need && !togglesOnly && !blocked && !(showDrops && st.status === 'ready') && <DilationBadge st={st} large={large} />}
-      {/* 산동 확인(10-03): 시간 전이면 작은 [산동 확인 · 완료](일찍 완료), CR·다시 진료는 시간이 지나면 노란 [N분 지남 · 확인] (눌러야 진료 대기로) */}
-      {showDrops && st.need && !blocked && (st.status === 'waiting' || st.status === 'due') && (
-        <button type="button" onClick={() => { const at = Date.now(); patchPatient(mutatePatients, pk, x => confirmDilationPatch(x, prefs, waitMin, st.last, at)); }}
-          title={st.status === 'due' ? '동공을 확인했으면 눌러 주세요 (누르면 진료 대기로)' : '산동이 이미 충분하면 시간 전이라도 지금 완료'}
-          className={st.status === 'due' ? `${sz} rounded-lg border bg-amber-300 border-amber-400 text-amber-950 font-semibold` : 'text-xs text-green-700 underline'}>
-          {st.status === 'due' ? `${st.mins}분 지남 · ${cr ? 'CR' : '산동'} 확인` : `${cr ? 'CR' : '산동'} 확인 · 완료`}
-        </button>
-      )}
       {/* 산동 완료인데 덜 됐을 때: 한 번 더 점안 (CR 제외, 산동 금지 검사가 남아 있으면 숨김) */}
       {showDrops && st.need && !cr && (st.status === 'ready' || st.status === 'due') && blockers.length === 0 && (
         <button type="button" onClick={() => addExtraDrop(mutatePatients, pk)} title="산동이 덜 됐으면 한 번 더 점안 (이 시각부터 다시 시간을 잽니다)"

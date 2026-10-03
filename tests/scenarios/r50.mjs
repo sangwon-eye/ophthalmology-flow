@@ -40,7 +40,7 @@ await c().getByRole('button', { name: '추가 점안' }).click(); await W(800);
 ok(await c().getByRole('button', { name: /· 3회$/ }).count() === 1 && (await pt('장민호')).dropsExtra.length === 2, '두 번째 추가 점안 → 3회');
 // CR 환자, 산동 금지 검사(VF)가 남은 환자는 추가 점안 없음
 // CR은 시간이 지나면 확인을 눌러야 완료 (10-03 산동 확인)
-ok(await cardOf('한지훈').getByRole('button', { name: /분 지남 · CR 확인$/ }).count() === 1 && await cardOf('한지훈').getByRole('button', { name: '추가 점안' }).count() === 0, 'CR 환자는 시간이 지나면 [CR 확인], 추가 점안 없음');
+ok(await cardOf('한지훈').getByRole('button', { name: /분 지남 · 확인$/ }).count() === 1 && await cardOf('한지훈').getByRole('button', { name: '추가 점안' }).count() === 0, 'CR 환자는 시간이 지나면 [N분 지남 · 확인], 추가 점안 없음');
 ok(await cardOf('윤지아').getByRole('button', { name: '추가 점안' }).count() === 0, 'VF(산동 금지)가 남아 있으면 추가 점안 숨김');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

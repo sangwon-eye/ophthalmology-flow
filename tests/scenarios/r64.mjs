@@ -39,6 +39,8 @@ ok(await cardOf('오세영').getByRole('button', { name: '진료 호출' }).coun
 // 다시 진료 → 진료 완료 → 진료 완료 취소: 처치는 다시 '다시 진료 뒤'로
 await editKey('daily-patients', list => list.map(p => (p.name === '오세영' ? { ...p, dilateOverride: true, drops: [Date.now() - 20 * 60000] } : p)));
 await W(4500);
+// 시간이 지나도 확인을 눌러야 진료 대기로 (10-03 산동 확인)
+await cardOf('오세영').getByRole('button', { name: /분 지남 · 확인$/ }).click(); await W(1200);
 await cardOf('오세영').getByRole('button', { name: '진료 호출' }).click(); await W(600);
 await page.getByRole('button', { name: '진료 완료', exact: true }).click(); await W(800);
 ok((await pt('오세영')).procedures.some(x => x.name === '전공의 처치' && !x.done), '다시 진료 완료 → 처치 시작');
