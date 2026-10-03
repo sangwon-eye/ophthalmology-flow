@@ -32,8 +32,11 @@ await W(2600);
 const c0 = await chimes();
 await setP('권나은', p => ({ drops: p.drops.map(t => t - 20 * 60000) }));
 await W(4500);
-ok(await inWaiting('권나은'), '기다리는 시간이 지나면 진료 대기로');
+// 10-03 산동 확인: 시간이 지나도 저절로 들어가지 않음 → 띵동 + 4회 버튼이 노란 'N분 지남 · 확인'
+ok(!(await inWaiting('권나은')), '시간이 지나도 확인 전에는 진료 대기에 없음');
 ok(await chimes() === c0 + 1, 'CR 시간 됨 → 띵동');
+await cardOf('권나은').getByRole('button', { name: /분 지남 · 확인$/ }).click(); await W(1500);
+ok(await inWaiting('권나은'), '확인을 누르면 진료 대기로');
 await back();
 // 처치실: CR 환자는 상태만 (점안 버튼 없음)
 await setP('조현우', () => ({ doctor: '나상훈', cr: true, drops: [Date.now()] }));
@@ -57,6 +60,7 @@ await page.screenshot({ path: `${SP}/r62-consult.png`, fullPage: true });
 await cardOf('오세영').getByRole('button', { name: '점안', exact: true }).click(); await W(600);
 await setP('오세영', p => ({ drops: p.drops.map(t => t && t - 20 * 60000) }));
 await W(4500);
+await cardOf('오세영').getByRole('button', { name: /분 지남 · 확인$/ }).click(); await W(1500);
 ok(await inWaiting('오세영') && /산동 후 재진/.test(await cardOf('오세영').innerText()), '산동이 끝나면 진료 대기에 산동 후 재진 표시');
 const first = await waitingCards().first().innerText();
 ok(/오세영/.test(first), `진료 대기 맨 앞 (${first.split('\n')[0]})`);
