@@ -1,10 +1,10 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
 import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
-import { COLOR_MAP, INPUT, applyCheckin, consultWaiting, forcedToday, patientKey, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, todayISO, treatRoomOf, treatWork, treatWorkCount, visionWaiting } from '../core/flow.jsx';
+import { COLOR_MAP, INPUT, applyCheckin, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
 import { shiftISO, visionNames } from '../core/storage.jsx';
 import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
-import { patientBoardName } from './BoardView.jsx';
+import { consultRoomLabel, patientBoardName } from './BoardView.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 역할 선택                                                           */
@@ -109,14 +109,51 @@ export function kioskNoteFor(p, settings) {
   const t = treatRoomOf(settings);
   return `시력검사 없이 바로 ${t.patientName || t.name}로 오세요`;
 }
-export function KioskView({ patients, settings, mutatePatients, onExit }) {
+// '로/으로': 받침이 없거나 ㄹ 받침이면 '로' (처치실로, 6번방으로). 숫자로 끝나면 읽는 소리로 (3 삼 → 으로)
+export function withRo(name) {
+  const s = String(name || '').trim();
+  const ch = s.charCodeAt(s.length - 1);
+  if (ch >= 0xAC00 && ch <= 0xD7A3) { const jong = (ch - 0xAC00) % 28; return `${s}${jong === 0 || jong === 8 ? '로' : '으로'}`; }
+  return `${s}${/[036]$/.test(s) ? '으로' : '로'}`;
+}
+// QR 접수기에서 이미 접수한 환자가 다시 찍었을 때 지금 갈 곳 (10-03 사용자 결정)
+// 검사는 어느 방이 먼저 부를지 그때그때 달라서 두 곳 이상 남으면 '큰 복도'로 통일, 한 곳만 남으면 그곳,
+// 처치실을 먼저 거쳐야 하면(진료실 요청·초진 검사 지정·진료 전 처치·예진) 처치실, 진료만 남으면 진료실(앞 N명이면 진료실 앞으로)
+export function kioskGuide(p, patients, settings, prefs) {
+  const treat = treatRoomOf(settings);
+  const treatName = treat.patientName || treat.name;
+  const room = consultRoomLabel(prefs, p.doctor) || '진료실';
+  const toRoomFront = { title: '곧 진료 순서입니다', note: `${room} 앞으로 이동해 주세요` };
+  const toTreat = { title: `다음은 ${treatName}입니다`, note: `${withRo(treatName)} 이동해 주세요` };
+  if (p.consultDone || p.seen) return { title: '진료가 끝났습니다', note: '간호사 안내를 받으시기 바랍니다' };
+  if (inConsult(p)) return toRoomFront;
+  if (!visionComplete(p)) return { title: '시력검사 대기 중입니다', note: '큰 복도에서 기다려 주세요' };
+  if (treatRequested(p) || needsTriageAssign(p) || preProcPending(p)) return toTreat;
+  // 남은 검사가 있는 곳 (검사 준비가 남은 검사는 처치실부터, 검사 준비 결과로 취소된 검사는 뺌)
+  const roomIds = new Set(settings.rooms.map(r => r.id));
+  const places = new Set();
+  sortedTests(settings).forEach(t => {
+    if (!roomIds.has(t.roomId) || !p.assigned?.[t.id] || p.done?.[t.id] || prepPositive(p, t)) return;
+    places.add(prepBlocked(p, t) ? treat.id : t.roomId);
+  });
+  if (places.size >= 2) return { title: '검사가 남았습니다', note: '큰 복도에서 기다려 주세요' };
+  if (places.size === 1) {
+    const r = settings.rooms.find(x => x.id === [...places][0]);
+    return { title: '검사가 한 곳 남았습니다', note: `${withRo(r?.patientName || r?.name || '검사실')} 이동해 주세요` };
+  }
+  if (needsTriageExam(p, settings)) return toTreat;
+  const n = consultFrontCount(settings);
+  if (n && consultQueue(patients, p.doctor, settings, prefs).slice(0, n).some(x => patientKey(x) === patientKey(p))) return toRoomFront;
+  return { title: `${room}에서 진료 예정입니다`, note: '복도 끝 모니터를 확인해 주세요' };
+}
+export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onExit }) {
   const [result, setResult] = useState(null);
   const [askPassword, setAskPassword] = useState(false);
   const buffer = useRef('');
   const lastKey = useRef(0);
   const clearTimer = useRef(null);
-  const latest = useRef({ patients, settings });
-  latest.current = { patients, settings };
+  const latest = useRef({ patients, settings, prefs: doctorPrefs });
+  latest.current = { patients, settings, prefs: doctorPrefs };
 
   const show = (r) => {
     setResult(r);
@@ -126,16 +163,19 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
     clearTimer.current = setTimeout(() => setResult(null), r.note ? 8000 : 5000);
   };
   const handle = async (code) => {
-    const { patients: list, settings: s } = latest.current;
+    const { patients: list, settings: s, prefs } = latest.current;
     const found = findKioskPatient(list, code);
-    const waiting = found.filter(p => !p.consultDone);
-    const p = waiting.find(x => !x.checkin) || waiting[0];
+    // 같은 날 2차 진료(앞 진료가 끝나기를 기다리는 기록)는 접수·안내 대상이 아님 — 그 기록이 앞에 있어도 실제 진료 기록을 접수
+    const active = found.filter(p => !p.consultDone && !p.linkWaiting);
+    const p = active.find(x => !x.checkin) || active[0];
     if (!p) {
-      show({ ok: false, title: found.length ? '오늘 진료가 끝났습니다' : '오늘 예약 명단에서 찾지 못했습니다', sub: '접수처에 문의해 주세요' });
+      if (found.length && found.every(x => x.consultDone)) show({ ok: true, who: `${patientBoardName(found[0])}님`, title: '진료가 끝났습니다', note: '간호사 안내를 받으시기 바랍니다' });
+      else if (found.length) show({ ok: true, title: `${patientBoardName(found[0])}님은 이미 접수되었습니다`, sub: '잠시 기다려 주세요' });
+      else show({ ok: false, title: '오늘 예약 명단에서 찾지 못했습니다', sub: '접수처에 문의해 주세요' });
       return;
     }
     if (p.checkin) {
-      show({ ok: true, title: `${patientBoardName(p)}님은 이미 접수되었습니다`, note: kioskNoteFor(p, s), sub: kioskNoteFor(p, s) ? '' : '잠시 기다려 주세요' });
+      show({ ok: true, who: `${patientBoardName(p)}님은 이미 접수되었습니다`, ...kioskGuide(p, list, s, prefs) });
       return;
     }
     const pk = patientKey(p);
@@ -187,6 +227,7 @@ export function KioskView({ patients, settings, mutatePatients, onExit }) {
         </>
       ) : (
         <div role="status" className="w-full max-w-6xl">
+          {result.who && <p className="font-semibold text-slate-700 mb-4" style={{ fontSize: 'clamp(1.5rem, 3vw, 2.75rem)' }}>{result.who}</p>}
           <h1 className={`font-bold leading-tight mb-8 ${result.ok ? 'text-slate-900' : 'text-red-800'}`} style={{ fontSize: 'clamp(2.5rem, 6.5vw, 6rem)' }}>
             {result.ok && <span className="text-emerald-700">✓ </span>}{result.title}
           </h1>

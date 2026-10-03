@@ -51,6 +51,7 @@ export const DEFAULT_SETTINGS = {
   dilationWaitMin: 15,
   treatStaleMin: 20, // 처치실: 마지막 진행 후 이 시간(분)이 지나면 카드 강조 (0 = 끔)
   lateGraceMin: 0, // 바코드 접수에서만: 예약시간보다 이 시간 넘게 늦게 찍으면 지각
+  consultFrontCount: 5, // 복도 끝 모니터(진료실 전체)·QR 다시 찍기: 교수님마다 앞에서부터 이 인원은 '진료실 앞으로 이동' (0 = 끔)
   // 같은 날 2차 진료(다른 교수님)로 넘어갈 때 처치실에서 추가 검사를 확인할지
   linkCheckAdded: true,    // 진료 중에 추가된 2차 진료
   linkCheckPlanned: false, // 미리 명단에 예정된 2차 진료
@@ -417,6 +418,15 @@ export function inConsult(p) {
 export function consultWaiting(p, settings, prefs) {
   return !p.consultDone && !p.seen && !p.calledRoom && !p.treatRequest && allDone(p, settings)
     && !dropsPending(p, prefs, settings?.dilationWaitMin);
+}
+// 그 교수님 진료 대기 순서 (진료실 화면·환자용 화면·QR 접수가 같은 순서를 씀)
+export function consultQueue(patients, doctor, settings, prefs) {
+  return patients.filter(p => p.doctor === doctor && consultWaiting(p, settings, prefs)).sort(byQueue);
+}
+// 진료실 앞으로 안내할 인원 (설정 > 기타, 기본 5명, 0 = 끔)
+export function consultFrontCount(settings) {
+  const n = Math.round(Number(settings?.consultFrontCount ?? 5));
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 export function getStage(p, settings) {

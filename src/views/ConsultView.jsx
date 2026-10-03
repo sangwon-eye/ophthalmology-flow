@@ -204,6 +204,18 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     }, () => {});
   };
 
+  // 환자 찾기: 진료실 앞으로 안 온 환자를 복도 끝 모니터(진료실 대기 명단 전체)에 크게 띄우고 띵동 (환자 기록에 새 칸 boardCall)
+  // 서버의 최신 기록으로 다시 확인: 그사이 진료 호출·귀가 등으로 진료 대기가 아니면 띄우지 않고 안내
+  const findPatient = (p) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    mutatePatients(prev => prev.map(x => (patientKey(x) === pk && consultWaiting(x, settings, doctorPrefs) ? { ...x, boardCall: { at } } : x))).then(next => {
+      if (!Array.isArray(next)) return; // 저장 실패: 위쪽 빨간 띠로 안내
+      const rec = next.find(x => patientKey(x) === pk);
+      showToast(rec?.boardCall?.at === at ? `${p.name} 환자 찾기 · 복도 끝 모니터에 띄웠습니다` : `환자 찾기 안 됨 · ${p.name} 환자는 이미 다른 곳에서 처리되었습니다`);
+    }, () => {});
+  };
+
   // 실수로 진료 완료를 눌렀을 때: 설명 대기에서 다시 진료 중(또는 진료 대기 앞)으로
   const undoFinishConsult = (p) => {
     const pk = patientKey(p);
@@ -675,6 +687,11 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                       진료 호출
                     </button>
                     <button type="button" onClick={() => setSendFor(p)} className="text-sm px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700">보내기</button>
+                    {/* 진료실 앞으로 안 온 환자: 복도 끝 모니터에 이름을 크게 띄움 (드물게 써서 작은 글씨) */}
+                    <button type="button" onClick={() => findPatient(p)} title="복도 끝 모니터에 '○○○님 진료실 앞으로 오세요'를 띵동과 함께 크게 띄웁니다"
+                      className="ml-auto text-xs underline text-slate-500 hover:text-amber-700">
+                      환자 찾기{p.boardCall?.at ? ` · ${fmtClock(p.boardCall.at)}` : ''}
+                    </button>
                   </PatientRow>
                 );
               }}

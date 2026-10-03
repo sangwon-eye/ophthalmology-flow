@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone } from 'lucide-react';
-import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
 import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
@@ -337,13 +337,14 @@ export function DoctorRoomInput({ name, value, onSave }) {
   );
 }
 
-export function ConsultBoardSection({ doctor, patients, settings, prefs, compact, plain, roomLabel = '' }) {
+// front: 복도 끝 모니터(진료실 전체)에서 앞에서부터 이 인원은 노란 상자 '진료실 앞으로 이동해 주세요', 나머지는 '큰 복도에서 기다려 주세요'
+export function ConsultBoardSection({ doctor, patients, settings, prefs, compact, plain, roomLabel = '', front = 0 }) {
   const mine = patients.filter(p => p.doctor === doctor && !p.consultDone);
   const inRoom = mine.find(inConsult);
   // CR·산동 점안 중인 환자는 시간이 지나면 진료 대기로 (가끔 다시 계산)
   const [, setTick] = useState(0);
   useEffect(() => { const i = setInterval(() => setTick(x => x + 1), 30000); return () => clearInterval(i); }, []);
-  const waiting = mine.filter(p => consultWaiting(p, settings, prefs)).sort(byQueue);
+  const waiting = consultQueue(patients, doctor, settings, prefs);
   const testing = mine.filter(p => !p.seen && (!allDone(p, settings) || dropsPending(p, prefs, settings.dilationWaitMin))).length;
   const testingLabel = mine.some(p => !p.seen && dropsPending(p, prefs, settings.dilationWaitMin)) ? '검사·점안 진행 중' : '검사 진행 중';
   const notice = useNotice(`doctor:${doctor}`);
@@ -384,6 +385,25 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
       )}
       {waiting.length === 0 ? (
         <div className="text-sm text-slate-500 py-3">진료 대기 환자가 없습니다</div>
+      ) : front > 0 ? (
+        <>
+          <div data-front className="rounded-2xl border-4 border-yellow-300 bg-yellow-300/10 p-3">
+            <div className="text-2xl font-extrabold text-yellow-200 mb-2.5 break-keep">진료실 앞으로 이동해 주세요</div>
+            <div className="grid gap-2.5" style={boardGrid(17)}>
+              {waiting.slice(0, front).map((p, i) => (
+                <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="amber" note={i === 0 ? '다음 순서' : ''} />
+              ))}
+            </div>
+          </div>
+          {waiting.length > front && (
+            <div data-rest className="mt-4">
+              <div className="text-lg font-bold text-slate-300 mb-2 break-keep">큰 복도에서 기다려 주세요</div>
+              <div className="grid gap-2" style={boardGrid(13)}>
+                {waiting.slice(front).map((p, i) => <BoardNumberRow key={patientKey(p)} n={front + i + 1} name={patientBoardName(p)} color="amber" compact />)}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>
           {waiting.map((p, i) => (
@@ -431,10 +451,78 @@ export function BoardSelect({ doctors, settings, onSelect, onBack }) {
   );
 }
 
+// 환자 찾기 (진료실 화면 [환자 찾기] → 환자 기록 boardCall): 복도 끝 모니터(진료실 대기 명단 전체)에
+// '○○○님 3번 진료실 앞으로 오세요'를 크게 띄우고 띵동, 10초 뒤 사라짐.
+// 화면을 연 순간 이미 있던 요청은 다시 띄우지 않음, 여러 명이면 차례로, 그사이 진료 호출·귀가한 환자는 건너뜀
+export const FIND_SHOW_MS = 10000;
+export function FindCallPopup({ patients, settings, prefs }) {
+  const seen = useRef(null);
+  const [queue, setQueue] = useState([]);
+  const calls = patients.filter(p => p.boardCall?.at).map(p => `${patientKey(p)}@${p.boardCall.at}`);
+  const sig = calls.join('|');
+  useEffect(() => {
+    if (!seen.current) { seen.current = new Set(calls); return; }
+    const fresh = calls.filter(k => !seen.current.has(k));
+    if (!fresh.length) return;
+    fresh.forEach(k => seen.current.add(k));
+    setQueue(q => [...q, ...fresh]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+  const head = queue[0] || '';
+  const p = head ? patients.find(x => patientKey(x) === head.slice(0, head.lastIndexOf('@'))) : null;
+  const skip = !!head && (!p || !consultWaiting(p, settings, prefs));
+  useEffect(() => {
+    if (!head) return undefined;
+    const t = setTimeout(() => setQueue(q => q.slice(1)), skip ? 0 : FIND_SHOW_MS);
+    return () => clearTimeout(t);
+  }, [head, skip]);
+  useChime(head && !skip ? [head] : []);
+  if (!head || skip) return null;
+  const room = consultRoomLabel(prefs, p.doctor) || '진료실';
+  return (
+    <div role="alert" data-find-popup className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-8">
+      <div className="w-full max-w-7xl rounded-[2rem] border-8 border-black bg-yellow-300 px-10 py-12 text-center text-black break-keep">
+        <div className="font-extrabold leading-tight" style={{ fontSize: 'clamp(3rem, 8vw, 8rem)' }}>{patientBoardName(p)}님</div>
+        <div className="mt-6 font-extrabold leading-snug" style={{ fontSize: 'clamp(2.25rem, 5vw, 5rem)' }}>{room} 앞으로 오세요</div>
+      </div>
+    </div>
+  );
+}
+// 진료실 대기 명단(전체) 화면에 보일 진료실 고르기 (PC마다 기억). 특수검사·처치처럼 진료가 아닌 명단 칸을 빼서 화면을 넓게 씀
+const HIDDEN_DOCTORS_KEY = 'oph-board-hidden-doctors';
+function readHiddenDoctors() {
+  try { const v = JSON.parse(window.localStorage.getItem(HIDDEN_DOCTORS_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function ConsultPicker({ doctors, hidden, onChange }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-800 text-slate-400">진료실 고르기</button>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-2 w-64 whitespace-normal rounded-xl border border-slate-700 bg-slate-950 p-3 text-left shadow-xl">
+          <div className="text-xs text-slate-400 mb-2">이 화면에 보일 진료실 (체크한 곳 중 오늘 환자가 있는 곳만 칸이 생깁니다)</div>
+          {doctors.map(d => (
+            <label key={d} className="flex items-center gap-2 py-1 text-sm text-slate-200 cursor-pointer">
+              <input type="checkbox" aria-label={`${d} 보이기`} checked={!hidden.includes(d)} onChange={e => onChange(e.target.checked ? hidden.filter(x => x !== d) : [...hidden, d])} className="w-4 h-4" />
+              {d}
+            </label>
+          ))}
+          <button type="button" onClick={() => setOpen(false)} className="mt-2 text-xs underline text-slate-400">닫기</button>
+        </div>
+      )}
+    </span>
+  );
+}
+
 export function BoardView({ kind, patients, settings, doctors, doctorPrefs, ready = true, onBack }) {
   const [layout, setLayout] = useState('horizontal');
-  const activeDoctors = Array.from(new Set([...doctors, ...patients.map(p => p.doctor).filter(Boolean)]))
-    .filter(d => patients.some(p => p.doctor === d && !p.consultDone));
+  const allDoctors = Array.from(new Set([...doctors, ...patients.map(p => p.doctor).filter(Boolean)]));
+  const activeDoctors = allDoctors.filter(d => patients.some(p => p.doctor === d && !p.consultDone));
+  const [hiddenDoctors, setHiddenDoctors] = useState(readHiddenDoctors);
+  const saveHiddenDoctors = (next) => {
+    setHiddenDoctors(next);
+    try { window.localStorage.setItem(HIDDEN_DOCTORS_KEY, JSON.stringify(next)); } catch { /* 저장 못 해도 이번엔 적용 */ }
+  };
   // 진료실 앞 모니터: 직원 진료실 화면처럼 그 교수님 진료 호출이 생기면 띵동 (오른쪽 아래 종 버튼으로 이 컴퓨터만 끄기)
   const chimeDoctor = kind.startsWith('consult:') ? kind.slice('consult:'.length) : '';
   useChime(chimeDoctor ? patients.filter(p => p.doctor === chimeDoctor && inConsult(p)).map(patientKey) : [], { ready: ready && !!chimeDoctor, context: chimeDoctor });
@@ -466,14 +554,19 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
     );
   }
   if (kind === 'consult-all') {
+    // 복도 끝 모니터: 고른 진료실만 칸을 나눠 보여 줌, [환자 찾기] 팝업·띵동
+    const shown = activeDoctors.filter(d => !hiddenDoctors.includes(d));
     return (
-      <BoardShell title="진료 대기 순서" onBack={onBack}>
-        {activeDoctors.length === 0 ? <BoardEmpty /> : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {activeDoctors.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} prefs={doctorPrefs} roomLabel={consultRoomLabel(doctorPrefs, d)} />)}
-          </div>
-        )}
-      </BoardShell>
+      <>
+        <BoardShell title="진료 대기 순서" onBack={onBack} chime extra={<ConsultPicker doctors={allDoctors} hidden={hiddenDoctors} onChange={saveHiddenDoctors} />}>
+          {shown.length === 0 ? <BoardEmpty /> : (
+            <div className={`grid gap-4 ${shown.length === 1 ? 'grid-cols-1' : shown.length === 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'}`}>
+              {shown.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} prefs={doctorPrefs} roomLabel={consultRoomLabel(doctorPrefs, d)} front={consultFrontCount(settings)} />)}
+            </div>
+          )}
+        </BoardShell>
+        <FindCallPopup patients={patients} settings={settings} prefs={doctorPrefs} />
+      </>
     );
   }
   if (kind.startsWith('consult:')) {

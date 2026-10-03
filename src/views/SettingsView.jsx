@@ -99,6 +99,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
       dilationWaitMin: Math.max(1, Math.round(Number(draft.dilationWaitMin) || 15)),
       lateGraceMin: Math.max(0, Math.round(Number(draft.lateGraceMin) || 0)),
       treatStaleMin: Math.max(0, Math.round(Number(draft.treatStaleMin ?? 20) || 0)),
+      consultFrontCount: Math.max(0, Math.round(Number(draft.consultFrontCount ?? 5) || 0)),
       hxFields: hxFieldsOf(draft).map(x => ({ ...x, label: String(x.label || '').trim(), short: String(x.short || '').trim() })).filter(x => x.label),
     };
     setDraft(toDraft(cleaned));
@@ -549,6 +550,14 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             <div className="flex items-center gap-2">
               <input type="number" min="0" aria-label="지각 유예 시간" value={draft.lateGraceMin ?? 0} onChange={e => updateDraft(d => ({ ...d, lateGraceMin: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
               <span className="text-sm text-slate-600">분</span>
+            </div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="font-medium text-slate-900 mb-1">진료실 앞으로 안내할 인원</div>
+            <p className="text-sm text-slate-500 mb-3">환자용 화면 '진료실 대기 명단 (전체)'(복도 끝 모니터)에서 교수님마다 앞에서부터 이 인원을 노란 상자 '진료실 앞으로 이동해 주세요'로 크게 보여 주고, 나머지는 '큰 복도에서 기다려 주세요'로 보여 줍니다. QR 접수기에서 다시 찍은 환자도 이 순서 안이면 '진료실 앞으로' 안내합니다. 0명이면 끕니다.</p>
+            <div className="flex items-center gap-2">
+              <input type="number" min="0" aria-label="진료실 앞으로 안내할 인원" value={draft.consultFrontCount ?? 5} onChange={e => updateDraft(d => ({ ...d, consultFrontCount: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              <span className="text-sm text-slate-600">명</span>
             </div>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-5">

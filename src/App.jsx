@@ -281,7 +281,7 @@ export default function App() {
     );
   }
   if (role === 'kiosk') {
-    return <KioskView patients={patientsToday} settings={settings} mutatePatients={mutatePatients} onExit={onBack} />;
+    return <KioskView patients={patientsToday} settings={settings} doctorPrefs={doctorPrefs} mutatePatients={mutatePatients} onExit={onBack} />;
   }
   if (role === 'procedure') {
     return (
