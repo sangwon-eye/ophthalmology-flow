@@ -1,7 +1,7 @@
 // 관리자 화면(명단·FU·통계·안내문)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, Trash2, Search, RotateCcw } from 'lucide-react';
+import { Upload, Trash2, Search, RotateCcw, ArrowDown } from 'lucide-react';
 import { laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
@@ -157,77 +157,137 @@ export function DayStats({ patients, doctors }) {
     </div>
   );
 }
-/* 역할별 1장 안내문: 자리마다 붙여 두는 요약. 방 이름은 지금 설정을 따라감. [인쇄]하면 역할마다 한 장씩 */
+/* 역할별 1장 안내문: 자리마다 붙여 두는 요약(하는 일 5줄 이내 + 이럴 땐). 방 이름은 지금 설정을 따라감.
+   화면 동작을 바꾸면 여기와 업무흐름정리.md 도 같이 고칠 것. [인쇄]하면 흐름 그림 1장 + 역할마다 한 장씩 */
 export function roleGuideSheets(settings) {
   const vision = visionNames(settings).name;
   const rooms = settings.rooms.filter(r => r.builtin !== 'treat').map(r => r.name).join(' · ') || '검사실';
   const treat = treatRoomOf(settings).name;
   return [
     { key: 'vision', title: vision, steps: [
-      '접수: 아래 "접수 대기"에서 [접수] (QR로 찍은 환자는 자동 접수). 늦게 온 환자는 [지각].',
-      '카드 첫 줄의 할 일을 차례로 합니다. 끝난 일은 버튼이 사라집니다.',
-      '  · [측정값 입력] → 값 입력 → [확인] (안압을 비우면 한 번 더 묻습니다)',
-      '  · 초진: [History 필요] → 적고 [확인] (빈칸이어도 [확인]은 꼭)',
-      '  · ARK 같은 시력방 검사 칸 누르기',
-      '  · 산동 예정: [산동] 누르면 점안 시각 기록 (지금 못 하면 "점안 없이 넘기기")',
-      '할 일이 모두 끝나면 자동으로 다음 단계로 넘어갑니다. 잘못 넘어가면 알림의 [되돌리기].',
-      '고칠 때: "오늘" 값 옆 [수정], Hx 옆 [수정].',
-      '초진/재진이 틀리면 이름 옆 [초진]/[재진]을 눌러 바꿉니다 (재진이면 History 버튼이 없어짐).',
-      '검사 추가·빼기, 산동 넣기·빼기: 맨 아래 [+ 검사 변경].',
+      '[접수] (QR로 찍은 환자는 저절로 접수). 늦게 온 환자는 [지각]',
+      '[시력] · [NCT]를 눌러 값 입력 → 둘 다 ✓',
+      '초진이면 [History 설문지 드리기]',
+      '산동 예정이면 [산동]으로 점안 시각 기록 (CR은 진료실에서 점안)',
+      '할 일이 모두 끝나면 저절로 다음 방으로 넘어갑니다',
+    ], tips: [
+      '검사를 넣거나 뺄 때: [오늘 검사 보기]를 눌러 그 자리에서',
+      '접수를 잘못 눌렀으면: [접수 취소]를 두 번',
+      '잘못 넘어갔으면: 아래 알림의 [되돌리기]',
     ] },
     { key: 'exam', title: `검사실 (${rooms})`, steps: [
-      '위쪽 장비 버튼(VF · OCT …)을 누르면 내 장비 환자만 봅니다. [전체]는 모두.',
-      '[처방 전]: 전산 처방을 넣은 뒤 누르면 "처방 완료". 취소는 옆의 ↺.',
-      '검사 칸을 누르면 완료(초록 ✓), 다시 누르면 취소. 오른쪽 클릭(길게 누르기): 단안·프로토콜.',
-      '"우선" 표시가 붙은 검사를 먼저 합니다.',
-      'VF: [▶ 시작] → 끝나면 [종료]. 검사 중에는 다른 장비로 부르지 않습니다.',
-      '산동 예정: [산동] 누르면 점안 시각 기록. VF 전에는 "산동 · VF 끝난 뒤"로 잠겨 있습니다.',
-      '검사 추가·빼기: [+ 검사 변경]. 다른 검사실에 남은 검사는 카드 끝에 보입니다.',
-      '잘못 눌렀으면 알림의 [되돌리기] 또는 아래 "방금 완료한 환자".',
+      '위쪽 장비 버튼(VF · OCT …)을 누르면 내 장비 환자만 보입니다',
+      '전산 처방을 넣은 뒤 [처방 전] → "처방 완료"',
+      '검사가 끝나면 검사 칸을 누릅니다 (초록 ✓). "우선" 표시를 먼저',
+      'VF 등: [▶ 시작] → 끝나면 [종료] (검사 중에는 다른 장비가 부르지 못함)',
+      '산동 예정이면 [산동] (VF처럼 산동 금지 검사가 끝난 뒤)',
+    ], tips: [
+      '검사를 넣거나 뺄 때: [검사 변경]',
+      '단안 · 세부 종류: 검사 칸을 길게 누르기 (마우스는 오른쪽 클릭)',
+      '잘못 눌렀으면: 알림의 [되돌리기] 또는 아래 "방금 완료한 환자"',
     ] },
     { key: 'treat', title: treat, steps: [
-      '진료 전 처치(PRP · YAG 등): 맨 위 카드에서 [처치 완료]. 산동 예정이면 [산동]으로 점안 기록.',
-      '검사 준비(FAG skin test 등): [시작] → 시간이 지나면 [확인] 또는 [검사 취소].',
-      '검사 지정 대기(초진 · 2차 진료): History와 오늘 검사를 보고 [검사 지정] → 검사·예진 여부 선택.',
-      '예진: 검사를 마친 환자 카드에서 [예진 완료].',
-      '전공의 처치: [처치 완료]. 잘못 눌렀으면 아래 "방금 완료한 환자"에서 취소.',
+      '위쪽 요약 줄의 묶음을 누르면 그곳으로 이동 (주황 = 오래 기다리는 환자)',
+      '초진 · 2차 진료: [History 입력] → [검사 지정]',
+      '검사 준비(skin test 등): [시작] → 시간이 되면 [확인]',
+      '예진이 끝나면 [예진 완료], 전공의 처치가 끝나면 [처치 완료]',
+      '진료실 요청: 할 일을 고르고 [확인 완료 · 진료 대기로]',
+    ], tips: [
+      '진료 전 처치(PRP · YAG): 맨 위 카드에서 [처치 완료]',
+      '잘못 눌렀으면: 알림의 [되돌리기] 또는 아래 "방금 완료한 환자"',
     ] },
     { key: 'consult', title: '진료실', steps: [
-      '위에서 교수님을 고릅니다.',
-      '진료 대기 명단에서 [진료 호출] → 진료 중 카드가 위에 크게 뜹니다.',
-      '진료 중: [진료 완료] · [추가 검사] · [처치] · [보내기 (시력·검사실·처치실)]. 잘못 부르면 [호출 취소].',
-      '설명 대기: [설명 완료] 창에서 다음 내원 검사·FU를 지정합니다.',
-      '너무 바쁘면 [설명 완료 · FU 나중에] → 관리자 "FU 나중에 지정할 환자"로 갑니다.',
-      '처치 중인 환자는 처치가 끝나면 귀가 처리할 수 있습니다.',
+      '위에서 교수님을 고릅니다 (이 PC가 기억)',
+      '진료 대기에서 [진료 호출] → 진료 중 카드가 위에 크게',
+      '진료 중: [진료 완료] · [처치] · [추가 검사] · [보내기]',
+      '설명 대기: [설명 완료] 창에서 다음 내원 검사 지정 (바쁘면 [설명 완료 · FU 나중에])',
+      'CR · 산동 점안 칸: 점안할 때마다 버튼 (진료실 간호사)',
+    ], tips: [
+      '잘못 불렀으면: [호출 취소]',
+      '진료 후 처치를 넣을 때: 설명 대기 카드의 [처치 보내기]',
+      '처치가 남은 환자: 처치가 끝나면 [귀가]',
     ] },
     { key: 'admin', title: '관리자', steps: [
-      '아침: [명단 업로드]에서 엑셀 올리기 (제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의).',
-      '[명단 관리]: 주황 테두리 "확인 필요" 환자의 오늘 검사를 지정합니다. 이전 시력이 없으면 [이전 시력 입력].',
-      '다음 주 환자도 날짜를 바꿔 미리 볼 수 있습니다 (지난 시력 · 예정 검사 확인, 이전 시력 입력).',
-      '[접수 안내 일괄 적용]: 접수 때 보여줄 안내 · 진료 전 처치를 여러 명에게 한 번에.',
-      '[FU 지정 관리] · [대기 화면 안내](환자용 화면 노란 문구) · [오늘 통계].',
-      '날짜가 틀리면 메인 화면 "오늘 날짜"에서 그날만 바꿀 수 있습니다.',
+      '전날 · 아침: [명단 업로드]에 엑셀 (제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의)',
+      '[명단 관리]: 주황 "확인 필요" 환자의 오늘 검사 지정',
+      '[FU 지정 관리]: "FU 나중에" 환자의 다음 내원 검사 지정',
+      '[대기 화면 안내]: 환자용 화면 노란 안내 문구',
+    ], tips: [
+      '날짜가 틀리면: 메인 화면 "오늘 날짜"',
+      '서버 · 백업 · 문제 해결: 사용방법.txt',
     ] },
   ];
+}
+// 어느 자리에서나 같은 것 (흐름 그림 아래·자리별 안내 아래 공통)
+const COMMON_TIPS = [
+  '잘못 눌렀으면 아래 알림의 [되돌리기] (몇 초 동안)',
+  '"○○ 안 됨" 안내가 뜨면: 다른 자리에서 먼저 처리한 것 → 바뀐 화면을 보고 필요하면 다시',
+  '위쪽 빨간 띠: 저장이 안 된 것 → 관리 담당에게 알리기',
+];
+function FlowBox({ title, lines, tone = 'slate' }) {
+  const tones = { slate: 'border-slate-300 bg-white', sky: 'border-sky-300 bg-sky-50', violet: 'border-violet-300 bg-violet-50', indigo: 'border-indigo-300 bg-indigo-50', amber: 'border-amber-300 bg-amber-50', emerald: 'border-emerald-300 bg-emerald-50' };
+  return (
+    <div className={`border-2 rounded-xl px-4 py-2.5 ${tones[tone]}`}>
+      <div className="font-semibold text-slate-900 text-base print:text-xl">{title}</div>
+      {lines.map(l => <div key={l} className="text-sm text-slate-700 print:text-base">{l}</div>)}
+    </div>
+  );
+}
+const FlowArrow = () => <div className="flex justify-center text-slate-400 py-0.5"><ArrowDown size={22} /></div>;
+// 환자 흐름 그림 1장 (벽 · 교육용)
+export function FlowSheet({ settings }) {
+  const vision = visionNames(settings).name;
+  const treat = treatRoomOf(settings).name;
+  return (
+    <section className="bg-white border border-slate-200 rounded-xl p-5 mb-4 print:border-0 print:rounded-none print:p-0 print:break-after-page">
+      <div className="text-xs text-slate-400">Ophthalmology Flow · 환자 흐름</div>
+      <h3 className="text-xl font-semibold text-slate-900 mt-1 mb-3 print:text-3xl">환자는 이렇게 움직입니다</h3>
+      <div className="max-w-2xl">
+        <FlowBox title="접수" lines={['QR 접수(환자가 직접) 또는 시력방 [접수]']} />
+        <FlowArrow />
+        <FlowBox tone="sky" title={vision} lines={['시력 · NCT, 초진 History 설문지, 산동 첫 점안']} />
+        <FlowArrow />
+        <div className="grid grid-cols-2 gap-3">
+          <FlowBox tone="violet" title={treat} lines={['초진 · 2차 진료: 검사 지정 · 예진', '진료 전 처치(PRP · YAG)', '검사 준비(skin test 등)']} />
+          <FlowBox tone="indigo" title="검사실" lines={['장비별 검사 (VF · OCT …)', '처방 완료 → 검사 → ✓']} />
+        </div>
+        <div className="text-center text-xs text-slate-500 py-1 print:text-sm">필요한 곳을 모두 거치면 저절로 진료 대기로 (산동 환자는 점안 + 대기시간 뒤)</div>
+        <FlowArrow />
+        <FlowBox tone="amber" title="진료실" lines={['CR · 산동 점안 → 진료 대기 → [진료 호출] → 진료 중', '[보내기]: 시력방 · 검사실 · 처치실에 다녀오면 다시 진료 대기로']} />
+        <FlowArrow />
+        <FlowBox tone="emerald" title="설명 대기" lines={['[설명 완료] + 다음 내원(FU) 지정', '처치가 남으면: 처치실(전공의) · 설명 대기 카드(교수님) → [귀가]']} />
+        <FlowArrow />
+        <FlowBox title="귀가" lines={['같은 날 다른 교수님 진료가 있으면 그 진료로 이어집니다']} />
+      </div>
+      <div className="mt-4 text-sm text-slate-700 print:text-base">
+        <div className="font-semibold text-slate-900 mb-1">어느 자리에서나</div>
+        {COMMON_TIPS.map(t => <div key={t}>· {t}</div>)}
+      </div>
+    </section>
+  );
 }
 export function RoleGuides({ settings }) {
   const sheets = roleGuideSheets(settings);
   return (
     <div>
       <div className="flex items-center justify-between gap-3 flex-wrap mb-4 print:hidden">
-        <p className="text-sm text-slate-500">자리마다 붙여 둘 1장 요약입니다. [인쇄]하면 역할마다 한 장씩 나옵니다 (방 이름은 설정을 따라갑니다).</p>
+        <p className="text-sm text-slate-500">흐름 그림 1장과 자리마다 붙여 둘 1장 요약입니다. [인쇄]하면 한 장씩 나옵니다 (방 이름은 설정을 따라갑니다).</p>
         <button type="button" onClick={() => window.print()} className="text-sm px-4 py-2 rounded-lg bg-slate-800 text-white font-medium">인쇄</button>
       </div>
+      <FlowSheet settings={settings} />
       <div className="grid gap-4 md:grid-cols-2 print:block">
         {sheets.map(sh => (
           <section key={sh.key} className="bg-white border border-slate-200 rounded-xl p-5 print:border-0 print:rounded-none print:p-0 print:break-after-page">
             <div className="text-xs text-slate-400">Ophthalmology Flow · 이 자리 사용법</div>
-            <h3 className="text-xl font-semibold text-slate-900 mt-1 mb-3 print:text-3xl">{sh.title}</h3>
-            <ol className="space-y-1.5 text-sm text-slate-700 print:text-lg print:space-y-3">
-              {sh.steps.map((t, i) => t.startsWith('  · ')
-                ? <li key={i} className="pl-6 text-slate-600">{t.trim()}</li>
-                : <li key={i} className="flex gap-2"><span className="text-slate-400 shrink-0">{sh.steps.slice(0, i + 1).filter(x => !x.startsWith('  · ')).length}.</span><span>{t}</span></li>)}
+            <h3 className="text-xl font-semibold text-slate-900 mt-1 mb-3 print:text-4xl">{sh.title}</h3>
+            <div className="text-xs font-semibold text-slate-500 mb-1 print:text-base">하는 일</div>
+            <ol className="space-y-1.5 text-base text-slate-800 print:text-2xl print:space-y-4">
+              {sh.steps.map((t, i) => <li key={i} className="flex gap-2"><span className="text-slate-400 shrink-0">{i + 1}.</span><span>{t}</span></li>)}
             </ol>
+            <div className="text-xs font-semibold text-slate-500 mt-4 mb-1 print:text-base print:mt-8">이럴 땐</div>
+            <ul className="space-y-1 text-sm text-slate-600 print:text-xl print:space-y-3">
+              {[...sh.tips, ...COMMON_TIPS.slice(1)].map((t, i) => <li key={i}>· {t}</li>)}
+            </ul>
           </section>
         ))}
       </div>

@@ -67,6 +67,8 @@
 - `src/App.jsx` 최상위(동기화·화면 전환), `src/main.jsx` 서버 연결·위쪽 알림 띠(연결·새 버전·저장 실패·파일 문제)
 - `src/ui/safety.jsx` 화면 안전장치(ErrorBoundary·저장 실패 띠·파일 문제 띠·마지막 화면 기억). `scripts/restore.js` = 백업복구.bat
 - `tests/`: Playwright 시나리오(`tests/README.md`), `tests/seed.cjs` 가상 명단
+- **`업무흐름정리.md`**: 방·직원 역할·주고받기, 설정으로 되는 것/코드로 정해진 것(사용자와 Claude용). 새 요청은 먼저 여기 5번으로 범위 판단, 흐름을 바꾸면 같이 고침.
+- 직원용 안내: 관리자 > [역할별 안내문] = 흐름 그림 1장(`FlowSheet`) + 자리별 1장(`roleGuideSheets`: 하는 일 5줄 이내 + 이럴 땐). **화면 동작·버튼 이름을 바꾸면 여기도 고침**(r79). 사용방법.txt는 관리 담당 참고서(10-03 사용자 결정: 글이 많으면 아무도 못 읽음).
 - `.claude/agents/code-improver.md`: 읽기 전용 코드 검토 에이전트(Opus, 한국어). “code-improver로 ○○ 검토해 줘”로 부름. 제안은 확인 후 사용자에게 물어보고 고침
 
 ## 5. 정해진 결정과 이유 (다시 제안하거나 “버그”로 고치지 말 것)
