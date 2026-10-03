@@ -90,7 +90,7 @@ export function PatientDirectory({ patients, settings, doctorPrefs, lastSync, on
   const [date, setDate] = useState(todayISO());
   const [doctor, setDoctor] = useState('');
   const [status, setStatus] = useState('all');
-  const archived = useArchivedPatients(date);
+  const archived = useArchivedPatients(date, patients);
   const source = archived.isArchived ? archived.list : patients;
   const list = filterDirectory(source, settings, date, query, doctor, status, doctorPrefs);
   const doctors = [...new Set(source.map(p => p.doctor).filter(Boolean))];

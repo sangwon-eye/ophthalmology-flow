@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw } from 'lucide-react';
-import { applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
-import { loadEntries, loadFu, useArchivedPatients, visionNames } from '../core/storage.jsx';
+import { applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
+import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
 import { NOTICE_PRESETS, consultRoomLabel } from './BoardView.jsx';
@@ -67,7 +67,7 @@ export function avgText(values) {
 }
 export function DayStats({ patients, doctors }) {
   const [date, setDate] = useState(todayISO());
-  const archived = useArchivedPatients(date);
+  const archived = useArchivedPatients(date, patients);
   const list = (archived.isArchived ? archived.list : patients).filter(p => p.date === date && !p.linkWaiting);
   const checkedIn = list.filter(p => p.checkin);
   const done = list.filter(p => p.consultDone);
@@ -331,6 +331,9 @@ export function BoardNoticeAdmin({ patients = [], settings, doctors, doctorPrefs
   );
 }
 
+// 그저께 이전 날짜는 서버가 보관 파일로 옮긴 명단이라 새로 올리면 보관된 진행 기록과 섞임 → 올리지 않음
+const PAST_DATE_MSG = '어제보다 앞 날짜에는 명단을 올리거나 환자를 추가할 수 없습니다. 지난 명단은 명단 관리에서 날짜를 골라 보세요 (보기 전용).';
+
 // FU 지정 관리 탭을 연 동안만 FU 전체를 받습니다 (평소 화면은 명단에 있는 환자 것만 — App).
 // 고치면 이 목록에 바로 보이고, 저장은 그 환자 칸만 (updateFu). 저장 중에 시작한 새로 받기는 버림 (방금 고친 것이 잠깐 사라지지 않게)
 function useAllFollowups(active, updateFu) {
@@ -407,6 +410,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     const file = e.target.files?.[0];
     if (!file) return;
     const fail = (msg) => { setUploadResult(null); setMessage(msg); e.target.value = ''; };
+    if (isArchivedDate(batchDate)) return fail(PAST_DATE_MSG);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
@@ -477,6 +481,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
   const handleManualAdd = async () => {
     if (!manual.id || !manual.name) { setMessage('환자번호와 이름을 입력해주세요.'); return; }
     if (!batchDoctor) { setMessage('먼저 담당 교수를 선택해주세요.'); return; }
+    if (isArchivedDate(batchDate)) { setMessage(PAST_DATE_MSG); return; }
     const currentFu = await loadEntries('fu-designations', [manual.id.trim()]);
     const np = buildPatient({ ...manual, id: manual.id.trim(), name: manual.name.trim(), reservation: normalizeTime(manual.reservation), date: batchDate, doctor: batchDoctor }, currentFu, settings);
     const stats = await upsert([np]);
@@ -492,7 +497,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     setManual({ id: '', name: '', reservation: '', firstVisit: false });
   };
 
-  const archived = useArchivedPatients(manageDate);
+  const archived = useArchivedPatients(manageDate, patients);
   const readOnly = archived.isArchived;
   const [manageDoctor, setManageDoctor] = useState('');
   const dayAll = (readOnly ? archived.list : patients).filter(p => p.date === manageDate);
@@ -646,7 +651,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       {(tab === 'upload' || tab === 'manual') && (
         <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4 grid grid-cols-2 gap-3">
           <Field label="진료 날짜">
-            <input type="date" value={batchDate} onChange={e => setBatchDate(e.target.value)} className={INPUT} />
+            <input type="date" min={shiftISO(realTodayISO(), -1)} value={batchDate} onChange={e => setBatchDate(e.target.value)} className={INPUT} />
           </Field>
           {tab === 'upload' ? (
             <Field label="진료의">
@@ -800,7 +805,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
               <span className="font-semibold">확인 필요 {checkCount}명</span> · 검사 미지정 또는 지난 진료 FU 미지정
             </div>
           )}
-          {byDate.length === 0 ? <EmptyState text={readOnly && archived.loading ? '불러오는 중…' : mq ? `'${mq}'에 맞는 환자가 없습니다` : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
+          {byDate.length === 0 ? <EmptyState text={readOnly && archived.error ? '명단은 서버에 그대로 있습니다. 연결을 확인한 뒤 날짜를 다시 골라 주세요.' : readOnly && archived.loading ? '불러오는 중…' : mq ? `'${mq}'에 맞는 환자가 없습니다` : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
             const flag = !readOnly && needsTestCheck(p, doctorPrefs);
             return (
             <div key={patientKey(p)} className={`bg-white rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap ${flag ? 'border-2 border-orange-400' : 'border border-slate-200'}`}>

@@ -11,7 +11,8 @@ export async function loadKey(key, fallback, meta) {
   const r = await window.storage.get(key, true);
   if (meta) meta.version = r?.version ?? 0;
   if (!r) return fallback;
-  try { return JSON.parse(r.value); } catch { return fallback; }
+  // 서버 값이 깨져 있으면 빈 값으로 여기지 않고 오류 (빈 값에 변경을 얹어 저장하면 명단 전체가 사라지므로)
+  try { return JSON.parse(r.value); } catch { throw new Error(`${key} 값을 읽지 못했습니다`); }
 }
 export async function saveKey(key, value, version) {
   await window.storage.set(key, JSON.stringify(value), true, version);
@@ -95,7 +96,8 @@ export function isArchivedDate(date) {
   return !!date && date < shiftISO(realTodayISO(), -1);
 }
 // 보관된 날짜를 고르면 그 달의 보관 명단을 한 번 불러옵니다 (보기 전용).
-export function useArchivedPatients(date) {
+// live: 실시간 명단 — 자정 직후처럼 서버가 아직 보관 파일로 옮기지 않은 그 날짜 기록도 함께 보여 줍니다 (같은 기록이면 실시간 것)
+export function useArchivedPatients(date, live = []) {
   const isArchived = isArchivedDate(date);
   const month = isArchived ? date.slice(0, 7) : '';
   const [state, setState] = useState({ month: '', list: [], loading: false, error: false });
@@ -109,7 +111,11 @@ export function useArchivedPatients(date) {
     return () => { alive = false; };
   }, [month]);
   const ready = state.month === month;
-  return { isArchived, list: ready ? state.list : [], loading: isArchived && (!ready || state.loading), error: ready && state.error };
+  const keyOf = p => `${p.id}::${p.date}::${p.visit || 1}`;
+  const extra = isArchived ? live.filter(p => typeof p?.date === 'string' && p.date.slice(0, 7) === month && isArchivedDate(p.date)) : [];
+  const merged = new Map((ready ? state.list : []).map(p => [keyOf(p), p]));
+  extra.forEach(p => merged.set(keyOf(p), p));
+  return { isArchived, list: [...merged.values()], loading: isArchived && (!ready || state.loading), error: ready && state.error };
 }
 
 // 끝내 저장하지 못하면 화면에 알립니다 (ui/safety.jsx 의 빨간 띠). 접속 비밀번호 화면(401)으로 바뀌는 경우는 빼고

@@ -298,7 +298,8 @@ function archiveOldPatients() {
     try { prev = JSON.parse(readItem(key)?.value || '[]'); } catch { prev = []; }
     const keyOf = p => `${p.id}::${p.date}::${p.visit || 1}`;
     const merged = new Map(prev.map(p => [keyOf(p), p]));
-    for (const p of items) merged.set(keyOf(p), p);
+    // 이미 보관된 기록은 덮어쓰지 않음 (지난 날짜에 같은 환자를 다시 올려도 그날 진행 기록이 빈 기록으로 바뀌지 않도록)
+    for (const p of items) if (!merged.has(keyOf(p))) merged.set(keyOf(p), p);
     writeItem(key, JSON.stringify([...merged.values()]));
   }
   // 보관 파일을 먼저 저장한 뒤 실시간 명단에서 뺍니다 (중간에 멈춰도 데이터가 사라지지 않도록).
