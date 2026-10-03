@@ -1,7 +1,7 @@
 // 최상위 App (저장소 동기화와 화면 전환)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
-import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
+import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
 import { StationView } from './views/StationView.jsx';
@@ -172,7 +172,8 @@ export default function App() {
   setVisionTestIds(settings.tests.filter(t => t.roomId === 'vision').map(t => t.id));
   setNoDilateTests(settings.tests.filter(noDilateTest).map(t => ({ id: t.id, short: t.short || t.name })));
   // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
-  setForcedToday(todayOverride?.date && todayOverride.setOn === realTodayISO() ? todayOverride.date : null);
+  // 어제보다 앞 날짜(보관 파일로 옮겨진 명단)는 업무 날짜로 쓰지 않음 — 예전에 정해 둔 값도 무시
+  setForcedToday(todayOverride?.date && todayOverride.setOn === realTodayISO() && todayOverride.date >= shiftISO(realTodayISO(), -1) ? todayOverride.date : null);
   const setToday = (date) => mutateTodayOverride(() => (date && date !== realTodayISO() ? { date, setOn: realTodayISO() } : null));
 
   const refresh = useCallback(async () => {

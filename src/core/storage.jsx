@@ -1,6 +1,6 @@
 // 서버 저장소 읽기·쓰기와 공유 상태 훅
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ARK_TEST, DEFAULT_SETTINGS, DRAG_ACTIVE, GAT_ID, GAT_TEST, TREAT_ROOM, normalizeTests, todayISO } from './flow.jsx';
+import { ARK_TEST, DEFAULT_SETTINGS, DRAG_ACTIVE, GAT_ID, GAT_TEST, TREAT_ROOM, normalizeTests, realTodayISO } from './flow.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 저장소 (window.storage, 공유)                                        */
@@ -89,8 +89,10 @@ export function shiftISO(iso, days) {
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
 }
+// 서버는 실제 날짜(서버 PC 시계) 기준으로 그저께 이전 명단을 보관 파일로 옮기므로, 여기서도 실제 날짜로 판단합니다.
+// (메인 화면에서 날짜를 직접 정해도 보관 여부는 바뀌지 않음 — 정한 날짜로 판단하면 보관 명단이 안 보이던 문제)
 export function isArchivedDate(date) {
-  return !!date && date < shiftISO(todayISO(), -1);
+  return !!date && date < shiftISO(realTodayISO(), -1);
 }
 // 보관된 날짜를 고르면 그 달의 보관 명단을 한 번 불러옵니다 (보기 전용).
 export function useArchivedPatients(date) {

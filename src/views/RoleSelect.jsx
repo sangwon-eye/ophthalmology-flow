@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
 import { COLOR_MAP, INPUT, applyCheckin, consultWaiting, forcedToday, patientKey, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, todayISO, treatRoomOf, treatWork, treatWorkCount, visionWaiting } from '../core/flow.jsx';
-import { visionNames } from '../core/storage.jsx';
+import { shiftISO, visionNames } from '../core/storage.jsx';
 import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
 import { patientBoardName } from './BoardView.jsx';
 
@@ -272,7 +272,12 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
   const [about, setAbout] = useState(false);
   // 날짜 바꾸기는 모든 컴퓨터 명단이 바뀌므로 고른 뒤 [바꾸기]를 한 번 더 눌러야 적용 (실제 날짜로 되돌리는 것은 바로)
   const [pendingDate, setPendingDate] = useState(null);
+  const [tooOld, setTooOld] = useState(false);
+  const minDate = shiftISO(realTodayISO(), -1);
   const pickDate = (v) => {
+    setTooOld(false);
+    // 그저께 이전 명단은 서버가 보관 파일로 옮겨 두므로 업무 날짜로 쓸 수 없음 (보기는 명단 관리·전체 환자 명단에서)
+    if (v && v < minDate) { setPendingDate(null); setTooOld(true); return; }
     if (!v || v === todayISO()) { setPendingDate(null); return; }
     if (v === realTodayISO()) { setPendingDate(null); onSetToday(null); return; }
     setPendingDate(v);
@@ -325,7 +330,7 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
             <TextSizeControl />
             <span className="flex items-center gap-2 flex-wrap justify-center">
               <span className="text-slate-500">오늘 날짜</span>
-              <input type="date" aria-label="오늘 날짜" value={pendingDate || todayISO()} onChange={e => pickDate(e.target.value)}
+              <input type="date" aria-label="오늘 날짜" min={minDate} value={pendingDate || todayISO()} onChange={e => pickDate(e.target.value)}
                 className={`border rounded-lg px-3 py-1.5 bg-white ${forcedToday || pendingDate ? 'border-amber-400' : 'border-slate-300'}`} />
               {pendingDate ? <>
                 <button type="button" onClick={() => { onSetToday(pendingDate); setPendingDate(null); }} className="text-xs px-3 py-1.5 rounded-lg bg-amber-500 text-white font-semibold">모든 컴퓨터 {Number(pendingDate.slice(5, 7))}월 {Number(pendingDate.slice(8, 10))}일로 바꾸기</button>
@@ -335,6 +340,11 @@ export function RoleSelect({ settings, onSelect, onSetToday, patients = [], doct
                 <button type="button" onClick={() => onSetToday(null)} className="text-xs underline text-slate-600">실제 날짜({realTodayISO()})로 되돌리기</button>
               </> : <span className="text-xs text-slate-400">컴퓨터 날짜 자동</span>}
             </span>
+            {tooOld && (
+              <span role="alert" className="basis-full text-xs text-rose-700">
+                어제보다 앞 날짜는 고를 수 없습니다. 지난 명단은 관리자 &gt; 명단 관리나 전체 환자 명단에서 날짜를 골라 보세요.
+              </span>
+            )}
           </div>
         </div>
         {groupTitle('진료 흐름 · 직원 화면')}
