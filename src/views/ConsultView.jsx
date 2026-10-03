@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { VISION_KEY, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -303,14 +303,21 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems, x => x.procOrderedAt === at)));
   };
 
+  // 교수님 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 그대로 남김)
   const finishProfProcedure = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
-    patch(pk, x => ({ procedures: (x.procedures || []).map(i => (i.performer === 'prof' && !i.done ? { ...i, done: true, doneAt: at } : i)) }));
-    const next = pendingProcedures(p, 'resident').length ? '처치실로' : p.explainedEarly ? '귀가 대기' : '설명 가능';
-    showToast(`${p.name} 처치 완료, ${next}`, () => patch(pk, x => ({
-      procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
-    })));
+    const ids = new Set(pendingProcedures(p, 'prof').map(i => i.uid));
+    patch(pk, x => ({ procedures: (x.procedures || []).map(i => (ids.has(i.uid) && !i.done ? { ...i, done: true, doneAt: at } : i)) })).then(list => {
+      const rec = Array.isArray(list) ? list.find(x => patientKey(x) === pk) : null;
+      if (!rec) return;
+      const leftProf = pendingProcedures(rec, 'prof');
+      const next = leftProf.length ? `새로 들어온 교수님 처치가 남아 있습니다: ${leftProf.map(procLabel).join(', ')}`
+        : pendingProcedures(rec, 'resident').length ? '처치실로' : rec.explainedEarly ? '귀가 대기' : '설명 가능';
+      showToast(`${p.name} 처치 완료, ${next}`, () => patch(pk, x => ({
+        procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
+      })));
+    }, () => {});
   };
 
   const completeExplain = async (sel, detail, dil, _triage, linkDoctor, { later = false, noFu = false, patient } = {}) => {

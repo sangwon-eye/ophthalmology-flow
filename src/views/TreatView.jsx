@@ -1,6 +1,6 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { dilationState, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
+import { dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -34,25 +34,34 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   // 진료실 요청 처리. 여러 가지를 함께 할 수 있습니다: 검사 추가, 시력/안압 다시, 예진 추가
   const finishRequest = (p, testIds = [], detail = {}, { vision = false, triage = false } = {}) => {
     const pk = patientKey(p);
+    const at = Date.now();
     const before = { measureOk: p.measureOk ?? null, vaOk: p.vaOk ?? null, nctOk: p.nctOk ?? null, treatRequest: p.treatRequest, assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, extraTriage: p.extraTriage, triageDone: p.triageDone, triageAt: p.triageAt, orders: p.orders };
+    // 서버의 최신 기록으로 다시 확인: 그 요청이 아직 남아 있을 때만 (다른 PC가 먼저 처리했으면 다시 적용하지 않고 안내)
+    // treatHandledAt: 이 버튼으로 처리했다는 표시 (되돌리기·안내 판단용)
     patchPatient(mutatePatients, pk, x => {
+      if (!treatRequested(x) || (p.treatRequest?.at && x.treatRequest?.at !== p.treatRequest.at)) return {};
       const assigned = { ...x.assigned }, done = { ...x.done }, doneAt = { ...x.doneAt }, nd = { ...(x.detail || {}) };
       testIds.forEach(id => { assigned[id] = true; done[id] = false; if (detail?.[id]) nd[id] = detail[id]; });
       if (vision) { done[VISION_KEY] = false; doneAt[VISION_KEY] = null; }
       return {
         ...(vision ? { measureOk: null, vaOk: null, nctOk: null } : {}),
-        treatRequest: null, assigned, done, doneAt, detail: nd, orders: clearOrders(x, testIds),
+        treatRequest: null, treatHandledAt: at, assigned, done, doneAt, detail: nd, orders: clearOrders(x, testIds),
         ...(triage ? { extraTriage: true, triageDone: false, triageAt: null } : {}),
       };
-    });
-    const steps = [vision && '시력/안압', testIds.length && '검사', triage && '예진'].filter(Boolean);
-    // 되돌리기: 이 버튼이 바꾼 검사(추가한 검사·시력/안압)만 원래대로, 다른 PC가 그사이 완료한 검사는 그대로
-    const touched = [...testIds, ...(vision ? [VISION_KEY] : [])];
-    const { assigned: bA, done: bD, doneAt: bT, detail: bDe, ...scalars } = before;
-    showToast(`${p.name} ${steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
-      ...(vision ? scalars : { treatRequest: scalars.treatRequest, extraTriage: scalars.extraTriage, triageDone: scalars.triageDone, triageAt: scalars.triageAt, orders: scalars.orders }),
-      ...restoreKeys(x, { assigned: bA, done: bD, doneAt: bT, detail: bDe }, touched),
-    })));
+    }).then(next => {
+      const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!rec) return;
+      if (rec.treatHandledAt !== at) { showToast(`${p.name} 환자의 진료실 요청은 이미 다른 곳에서 처리되었습니다 · 바꾸지 않았습니다`); return; }
+      const steps = [vision && '시력/안압', testIds.length && '검사', triage && '예진'].filter(Boolean);
+      // 되돌리기: 이 버튼이 바꾼 검사(추가한 검사·시력/안압)만 원래대로, 다른 PC가 그사이 완료한 검사는 그대로
+      const touched = [...testIds, ...(vision ? [VISION_KEY] : [])];
+      const { assigned: bA, done: bD, doneAt: bT, detail: bDe, ...scalars } = before;
+      showToast(`${p.name} ${steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => (x.treatHandledAt !== at ? {} : {
+        ...(vision ? scalars : { treatRequest: scalars.treatRequest, extraTriage: scalars.extraTriage, triageDone: scalars.triageDone, triageAt: scalars.triageAt, orders: scalars.orders }),
+        ...restoreKeys(x, { assigned: bA, done: bD, doneAt: bT, detail: bDe }, touched),
+        treatHandledAt: null,
+      })));
+    }, () => {});
   };
   const triage = [...work.triage].sort(order);
   const procs = [...work.procs].sort(order);
@@ -132,81 +141,115 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     return () => clearInterval(t);
   }, []);
   // 바로 넘어감: 시작하면 검사 완료로 두고(다음 검사·진료로 이동), 확인은 나중에
+  // 시간 재는 검사·준비 버튼은 모두 서버의 최신 기록으로 다시 확인합니다: 다른 PC가 먼저 시작·확인·취소했으면 다시 적용하지 않고,
+  // 되돌리기도 아직 이 버튼이 바꾼 그대로일 때만 (늦게 누른 [시작 취소]가 방금 한 확인을 지우지 않게)
+  const prepNow = (x, t) => x.prep?.[t.id] || null;
+  // 저장된 결과로 이 버튼이 들어갔는지 확인한 뒤 안내 (안 들어갔으면 '이미 다른 곳에서' 안내, 되돌리기 없음)
+  const prepSave = (p, fn, applied, msg, undo) => patchPatient(mutatePatients, patientKey(p), fn).then(next => {
+    const rec = Array.isArray(next) ? next.find(x => patientKey(x) === patientKey(p)) : null;
+    if (!rec) return;
+    if (applied(rec)) showToast(msg, undo);
+    else showToast(`${p.name} 환자는 이미 다른 곳에서 처리되었습니다 · 바꾸지 않았습니다`);
+  }, () => {});
   const startGo = (p, t) => {
     const pk = patientKey(p);
     const at = Date.now();
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
-    patchPatient(mutatePatients, pk, x => ({
+    prepSave(p, x => (prepNow(x, t)?.startedAt ? {} : {
       prep: { ...(x.prep || {}), [t.id]: { startedAt: at, go: true, name: t.short || t.name } },
       done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at },
-    }));
-    showToast(`${p.name} ${prepLabel(t)} 시작 · 시간이 되면 알려드려요`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
+    }), rec => prepNow(rec, t)?.startedAt === at, `${p.name} ${prepLabel(t)} 시작 · 시간이 되면 알려드려요`,
+    () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.startedAt === at ? restoreKeys(x, before, [t.id]) : {})));
   };
   const cancelGo = (p, t) => {
     const pk = patientKey(p);
+    const st = prepOf(p, t);
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
-    patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: null }, done: { ...x.done, [t.id]: false }, doneAt: { ...(x.doneAt || {}), [t.id]: null } }));
-    showToast(`${p.name} ${t.short || t.name} 시작 취소`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
+    prepSave(p, x => (prepNow(x, t)?.startedAt === st?.startedAt && !prepNow(x, t)?.checked
+      ? { prep: { ...(x.prep || {}), [t.id]: null }, done: { ...x.done, [t.id]: false }, doneAt: { ...(x.doneAt || {}), [t.id]: null } } : {}),
+    rec => !prepNow(rec, t), `${p.name} ${t.short || t.name} 시작 취소`,
+    () => patchPatient(mutatePatients, pk, x => (!prepNow(x, t) ? restoreKeys(x, before, [t.id]) : {})));
   };
   const checkGo = (p, t) => {
     const pk = patientKey(p);
     const st = prepOf(p, t);
-    patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: { ...(x.prep?.[t.id] || st), checked: Date.now() } } }));
-    showToast(`${p.name} ${t.short || t.name} 확인`, () => patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: st } })));
+    const at = Date.now();
+    prepSave(p, x => (prepNow(x, t)?.checked ? {} : { prep: { ...(x.prep || {}), [t.id]: { ...(prepNow(x, t) || st), checked: at } } }),
+      rec => prepNow(rec, t)?.checked === at, `${p.name} ${t.short || t.name} 확인`,
+      () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.checked === at ? { prep: { ...(x.prep || {}), [t.id]: st } } : {})));
   };
   const confirmTimed = (p, t) => {
     const pk = patientKey(p);
+    const at = Date.now();
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
-    patchPatient(mutatePatients, pk, x => prepConfirmPatch(x, t, settings, Date.now()));
-    showToast(`${p.name} ${t.short || t.name} 완료`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
+    prepSave(p, x => (prepNow(x, t)?.startedAt && !prepNow(x, t).result ? prepConfirmPatch(x, t, settings, at) : {}),
+      rec => prepNow(rec, t)?.at === at, `${p.name} ${t.short || t.name} 완료`,
+      () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.at === at ? restoreKeys(x, before, [t.id]) : {})));
   };
-  const setPrep = (p, t, value, msg) => {
+  // when(지금 서버 값): 이 조건일 때만 저장. 되돌리기는 아직 이 버튼이 넣은 값 그대로일 때만
+  const setPrep = (p, t, value, msg, when = () => true) => {
     const pk = patientKey(p);
     const before = p.prep?.[t.id] || null;
-    patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: value } }));
-    if (msg) showToast(msg, () => patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: before } })));
+    const same = (v) => JSON.stringify(v ?? null) === JSON.stringify(value ?? null);
+    prepSave(p, x => (when(prepNow(x, t)) ? { prep: { ...(x.prep || {}), [t.id]: value } } : {}), rec => same(prepNow(rec, t)), msg,
+      () => patchPatient(mutatePatients, pk, x => (same(prepNow(x, t)) ? { prep: { ...(x.prep || {}), [t.id]: before } } : {})));
   };
+  // 시작 전일 때만 시작, 같은 시작에 아직 결과가 없을 때만 시작 취소·검사 취소·확인
+  const notStarted = (cur) => !cur?.startedAt;
+  const sameRun = (st) => (cur) => !!cur?.startedAt && cur.startedAt === st?.startedAt && !cur.result;
   // [확인]: 검사실에서 검사할 수 있게 열어 줌. '확인하면 검사 완료'(예: Schirmer, MMP)면 검사도 완료로
   const confirmPrep = (p, t, st) => {
     const pk = patientKey(p);
     const at = Date.now();
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
-    patchPatient(mutatePatients, pk, x => ({
+    prepSave(p, x => (!sameRun(st)(prepNow(x, t)) ? {} : {
       prep: { ...(x.prep || {}), [t.id]: { ...st, result: 'neg', at } },
       ...(prepCompletesTest(t) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
-    }));
-    showToast(`${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
+    }), rec => prepNow(rec, t)?.at === at, `${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`,
+    () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.at === at ? restoreKeys(x, before, [t.id]) : {})));
   };
   // 진료 전 처치 (예: PRP, YAG): 처치 완료 후 검사가 있으면 검사실, 없으면 진료 대기로
   const preProcList = [...work.preProc].sort(order);
   const finishPreProcs = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
-    patchPatient(mutatePatients, pk, x => ({ preProcs: (x.preProcs || []).map(i => (i.done ? i : { ...i, done: true, doneAt: at })) }));
+    // 화면에 보이던 진료 전 처치만 완료
+    const ids = new Set((p.preProcs || []).filter(i => !i.done).map(i => i.uid));
+    patchPatient(mutatePatients, pk, x => ({ preProcs: (x.preProcs || []).map(i => (i.done || !ids.has(i.uid) ? i : { ...i, done: true, doneAt: at })) }));
     const next = { ...p, preProcs: (p.preProcs || []).map(i => ({ ...i, done: true })) };
     showToast(`${p.name} 진료 전 처치 완료, ${pendingRooms(next, settings).length ? '검사실로' : '진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
       preProcs: (x.preProcs || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
     })));
   };
 
+  // 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 하지 않은 것이므로 그대로 남김)
   const finishResident = (p) => {
     const pk = patientKey(p);
     const at = Date.now();
+    const ids = new Set(pendingProcedures(p, 'resident').map(i => i.uid));
     patchPatient(mutatePatients, pk, x => ({
-      procedures: (x.procedures || []).map(i => (i.performer === 'resident' && !i.done ? { ...i, done: true, doneAt: at } : i)),
-    }));
-    showToast(`${p.name} 처치 완료, ${p.explainedEarly ? '진찰실에서 귀가 처리' : '설명 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
-      procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
-    })));
+      procedures: (x.procedures || []).map(i => (ids.has(i.uid) && !i.done ? { ...i, done: true, doneAt: at } : i)),
+    })).then(next => {
+      const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!rec) return;
+      const left = pendingProcedures(rec, 'resident');
+      const undo = () => patchPatient(mutatePatients, pk, x => ({
+        procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
+      }));
+      showToast(left.length ? `${p.name} 처치 완료 · 새로 들어온 처치가 남아 있습니다: ${left.map(procLabel).join(', ')}`
+        : `${p.name} 처치 완료, ${rec.explainedEarly ? '진찰실에서 귀가 처리' : '설명 대기로'}`, undo);
+    }, () => {});
   };
 
-  const undoRecent = ({ p, kind }) => {
+  // 최근 완료 되돌리기: 예진은 그 예진 완료 그대로일 때만, 처치는 가장 최근에 함께 완료한 처치만 (이미 귀가한 환자는 그대로 — 되돌려도 어디에도 안 보임)
+  const undoRecent = ({ p, kind, at }) => {
     const pk = patientKey(p);
     if (kind === 'triage') {
-      patchPatient(mutatePatients, pk, () => ({ triageDone: false, triageAt: null }));
+      patchPatient(mutatePatients, pk, x => (x.triageAt === p.triageAt ? { triageDone: false, triageAt: null } : {}));
     } else {
-      patchPatient(mutatePatients, pk, x => ({
-        procedures: (x.procedures || []).map(i => (i.performer === 'resident' ? { ...i, done: false, doneAt: null } : i)),
+      if (p.consultDone) { showToast(`${p.name} 환자는 이미 귀가 처리되었습니다 · 진료실 '방금 완료한 환자'에서 설명 완료 취소 후 다시 해 주세요`); return; }
+      patchPatient(mutatePatients, pk, x => (x.consultDone ? {} : {
+        procedures: (x.procedures || []).map(i => (i.performer === 'resident' && i.done && i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
       }));
     }
   };
@@ -299,17 +342,17 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                   <div key={t.id} className="flex items-center gap-2 flex-wrap mr-4">
                     <span className="text-sm font-semibold text-slate-900">{t.short || t.name}</span>
                     {!st?.startedAt ? (
-                      <button type="button" onClick={() => (prepGoMode(t) ? startGo(p, t) : setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`))}
+                      <button type="button" onClick={() => (prepGoMode(t) ? startGo(p, t) : setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`, notStarted))}
                         className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium">{label}</button>
                     ) : due ? (
                       <button type="button" onClick={() => confirmPrep(p, t, st)} title={prepCompletesTest(t) ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
                         className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">{label} 끝 · 확인</button>
                     ) : (
-                      <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`)} title={`${prepWaitMin(t)}분 뒤 [확인] · 다시 누르면 시작 취소`}
+                      <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`, sameRun(st))} title={`${prepWaitMin(t)}분 뒤 [확인] · 다시 누르면 시작 취소`}
                         className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-medium">{label} {fmtClock(st.startedAt)}</button>
                     )}
                     {st?.startedAt && !due && <button type="button" onClick={() => confirmPrep(p, t, st)} title="시간 전이지만 지금 완료로 처리" className="text-xs text-green-700 underline">지금 확인</button>}
-                    {st?.startedAt && <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`)} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
+                    {st?.startedAt && <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`, sameRun(st))} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
                       className="text-xs text-red-600 underline">검사 취소</button>}
                   </div>
                 );

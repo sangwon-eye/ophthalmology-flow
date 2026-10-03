@@ -64,7 +64,7 @@ async function drive(page, ms) {
         const inputs = modal.locator('input[type=text], input:not([type])');
         if (await inputs.count() && rand() < 0.5) await inputs.first().fill(String(Math.round(rand() * 10) / 10), { timeout: 800 }).catch(() => {});
         const btns = await modal.getByRole('button').all();
-        const names = await Promise.all(btns.map(b => b.innerText().catch(() => '')));
+        const names = await Promise.all(btns.map(b => b.innerText({ timeout: 500 }).catch(() => '')));
         const okIdx = names.map((n, i) => (MODAL_OK.test(n.trim()) ? i : -1)).filter(i => i >= 0);
         const cancelIdx = names.findIndex(n => n.trim() === '취소');
         const pickIdx = okIdx.length && rand() < 0.8 ? okIdx[Math.floor(rand() * okIdx.length)] : cancelIdx;
@@ -74,8 +74,8 @@ async function drive(page, ms) {
         const btns = await page.locator('main button:visible, [class*="max-w"] button:visible').all();
         const cand = [];
         for (const b of btns.slice(0, 200)) {
-          const n = (await b.innerText().catch(() => '')).trim();
-          if (n && SAFE.test(n) && !AVOID.test(n) && await b.isEnabled().catch(() => false)) cand.push(b);
+          const n = (await b.innerText({ timeout: 500 }).catch(() => '')).trim();
+          if (n && SAFE.test(n) && !AVOID.test(n) && await b.isEnabled({ timeout: 500 }).catch(() => false)) cand.push(b);
         }
         if (cand.length) { await cand[Math.floor(rand() * cand.length)].click({ timeout: 1000 }).catch(() => {}); clicks++; }
       }
