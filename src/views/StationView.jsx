@@ -123,7 +123,15 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
 
   const changeVf = (p, t, action) => {
     const at = Date.now();
-    patchPatient(mutatePatients, patientKey(p), x => updateVf(x, t.id, action, at));
+    const pk = patientKey(p);
+    // updateVf 가 서버의 최신 기록으로 다시 확인 (다른 장비에서 방금 다른 검사를 시작했으면 시작하지 않음) → 안 됐으면 알림
+    patchPatient(mutatePatients, pk, x => updateVf(x, t.id, action, at)).then(next => {
+      if (action !== 'start' || !Array.isArray(next)) return;
+      const rec = next.find(x => patientKey(x) === pk);
+      if (!rec || rec.vfStartedAt === at) return;
+      const busy = activeVf(rec);
+      showToast(`${t.short || t.name} 시작 안 됨 · ${p.name} 환자는 ${busy ? `이미 ${testLabel(busy)} 검사 중입니다` : '이미 다른 곳에서 처리되었습니다'}`);
+    }, () => {});
   };
 
   // 시력방: 할 일(측정값·History·시력방 검사·점안)을 모두 마치면 자동으로 시력/안압 완료.
