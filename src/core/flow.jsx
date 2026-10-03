@@ -533,6 +533,21 @@ export function dilationState(p, prefs, waitMin, now = Date.now()) {
   if (given < total) return { ...base, status: 'progress' };
   return { ...base, status: mins >= (Number(waitMin) || 15) ? 'ready' : 'waiting' };
 }
+// 되돌리기: 그 버튼이 바꾼 검사 칸만 원래대로 (그사이 다른 컴퓨터가 완료한 다른 검사·칸은 그대로 둠)
+// before: 누르기 전 { done, doneAt, assigned, detail, prep } 중 일부, ids: 그 버튼이 바꾼 검사 id
+export function restoreKeys(x, before, ids) {
+  const out = {};
+  ['done', 'doneAt', 'assigned', 'detail', 'prep'].forEach(field => {
+    if (!(field in before)) return;
+    const cur = { ...(x[field] || {}) };
+    ids.forEach(id => {
+      const v = before[field]?.[id];
+      if (v === undefined) delete cur[id]; else cur[id] = v;
+    });
+    out[field] = cur;
+  });
+  return out;
+}
 export function patchPatient(mutatePatients, pk, fn) {
   mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? { ...x, ...fn(x) } : x)));
 }

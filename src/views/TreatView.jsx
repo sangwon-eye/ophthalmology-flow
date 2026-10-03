@@ -1,6 +1,6 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { dilationState, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys } from '../core/flow.jsx';
+import { dilationState, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -46,7 +46,13 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       };
     });
     const steps = [vision && '시력/안압', testIds.length && '검사', triage && '예진'].filter(Boolean);
-    showToast(`${p.name} ${steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, () => before));
+    // 되돌리기: 이 버튼이 바꾼 검사(추가한 검사·시력/안압)만 원래대로, 다른 PC가 그사이 완료한 검사는 그대로
+    const touched = [...testIds, ...(vision ? [VISION_KEY] : [])];
+    const { assigned: bA, done: bD, doneAt: bT, detail: bDe, ...scalars } = before;
+    showToast(`${p.name} ${steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
+      ...(vision ? scalars : { treatRequest: scalars.treatRequest, extraTriage: scalars.extraTriage, triageDone: scalars.triageDone, triageAt: scalars.triageAt, orders: scalars.orders }),
+      ...restoreKeys(x, { assigned: bA, done: bD, doneAt: bT, detail: bDe }, touched),
+    })));
   };
   const triage = [...work.triage].sort(order);
   const procs = [...work.procs].sort(order);
@@ -125,13 +131,13 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       prep: { ...(x.prep || {}), [t.id]: { startedAt: at, go: true, name: t.short || t.name } },
       done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at },
     }));
-    showToast(`${p.name} ${prepLabel(t)} 시작 · 시간이 되면 알려드려요`, () => patchPatient(mutatePatients, pk, () => before));
+    showToast(`${p.name} ${prepLabel(t)} 시작 · 시간이 되면 알려드려요`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
   };
   const cancelGo = (p, t) => {
     const pk = patientKey(p);
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
     patchPatient(mutatePatients, pk, x => ({ prep: { ...(x.prep || {}), [t.id]: null }, done: { ...x.done, [t.id]: false }, doneAt: { ...(x.doneAt || {}), [t.id]: null } }));
-    showToast(`${p.name} ${t.short || t.name} 시작 취소`, () => patchPatient(mutatePatients, pk, () => before));
+    showToast(`${p.name} ${t.short || t.name} 시작 취소`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
   };
   const checkGo = (p, t) => {
     const pk = patientKey(p);
@@ -143,7 +149,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const pk = patientKey(p);
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
     patchPatient(mutatePatients, pk, x => prepConfirmPatch(x, t, settings, Date.now()));
-    showToast(`${p.name} ${t.short || t.name} 완료`, () => patchPatient(mutatePatients, pk, () => before));
+    showToast(`${p.name} ${t.short || t.name} 완료`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
   };
   const setPrep = (p, t, value, msg) => {
     const pk = patientKey(p);
@@ -160,7 +166,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       prep: { ...(x.prep || {}), [t.id]: { ...st, result: 'neg', at } },
       ...(prepCompletesTest(t) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
     }));
-    showToast(`${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`, () => patchPatient(mutatePatients, pk, () => before));
+    showToast(`${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
   };
   // 진료 전 처치 (예: PRP, YAG): 처치 완료 후 검사가 있으면 검사실, 없으면 진료 대기로
   const preProcList = [...work.preProc].sort(order);

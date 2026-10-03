@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { VISION_KEY, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -157,6 +157,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const mine = patients.filter(p => p.doctor === selectedDoctor);
   const explainList = mine.filter(awaitingExplain).sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0));
   const inRoom = mine.find(inConsult);
+  // 안전망: 어떤 이유로든 '진료 중'이 두 명 이상이면 나머지도 보이게 (화면에서 사라지지 않도록)
+  const extraInRoom = mine.filter(inConsult).filter(x => x !== inRoom);
   // CR(진료실 간호사 담당)·점안 후 다시 진료: 점안이 끝날 때까지 'CR·산동 점안' 칸에 (시간이 지나면 저절로 진료 대기로)
   const [, setTick] = useState(0);
   useEffect(() => { const i = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(i); }, []);
@@ -182,6 +184,24 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     return prev.map(x => (patientKey(x) === pk ? { ...x, ...extra(x), seen: false, seenAt: null, calledRoom: someoneIn ? null : doctor } : x));
   });
 
+  // 진료 호출: 서버의 최신 명단으로 다시 확인 (다른 PC가 1~2초 사이에 다른 환자를 먼저 불렀거나, 이 환자를 다른 곳으로 보냈으면 부르지 않음)
+  const callPatient = (p) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    mutatePatients(prev => {
+      const target = prev.find(x => patientKey(x) === pk);
+      if (prev.some(x => patientKey(x) !== pk && x.doctor === doctor && inConsult(x))) return prev;
+      if (!target || !consultWaiting(target, settings, doctorPrefs)) return prev;
+      return prev.map(x => (x === target ? { ...x, calledRoom: doctor, calledAt: at, sendNote: null } : x));
+    }).then(next => {
+      // 서버에 저장된 결과로 확인: 이 호출이 들어가지 않았으면 이유를 알림
+      const t = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!Array.isArray(next) || (t?.calledRoom === doctor && t.calledAt === at)) return;
+      const other = next.find(x => patientKey(x) !== pk && x.doctor === doctor && inConsult(x));
+      showToast(`진료 호출 안 됨 · ${other ? `${other.name} 환자가 이미 진료 중입니다` : `${p.name} 환자는 이미 다른 곳에서 처리되었습니다`}`);
+    }, () => {});
+  };
+
   // 실수로 진료 완료를 눌렀을 때: 설명 대기에서 다시 진료 중(또는 진료 대기 앞)으로
   const undoFinishConsult = (p) => {
     const pk = patientKey(p);
@@ -200,10 +220,12 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   // 다시 진료 취소: 원래 있던 곳으로 (설명 대기에서 보냈으면 설명 대기, 진료 중에 보냈으면 진료 대기 맨 앞)
   const cancelRedo = (p) => {
     const pk = patientKey(p);
-    const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'explainedEarly', 'cr', 'dilateOverride', 'drops', 'dropsExtra', 'dropsBefore', 'procedures', 'procOrderedAt'];
+    const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'explainedEarly', 'cr', 'dilateOverride', 'drops', 'dropsExtra', 'dropsBefore', 'procOrderedAt'];
     const before = Object.fromEntries(keys.map(k => [k, p[k]]));
+    // 취소하면서 시작한 처치(설명 대기에서 보냈던 경우)는 되돌릴 때 그 처치만 다시 빼기 (다른 처치 기록은 그대로)
+    const added = new Set((p.redo?.prev?.seen ? (p.redo?.pending || []) : []).map(i => i.uid));
     patch(pk, x => cancelRedoPatch(x));
-    showToast(`${p.name} 다시 진료 취소, ${p.redo?.prev?.seen ? '설명 대기로' : '진료 대기로'}`, () => patch(pk, () => before));
+    showToast(`${p.name} 다시 진료 취소, ${p.redo?.prev?.seen ? '설명 대기로' : '진료 대기로'}`, () => patch(pk, x => ({ ...before, procedures: (x.procedures || []).filter(i => !added.has(i.uid)) })));
   };
 
   const orderProcedures = (chosen, redoKind) => {
@@ -362,8 +384,12 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const at = Date.now();
     setSendFor(null);
     const sendNote = note ? { text: note, from: doctor, at } : null;
-    const before = { measureOk: p.measureOk ?? null, vaOk: p.vaOk ?? null, nctOk: p.nctOk ?? null, done: p.done, doneAt: p.doneAt, assigned: p.assigned, detail: p.detail, queueKey: p.queueKey, calledRoom: p.calledRoom, consultHold: p.consultHold, sendNote: p.sendNote, treatRequest: p.treatRequest };
-    const undo = () => patch(pk, () => before);
+    const tests = { done: p.done, doneAt: p.doneAt, assigned: p.assigned, detail: p.detail };
+    const scalars = { queueKey: p.queueKey, calledRoom: p.calledRoom, consultHold: p.consultHold, sendNote: p.sendNote, treatRequest: p.treatRequest, orders: p.orders,
+      ...(dest === 'vision' ? { measureOk: p.measureOk ?? null, vaOk: p.vaOk ?? null, nctOk: p.nctOk ?? null } : {}) };
+    // 되돌리기: 보낼 때 바꾼 검사(고른 검사·시력/안압)만 원래대로, 그사이 다른 PC가 완료한 다른 검사는 그대로
+    const touched = dest === 'exam' ? allTests.filter(t => sel[t.id]).map(t => t.id) : dest === 'vision' ? [VISION_KEY] : [];
+    const undo = () => patch(pk, x => ({ ...scalars, ...restoreKeys(x, tests, touched) }));
     if (dest === 'exam') {
       const ids = allTests.filter(t => sel[t.id]).map(t => t.id);
       applyExtraTests(pk, ids, detail || {}, sendNote);
@@ -453,6 +479,17 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
             </div>
           )}
 
+          {extraInRoom.length > 0 && (
+            <div role="alert" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 flex flex-wrap items-center gap-2">
+              <span>진료 중으로 함께 표시된 환자가 있습니다:</span>
+              {extraInRoom.map(x => (
+                <span key={patientKey(x)} className="flex items-center gap-1">
+                  <span className="t-name">{x.name}</span>
+                  <button type="button" onClick={() => patch(patientKey(x), () => ({ calledRoom: null }))} className="text-xs px-2 py-1 rounded border border-amber-400 bg-white">진료 대기로</button>
+                </span>
+              ))}
+            </div>
+          )}
           {inRoom && (
             <div className="bg-white border-2 border-amber-300 rounded-2xl p-6 mb-6">
               <div className="text-sm text-amber-600 font-medium mb-1">현재 진료 중</div>
@@ -550,7 +587,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     <button
                       type="button"
                       disabled={!!inRoom}
-                      onClick={() => patch(pk, () => ({ calledRoom: doctor, calledAt: Date.now(), sendNote: null }))}
+                      onClick={() => callPatient(p)}
                       className={`text-sm px-3 py-1.5 rounded-lg font-medium ${inRoom ? 'bg-slate-200 text-slate-400' : 'bg-amber-600 text-white'}`}
                     >
                       진료 호출

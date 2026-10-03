@@ -1,7 +1,7 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, reservationQueueKey, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { TwoStepButton, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -204,15 +204,22 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
     patchPatient(mutatePatients, pk, x => (kind === 'start' ? prepStartPatch(x, t, at) : kind === 'confirm' ? prepConfirmPatch(x, t, settings, at) : prepCancelPatch(x, t)));
     const label = prepLabel(t);
     const msg = kind === 'start' ? (prepGoMode(t) ? `${label} 시작 · 시간이 되면 처치실에 알림` : `${label} 시작`) : kind === 'confirm' ? `${t.short || t.name} 완료` : `${label} 시작 취소`;
-    showToast(`${p.name} ${msg}`, () => patchPatient(mutatePatients, pk, () => before));
+    showToast(`${p.name} ${msg}`, () => patchPatient(mutatePatients, pk, x => restoreKeys(x, before, [t.id])));
   };
 
   const checkIn = (p) => {
     const pk = patientKey(p);
-    mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? applyCheckin(x) : x)));
-    showToast(`${p.name} 접수${p.skipVision ? ' (시력검사 없이 바로 진료)' : ''}`, () => mutatePatients(prev => prev.map(x => (patientKey(x) === pk
-      ? { ...x, checkin: '', late: !!p.late, queueKey: reservationQueueKey(x.reservation), assigned: p.assigned, done: p.done, doneAt: p.doneAt, visionSkipped: false }
-      : x))));
+    // 다른 PC(QR 접수 등)가 방금 접수했으면 그대로 둠 (접수 시각·순서를 덮어쓰지 않음)
+    mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin ? applyCheckin(x) : x)));
+    // 되돌리기: [접수 취소]와 같은 조건(시력 측정 전)일 때만, 접수 전에 고른 지각 표시·시력방 검사 지정은 원래대로
+    showToast(`${p.name} 접수${p.skipVision ? ' (시력검사 없이 바로 진료)' : ''}`, () => mutatePatients(prev => prev.map(x => {
+      if (patientKey(x) !== pk) return x;
+      const u = undoCheckin(x);
+      if (u === x) return x;
+      const assigned = { ...u.assigned };
+      VISION_TEST_IDS.forEach(id => { if (p.assigned?.[id] !== undefined) assigned[id] = p.assigned[id]; });
+      return { ...u, late: !!p.late, assigned };
+    })));
   };
 
   const handleMeasureSave = ({ measure, complete, gat, date, part = 'all', noIop }) => {
