@@ -44,7 +44,8 @@ await page.route(`**/api/storage/${archKey}**`, r => r.fulfill({ status: 500, bo
 await page.reload(); await W(1200);
 await pick('관리자');
 await page.getByRole('button', { name: '명단 관리', exact: true }).click(); await W(300);
-await page.locator('input[type=date]').first().fill(day(-4)); await W(1500);
+// 막은 보관 파일과 같은 달 날짜로 (day(-4)는 월초에 지난달이 되어 다른 파일을 읽음)
+await page.locator('input[type=date]').first().fill(old); await W(1500);
 ok(await page.getByText(/지난 명단을 불러오지 못했습니다/).count() === 1 && await page.getByText('이 날짜에 올라간 환자가 없습니다').count() === 0, '불러오기 실패 → 환자 없음 대신 실패 안내');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();
