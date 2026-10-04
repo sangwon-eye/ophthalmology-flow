@@ -580,10 +580,10 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
   if (kind === 'vision-exam') {
     return (
       <BoardShell title="검사 대기 현황" onBack={onBack} extra={<label className="text-xs text-slate-500">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
-        {/* 시력방 2 : 검사실 3 (검사실 명단이 보통 더 김), 안내는 제목 옆 */}
-        <div className="grid gap-6" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 2fr) minmax(0, 3fr)' : 'minmax(0, 1fr)' }}>
-          <BoardColumn title={visionNames(settings).patientName} aside={<VisionNotices patients={patients} inline />}><VisionBoardList patients={patients} five /></BoardColumn>
+        {/* 왼쪽 검사실 3 : 오른쪽 시력방 2 (검사실 명단이 보통 더 김, 화면 앞에서 볼 때 왼쪽이 검사실 쪽 — 10-04 사용자). 안내는 제목 옆 */}
+        <div className="grid gap-6" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 3fr) minmax(0, 2fr)' : 'minmax(0, 1fr)' }}>
           <BoardColumn title="검사실" aside={<ExamNotices patients={patients} settings={settings} inline />}><ExamBoardList patients={patients} settings={settings} wide /></BoardColumn>
+          <BoardColumn title={visionNames(settings).patientName} aside={<VisionNotices patients={patients} inline />}><VisionBoardList patients={patients} five /></BoardColumn>
         </div>
       </BoardShell>
     );

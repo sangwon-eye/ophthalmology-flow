@@ -1,5 +1,5 @@
 import { chromium, SP, editKey, tester, BASE } from '../lib.mjs';
-// 시력방 + 검사실 큰 TV (10-04 사용자 확인): 시력방 2 : 검사실 3, 시력방 앞 5명 같은 크기(1번만 강조 안 함, 5명씩 불러 검사),
+// 시력방 + 검사실 큰 TV (10-04 사용자 확인): 왼쪽 검사실 3 : 오른쪽 시력방 2, 시력방 앞 5명 같은 크기(1번만 강조 안 함, 5명씩 불러 검사),
 // 검사실은 칩 대신 '방 이름 + 검사 이름' 줄, 안내 문구는 제목 옆 (줄 하나 아낌)
 const BASE_URL = `${BASE}/api/storage/`;
 await fetch(BASE_URL + 'board-notices', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: JSON.stringify({ notices: { vision: '예약시간이 빠른 환자부터 먼저 검사합니다', exams: '모든 검사는 큰 복도에서 대기해주세요' }, presets: [] }) }) });
@@ -22,9 +22,9 @@ ok(await page.getByText('다음 순서', { exact: true }).count() === 0, '시력
 const sizes = await page.evaluate(() => [...document.querySelectorAll('span.text-3xl')].map(e => e.textContent));
 ok(sizes.length >= 5, `앞 5명 같은 크기 (${sizes.length})`);
 ok(await page.getByText('그다음 순서').count() === 1, '6번부터 그다음 순서');
-// 시력방 2 : 검사실 3
-const cols = await page.evaluate(() => { const g = [...document.querySelectorAll('div.grid')].find(x => (x.style.gridTemplateColumns || '').includes('2fr')); return g ? [...g.children].map(c => c.getBoundingClientRect().width) : []; });
-ok(cols.length === 2 && cols[1] / cols[0] > 1.4 && cols[1] / cols[0] < 1.6, `시력방 2 : 검사실 3 (${cols.map(Math.round).join(' : ')})`);
+// 왼쪽 검사실 3 : 오른쪽 시력방 2 (10-04 사용자)
+const cols = await page.evaluate(() => { const g = [...document.querySelectorAll('div.grid')].find(x => (x.style.gridTemplateColumns || '').includes('3fr')); return g ? [...g.children].map(c => c.getBoundingClientRect().width) : []; });
+ok(cols.length === 2 && cols[0] / cols[1] > 1.4 && cols[0] / cols[1] < 1.6, `왼쪽 검사실 3 : 오른쪽 시력방 2 (${cols.map(Math.round).join(' : ')})`);
 // 검사실: 칩이 아닌 줄 — '정밀검사실'(환자용 이름) 굵게 + 검사 이름
 const examCard = page.locator('div.bg-slate-800').filter({ hasText: '정밀검사실' }).first();
 ok(await examCard.count() === 1 && /정밀검사실\s*[가-힣A-Za-z]/.test(await examCard.innerText()) && !/정밀검사실:/.test(await examCard.innerText()), '검사실: 방 이름 + 검사 이름 줄');
