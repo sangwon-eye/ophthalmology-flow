@@ -194,7 +194,7 @@ function BigRow({ label, name, size, tone = 'amber', n, muted = false }) {
     <div className={`flex items-center ${S.box} rounded-2xl border-2 ${box}`}>
       {label ? <span className={`shrink-0 whitespace-nowrap rounded-full ${tag} ${S.tag} leading-snug font-bold`}>{label}</span>
         : <span className={`${S.num} shrink-0 rounded-full ${c.num} flex items-center justify-center font-bold`}>{n}</span>}
-      <span className={`${S.name} leading-snug min-w-0 font-bold ${muted ? 'text-slate-200' : 'text-white'} whitespace-nowrap`}>{name}</span>
+      <span className={`${S.name} leading-snug min-w-0 ${size === 'sm' ? 'font-extrabold' : 'font-bold'} ${muted ? 'text-slate-200' : 'text-white'} whitespace-nowrap`}>{name}</span>
     </div>
   );
 }
@@ -283,11 +283,11 @@ export function ExamBoardList({ patients, settings, compact, wide }) {
             }
             return (
               <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
-                <div className="text-3xl leading-snug font-bold text-white">{patientBoardName(p)}</div>
+                <div className="text-3xl leading-snug font-extrabold text-white">{patientBoardName(p)}</div>
                 {lines.map(l => (
                   <div key={l.k} className="text-xl leading-snug mt-0.5">
                     {l.room && <span className={`font-extrabold ${darkText(l.tone)}`}>{l.room} </span>}
-                    <span className={l.room ? 'text-slate-100' : `font-bold ${darkText(l.tone)}`}>{l.text}</span>
+                    <span className={l.room ? 'font-semibold text-white' : `font-bold ${darkText(l.tone)}`}>{l.text}</span>
                   </div>
                 ))}
               </div>
@@ -461,7 +461,7 @@ export function BoardColumn({ title, aside, children }) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3 pb-2 border-b-2 border-slate-700">
-        <div className={`${aside !== undefined ? 'text-3xl' : 'text-xl'} font-bold text-slate-100 shrink-0 break-keep`}>{title}</div>
+        <div className={`${aside !== undefined ? 'text-3xl font-extrabold text-white' : 'text-xl font-bold text-slate-100'} shrink-0 break-keep`}>{title}</div>
         {aside && <div className="flex-1 min-w-0 flex flex-col gap-2 empty:hidden">{aside}</div>}
       </div>
       <div className="space-y-4">{children}</div>

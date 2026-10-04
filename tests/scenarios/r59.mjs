@@ -54,12 +54,12 @@ await page.screenshot({ path: `${SP}/r59-room.png` });
 await openBoard(/^안구건조증 검사실 대기 명단/);
 txt = await page.locator('.board-scroll').innerText();
 ok(/임\*빈/.test(txt) && /IDRA/.test(txt) && !/조\*우/.test(txt) && !/OCT/.test(txt), '6번방 화면: 6번방 검사 환자만');
-// 시력방 + 검사실: 시력방 앞 5명 크게
+// 시력방 + 검사실: 시력방 앞 5명 같은 크기·굵게 (10-04: 1번만 강조하지 않음)
 await editKey('daily-patients', list => list.map((p, i) => (i < 8 ? { ...p, checkin: `08:1${i}`, done: {}, calledRoom: null, seen: false } : p)));
 await page.setViewportSize({ width: 1920, height: 1080 });
 await openBoard(/\+ 검사실/);
-const sizes = await page.locator('.board-scroll span.font-bold.whitespace-nowrap').evaluateAll(es => es.map(e => parseFloat(getComputedStyle(e).fontSize)));
-ok(sizes.filter(s => s >= 44).length === 5, `시력방 앞 5명 큰 글씨 (${sizes.join(', ')})`);
+const sizes = await page.locator('.board-scroll span.font-extrabold.whitespace-nowrap').evaluateAll(es => es.map(e => parseFloat(getComputedStyle(e).fontSize)));
+ok(sizes.filter(s => s >= 28).length === 5 && new Set(sizes).size === 1, `시력방 앞 5명 같은 크기 (${sizes.join(', ')})`);
 ok(await page.getByText('그다음 순서').count() === 1, '6번째부터는 그다음 순서 (작게)');
 await page.screenshot({ path: `${SP}/r59-vision.png` });
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
