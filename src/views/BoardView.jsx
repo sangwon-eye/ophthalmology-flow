@@ -25,6 +25,9 @@ const DARK = {
   slate: { chip: 'bg-slate-400/15 text-slate-100 border-slate-400/50' },
 };
 const darkChip = (color) => (DARK[color] || DARK.slate).chip;
+// 어두운 바탕 위 방 색깔 글씨 (큰 TV 검사실 명단)
+const DARK_TEXT = { blue: 'text-blue-300', amber: 'text-amber-300', teal: 'text-teal-300', violet: 'text-violet-300', rose: 'text-rose-300', sky: 'text-sky-300', emerald: 'text-emerald-300', indigo: 'text-indigo-300', slate: 'text-slate-300' };
+const darkText = (color) => DARK_TEXT[color] || DARK_TEXT.sky;
 // 직원용 버튼(자동 스크롤·글씨·종·메인 화면): 환자·보호자에게는 안 보이게 평소엔 숨기고,
 // 마우스를 움직이거나 화면을 누르면 잠깐(5초) 나타남. '글씨' 크기와 상관없이 늘 같은 작은 크기
 const STAFF_HIDE_MS = 5000;
@@ -152,24 +155,25 @@ export const NoticeContext = createContext({ notices: {} });
 export function useNotice(key) {
   return String(useContext(NoticeContext)?.notices?.[key] || '').trim();
 }
-export function BoardNotice({ text, label, compact }) {
+// inline: 제목 줄 옆에 (위아래 여백을 줄이고 글씨는 크고 굵게 — 시력방 + 검사실 큰 TV)
+export function BoardNotice({ text, label, compact, inline }) {
   if (!text) return null;
   return (
-    <div role="status" className={`flex items-start gap-2 bg-yellow-300 rounded-xl ${compact ? 'px-3 py-2 text-base' : 'px-4 py-3 text-xl'} font-bold text-slate-950 mb-3 break-keep`}>
-      <Megaphone aria-hidden="true" className={`${compact ? 'w-5 h-5' : 'w-6 h-6'} shrink-0 mt-0.5`} />
+    <div role="status" className={`flex items-start gap-2 bg-yellow-300 rounded-xl ${inline ? 'px-3 py-1 text-2xl leading-snug font-extrabold' : compact ? 'px-3 py-2 text-base font-bold mb-3' : 'px-4 py-3 text-xl font-bold mb-3'} text-slate-950 break-keep`}>
+      <Megaphone aria-hidden="true" className={`${compact ? 'w-5 h-5' : inline ? 'w-7 h-7' : 'w-6 h-6'} shrink-0 mt-0.5`} />
       <span>{label ? <span className="font-extrabold">{label}: </span> : null}{text}</span>
     </div>
   );
 }
 
 // 대기 시간 안내 (관리자 > 대기 화면 안내에서 반자동/자동)
-export function WaitNotice({ patients, kind, compact }) {
+export function WaitNotice({ patients, kind, compact, inline }) {
   const waits = useContext(NoticeContext)?.waits;
   // 명단이 그대로여도 기다린 시간은 늘어나므로 가끔 다시 계산
   const [, setTick] = useState(0);
   useEffect(() => { const i = setInterval(() => setTick(x => x + 1), 30000); return () => clearInterval(i); }, []);
   const n = shownWait(waits, patients, kind);
-  return n ? <BoardNotice text={WAIT_TEXT[kind].replace('{n}', n)} compact={compact} /> : null;
+  return n ? <BoardNotice text={WAIT_TEXT[kind].replace('{n}', n)} compact={compact} inline={inline} /> : null;
 }
 
 // 앞 순서 큰 칸 (진료실 앞 모니터·시력방 TV)
@@ -181,6 +185,7 @@ function BigRow({ label, name, size, tone = 'amber', n, muted = false }) {
     xl: { box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
     lg: { box: 'px-5 py-3 gap-4', name: 'text-5xl', tag: 'text-xl px-3 py-1', num: 'w-14 h-14 text-3xl' },
     md: { box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-1', num: 'w-12 h-12 text-2xl' },
+    sm: { box: 'px-3 py-2 gap-3', name: 'text-3xl', tag: 'text-base px-2.5 py-0.5', num: 'w-10 h-10 text-xl' },
   }[size];
   // muted: 진료 중 (이미 진료실 안에 있어 덜 눈에 띄게, 회색 칸)
   const box = muted ? 'bg-slate-800/60 border-slate-700' : label ? c.next : 'bg-slate-800 border-slate-600';
@@ -205,14 +210,24 @@ function SmallRest({ list, start, color }) {
   );
 }
 
-export function VisionBoardList({ patients, compact, big }) {
+export function VisionNotices({ patients, compact, inline }) {
   const notice = useNotice('vision');
+  return <><WaitNotice patients={patients} kind="vision" compact={compact} inline={inline} /><BoardNotice text={notice} compact={compact} inline={inline} /></>;
+}
+// five: 시력방 + 검사실 큰 TV (5명씩 불러 검사 → 앞 5명 같은 크기, 6번부터 작게, 안내는 제목 줄에)
+export function VisionBoardList({ patients, compact, big, five }) {
   const list = patients.filter(p => !p.consultDone && p.checkin && !visionComplete(p)).sort(byQueue);
   return (
     <div>
-      <WaitNotice patients={patients} kind="vision" compact={compact} />
-      <BoardNotice text={notice} compact={compact} />
-      {!list.length ? <BoardEmpty /> : big ? (
+      {!five && <VisionNotices patients={patients} compact={compact} />}
+      {!list.length ? <BoardEmpty /> : five ? (
+        <div>
+          <div className="grid gap-2.5" style={boardGrid(17)}>
+            {list.slice(0, 5).map((p, i) => <BigRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} size="sm" tone="blue" />)}
+          </div>
+          <SmallRest list={list.slice(5)} start={6} color="blue" />
+        </div>
+      ) : big ? (
         <div>
           <BigRow label="다음 순서" name={patientBoardName(list[0])} size="xl" tone="blue" />
           {list.length > 1 && (
@@ -232,17 +247,20 @@ export function VisionBoardList({ patients, compact, big }) {
     </div>
   );
 }
-export function RoomNotices({ settings, compact }) {
+export function RoomNotices({ settings, compact, inline }) {
   const notices = useContext(NoticeContext)?.notices || {};
   return settings.rooms
     .filter(r => String(notices[`room:${r.id}`] || '').trim())
-    .map(r => <BoardNotice key={r.id} label={r.patientName || r.name} text={String(notices[`room:${r.id}`]).trim()} compact={compact} />);
+    .map(r => <BoardNotice key={r.id} label={r.patientName || r.name} text={String(notices[`room:${r.id}`]).trim()} compact={compact} inline={inline} />);
 }
 
-export function ExamBoardList({ patients, settings, compact }) {
+export function ExamNotices({ patients, settings, compact, inline }) {
+  const examsNotice = useNotice('exams');
+  return <><WaitNotice patients={patients} kind="exams" compact={compact} inline={inline} /><BoardNotice text={examsNotice} compact={compact} inline={inline} /><RoomNotices settings={settings} compact={compact} inline={inline} /></>;
+}
+export function ExamBoardList({ patients, settings, compact, wide }) {
   // 처치실에서 먼저 할 일(진료 전 처치, 검사 준비)도 함께 안내
   const treat = treatRoomOf(settings);
-  const examsNotice = useNotice('exams');
   const treatTodo = (p) => !pastVision(p) ? [] : preProcPending(p)
     ? (p.preProcs || []).filter(x => !x.done).map(x => x.name)
     : prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => `${t.name || t.short} 검사 준비`);
@@ -251,10 +269,32 @@ export function ExamBoardList({ patients, settings, compact }) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
   return (
     <div>
-      <WaitNotice patients={patients} kind="exams" compact={compact} />
-      <BoardNotice text={examsNotice} compact={compact} />
-      <RoomNotices settings={settings} compact={compact} />
-      {list.length === 0 ? <BoardEmpty /> : (
+      {!wide && <ExamNotices patients={patients} settings={settings} compact={compact} />}
+      {list.length === 0 ? <BoardEmpty /> : wide ? (
+        // 큰 TV: 칩 대신 줄로 — 검사실 이름(방 색깔, 굵게) + 할 검사(흰 글씨), 멀리서도 읽히게
+        <div className="grid gap-2.5" style={boardGrid(24)}>
+          {list.map(p => {
+            const lines = [];
+            if (activeVf(p)) lines.push({ k: 'vf', tone: 'amber', room: '', text: `${settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중` });
+            else if (prepHolding(p, settings)) lines.push({ k: 'hold', tone: 'amber', room: '', text: `${prepHolding(p, settings).name || prepHolding(p, settings).short} 중` });
+            else {
+              if (treatTodo(p).length) lines.push({ k: 'treat', tone: 'rose', room: treat.patientName || treat.name, text: treatTodo(p).join(', ') });
+              pendingRooms(p, settings).forEach(r => lines.push({ k: r.id, tone: roomColor(settings, r.id), room: r.patientName || r.name, text: pendingTests(p, settings, r.id).map(t => t.name || t.short).join(', ') }));
+            }
+            return (
+              <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
+                <div className="text-3xl leading-snug font-bold text-white">{patientBoardName(p)}</div>
+                {lines.map(l => (
+                  <div key={l.k} className="text-xl leading-snug mt-0.5">
+                    {l.room && <span className={`font-extrabold ${darkText(l.tone)}`}>{l.room} </span>}
+                    <span className={l.room ? 'text-slate-100' : `font-bold ${darkText(l.tone)}`}>{l.text}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 15 : 20)}>
           {list.map(p => (
             <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
@@ -416,10 +456,14 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
   );
 }
 
-export function BoardColumn({ title, children }) {
+// aside: 제목 옆에 붙는 안내(노란 띠) — 줄을 하나 아껴 명단 자리를 넓게
+export function BoardColumn({ title, aside, children }) {
   return (
     <div>
-      <div className="text-xl font-bold text-slate-100 mb-3 pb-2 border-b-2 border-slate-700">{title}</div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3 pb-2 border-b-2 border-slate-700">
+        <div className={`${aside !== undefined ? 'text-3xl' : 'text-xl'} font-bold text-slate-100 shrink-0 break-keep`}>{title}</div>
+        {aside && <div className="flex-1 min-w-0 flex flex-col gap-2 empty:hidden">{aside}</div>}
+      </div>
       <div className="space-y-4">{children}</div>
     </div>
   );
@@ -536,9 +580,10 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
   if (kind === 'vision-exam') {
     return (
       <BoardShell title="검사 대기 현황" onBack={onBack} extra={<label className="text-xs text-slate-500">배치 <select aria-label="대기 명단 배치" value={layout} onChange={e => setLayout(e.target.value)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400"><option value="horizontal">좌우 배치</option><option value="vertical">위아래 배치</option></select></label>}>
-        <div className="grid gap-6" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
-          <BoardColumn title={visionNames(settings).patientName}><VisionBoardList patients={patients} big /></BoardColumn>
-          <BoardColumn title="검사실"><ExamBoardList patients={patients} settings={settings} /></BoardColumn>
+        {/* 시력방 2 : 검사실 3 (검사실 명단이 보통 더 김), 안내는 제목 옆 */}
+        <div className="grid gap-6" style={{ gridTemplateColumns: layout === 'horizontal' ? 'minmax(0, 2fr) minmax(0, 3fr)' : 'minmax(0, 1fr)' }}>
+          <BoardColumn title={visionNames(settings).patientName} aside={<VisionNotices patients={patients} inline />}><VisionBoardList patients={patients} five /></BoardColumn>
+          <BoardColumn title="검사실" aside={<ExamNotices patients={patients} settings={settings} inline />}><ExamBoardList patients={patients} settings={settings} wide /></BoardColumn>
         </div>
       </BoardShell>
     );
