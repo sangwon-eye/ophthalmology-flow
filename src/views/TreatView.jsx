@@ -1,6 +1,6 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
+import { dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byExamQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
 import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -18,7 +18,8 @@ export function defaultTriageRequired(p, doctorPrefs) {
 export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mutatePatients, mutateHistoryEntry, onBack, lastSync }) {
   const [triageFor, setTriageFor] = useState(null);
   const [sortMode, changeSort] = useSortMode('sort-procedure');
-  const order = sortMode === 'name' ? byName : byQueue;
+  // 처치실 검사도 검사실 순서 (진료실에서 추가 검사로 보낸 환자는 앞쪽, 진료 순서는 그대로)
+  const order = sortMode === 'name' ? byName : byExamQueue;
   const [toastNode, showToast] = useUndoToast();
   const testEdit = useTestEditing(patients, settings, mutatePatients);
   const allTests = sortedTests(settings);
