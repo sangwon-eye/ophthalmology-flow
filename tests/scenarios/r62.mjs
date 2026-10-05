@@ -62,10 +62,10 @@ await setP('오세영', p => ({ drops: p.drops.map(t => t && t - 20 * 60000) }))
 await W(4500);
 await cardOf('오세영').getByRole('button', { name: /분 지남 · 확인$/ }).click(); await W(1500);
 ok(await inWaiting('오세영') && /산동 후 재진/.test(await cardOf('오세영').innerText()), '산동이 끝나면 진료 대기에 산동 후 재진 표시');
-// 10-05: 다시 진료는 진료 대기 2번째 (먼저 기다리던 1번은 그대로), 기다리는 사람이 없으면 1번
+// 10-05: 다시 진료도 다른 환자와 같은 규칙 — 먼저 기다리던 1번은 그대로 (앞으로 끼어들지 않음), 기다리는 사람이 없으면 1번
 const wn = await waitingCards().count();
-const at = await waitingCards().nth(wn > 1 ? 1 : 0).innerText();
-ok(/오세영/.test(at), `진료 대기 ${wn > 1 ? '2번째' : '1번'} (${at.split('\n')[0]})`);
+const first = await waitingCards().first().innerText();
+ok(wn > 1 ? !/오세영/.test(first) : /오세영/.test(first), `진료 대기 1번을 빼앗지 않음 (${wn}명, 1번: ${first.split('\n')[0]})`);
 await cardOf('오세영').getByRole('button', { name: '진료 호출' }).click(); await W(600);
 await page.getByRole('button', { name: '진료 완료', exact: true }).click(); await W(1000);
 o = await pt('오세영');

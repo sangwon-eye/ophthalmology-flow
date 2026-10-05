@@ -275,7 +275,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       return true;
     };
     // CR·산동 후 다시 진료: 진료실 'CR·산동 점안' 칸으로, 같이 고른 처치는 다시 진료가 끝난 뒤 시작.
-    // 점안이 끝나 진료 대기로 들어오면 2번째 (placeConsultArrivals, 10-05 사용자 결정 — 예전 '맨 앞')
+    // 점안이 끝나 진료 대기로 들어오면 다른 환자와 같은 규칙: 예약 순서 자리, 1번이 되면 2번째 (placeConsultArrivals, 10-05 — 예전 '맨 앞')
     if (redoKind) {
       const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'dropsBefore', 'drops', 'dropsExtra', 'cr', 'dilateOverride', 'queueKey'];
       const before = Object.fromEntries(keys.map(k => [k, p[k]]));
@@ -476,7 +476,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       ...(dest === 'vision' ? { measureOk: p.measureOk ?? null, vaOk: p.vaOk ?? null, nctOk: p.nctOk ?? null } : {}) };
     // 되돌리기: 보낼 때 바꾼 검사(고른 검사·시력/안압)만 원래대로, 그사이 다른 PC가 완료한 다른 검사는 그대로
     const touched = dest === 'exam' ? allTests.filter(t => sel[t.id]).map(t => t.id) : dest === 'vision' ? [VISION_KEY] : [];
-    const undo = () => patch(pk, x => ({ ...scalars, ...restoreKeys(x, tests, touched) }));
+    // restoredAt: 되돌리기 표시 — 진료 대기로 돌아와도 '새로 들어온 환자'로 보지 않음 (원래 자리 그대로, placeConsultArrivals)
+    const undo = () => patch(pk, x => ({ ...scalars, ...restoreKeys(x, tests, touched), restoredAt: Date.now() }));
     if (dest === 'exam') {
       const ids = allTests.filter(t => sel[t.id]).map(t => t.id);
       applyExtraTests(pk, ids, detail || {}, sendNote);

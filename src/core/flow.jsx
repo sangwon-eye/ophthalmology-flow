@@ -429,9 +429,9 @@ export function consultQueue(patients, doctor, settings, prefs) {
 }
 // 검사·점안이 끝나 진료 대기로 '새로' 들어온 환자 자리 (모든 명단 저장에서 서버 최신 값으로 다시 계산 — App의 mutatePatients)
 //  - 예약 순서로 1번이 되면 2번째로: 지금 1번(곧 들어갈 환자)은 그대로 두고, 1번의 consultKey 를 새 환자 바로 앞으로
-//  - CR·산동 후 다시 진료는 항상 2번째 (예전 '맨 앞'에서 바뀜)
+//  - 2번째 이후면 예약 순서 자리 그대로. CR·산동 후 다시 진료도 같은 규칙 (10-05 사용자: 규칙 하나로 — 예외를 두지 않음)
 //  - 되돌리기는 새로 들어온 것이 아님: [호출 취소](진료 중에서)·[진료 완료 취소](설명 대기에서)는 그대로,
-//    [다시 진료 취소](진료 중에 보낸 것)는 예전처럼 맨 앞
+//    [보내기]의 [되돌리기]는 restoredAt(새 칸)이 바뀐 저장이라 그대로, [다시 진료 취소](진료 중에 보낸 것)는 예전처럼 맨 앞
 //  - 시력·검사 순서(queueKey)는 건드리지 않음
 function wasBeforeConsult(p, settings, prefs) {
   return !p.consultDone && !p.seen && !inConsult(p) && !consultWaiting(p, settings, prefs);
@@ -443,6 +443,7 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
   next.forEach((p, i) => {
     const b = before.get(patientKey(p));
     if (!b || b === p || !p.checkin) return;
+    if (p.restoredAt && p.restoredAt !== b.restoredAt) return; // 되돌리기: 원래 자리 그대로
     if (consultWaiting(p, settings, prefs) && wasBeforeConsult(b, settings, prefs)) arrivals.push(i);
   });
   if (!arrivals.length) return next;
@@ -460,7 +461,6 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
       const [first, fj] = others[0];
       const k1 = consultOrderKey(first);
       if (cancelRedo) a.consultKey = k1 - 0.001;
-      else if (redoActive(a)) a.consultKey = (k1 + (others[1] ? consultOrderKey(others[1][0]) : k1 + 1)) / 2;
       else if (typeof a.queueKey === 'number' && a.queueKey < k1) out[fj] = { ...first, consultKey: a.queueKey - 0.001 };
     }
     out[i] = a;
@@ -510,7 +510,7 @@ export function crActive(p, prefs) {
 }
 /* 점안 후 다시 진료: 진료실 [처치]·설명 대기 [처치 보내기]에서 'CR 후 다시 진료' / '산동 후 다시 진료'
    p.redo = { kind: 'cr' | 'dilate', at, from, pending: [같이 고른 처치] } (새 칸, 기존 기록은 그대로)
-   점안은 진료실 간호사가 진료실 화면 'CR·산동 점안' 칸에서. 끝나면 진료 대기 2번째 (placeConsultArrivals) */
+   점안은 진료실 간호사가 진료실 화면 'CR·산동 점안' 칸에서. 끝나면 진료 대기로 — 다른 환자와 같은 규칙 (placeConsultArrivals) */
 export const REDO_LABEL = { cr: 'CR 후 다시 진료', dilate: '산동 후 다시 진료' };
 export const REDO_SHORT = { cr: 'CR 후 재진', dilate: '산동 후 재진' };
 // 다시 진료 중인지: 취소하지 않았고, 그 점안(산동·CR)이 아직 켜져 있을 때만 (다른 화면에서 꺼 버리면 '재진' 표시도 사라짐)
