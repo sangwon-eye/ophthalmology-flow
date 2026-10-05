@@ -419,9 +419,53 @@ export function consultWaiting(p, settings, prefs) {
   return !p.consultDone && !p.seen && !p.calledRoom && !p.treatRequest && allDone(p, settings)
     && !dropsPending(p, prefs, settings?.dilationWaitMin);
 }
+// 진료 대기 순서 (10-05 사용자 결정): 시력·검사·진료 모두 같은 기준(queueKey: 예약시간 → 접수시각, 지각은 뒤).
+// 진료 대기에서만 consultKey(새 칸)가 있으면 그것을 씀 — 아래 placeConsultArrivals 가 정함
+export function consultOrderKey(p) { return typeof p.consultKey === 'number' ? p.consultKey : p.queueKey; }
+export function byConsultQueue(a, b) { return consultOrderKey(a) - consultOrderKey(b); }
 // 그 교수님 진료 대기 순서 (진료실 화면·환자용 화면·QR 접수가 같은 순서를 씀)
 export function consultQueue(patients, doctor, settings, prefs) {
-  return patients.filter(p => p.doctor === doctor && consultWaiting(p, settings, prefs)).sort(byQueue);
+  return patients.filter(p => p.doctor === doctor && consultWaiting(p, settings, prefs)).sort(byConsultQueue);
+}
+// 검사·점안이 끝나 진료 대기로 '새로' 들어온 환자 자리 (모든 명단 저장에서 서버 최신 값으로 다시 계산 — App의 mutatePatients)
+//  - 예약 순서로 1번이 되면 2번째로: 지금 1번(곧 들어갈 환자)은 그대로 두고, 1번의 consultKey 를 새 환자 바로 앞으로
+//  - CR·산동 후 다시 진료는 항상 2번째 (예전 '맨 앞'에서 바뀜)
+//  - 되돌리기는 새로 들어온 것이 아님: [호출 취소](진료 중에서)·[진료 완료 취소](설명 대기에서)는 그대로,
+//    [다시 진료 취소](진료 중에 보낸 것)는 예전처럼 맨 앞
+//  - 시력·검사 순서(queueKey)는 건드리지 않음
+function wasBeforeConsult(p, settings, prefs) {
+  return !p.consultDone && !p.seen && !inConsult(p) && !consultWaiting(p, settings, prefs);
+}
+export function placeConsultArrivals(prev, next, settings, prefs) {
+  if (!Array.isArray(prev) || !Array.isArray(next) || prev === next || !settings) return next;
+  const before = new Map(prev.map(p => [patientKey(p), p]));
+  const arrivals = [];
+  next.forEach((p, i) => {
+    const b = before.get(patientKey(p));
+    if (!b || b === p || !p.checkin) return;
+    if (consultWaiting(p, settings, prefs) && wasBeforeConsult(b, settings, prefs)) arrivals.push(i);
+  });
+  if (!arrivals.length) return next;
+  const out = [...next];
+  const pendingIdx = new Set(arrivals);
+  arrivals.forEach(i => {
+    pendingIdx.delete(i);
+    const b = before.get(patientKey(out[i]));
+    const a = { ...out[i], consultKey: null }; // 새로 들어올 때마다 다시 정함 (예전 자리 기록은 지움)
+    const cancelRedo = !!a.redo?.cancelledAt && a.redo.cancelledAt !== b.redo?.cancelledAt;
+    const others = out.map((p, j) => [p, j])
+      .filter(([p, j]) => j !== i && !pendingIdx.has(j) && p.doctor === a.doctor && p.date === a.date && consultWaiting(p, settings, prefs))
+      .sort((x, y) => consultOrderKey(x[0]) - consultOrderKey(y[0]));
+    if (others.length) {
+      const [first, fj] = others[0];
+      const k1 = consultOrderKey(first);
+      if (cancelRedo) a.consultKey = k1 - 0.001;
+      else if (redoActive(a)) a.consultKey = (k1 + (others[1] ? consultOrderKey(others[1][0]) : k1 + 1)) / 2;
+      else if (typeof a.queueKey === 'number' && a.queueKey < k1) out[fj] = { ...first, consultKey: a.queueKey - 0.001 };
+    }
+    out[i] = a;
+  });
+  return out;
 }
 // 진료실 앞으로 안내할 인원 (설정 > 기타, 기본 5명, 0 = 끔)
 export function consultFrontCount(settings) {
@@ -466,7 +510,7 @@ export function crActive(p, prefs) {
 }
 /* 점안 후 다시 진료: 진료실 [처치]·설명 대기 [처치 보내기]에서 'CR 후 다시 진료' / '산동 후 다시 진료'
    p.redo = { kind: 'cr' | 'dilate', at, from, pending: [같이 고른 처치] } (새 칸, 기존 기록은 그대로)
-   점안은 진료실 간호사가 진료실 화면 'CR·산동 점안' 칸에서. 끝나면 진료 대기 맨 앞으로 */
+   점안은 진료실 간호사가 진료실 화면 'CR·산동 점안' 칸에서. 끝나면 진료 대기 2번째 (placeConsultArrivals) */
 export const REDO_LABEL = { cr: 'CR 후 다시 진료', dilate: '산동 후 다시 진료' };
 export const REDO_SHORT = { cr: 'CR 후 재진', dilate: '산동 후 재진' };
 // 다시 진료 중인지: 취소하지 않았고, 그 점안(산동·CR)이 아직 켜져 있을 때만 (다른 화면에서 꺼 버리면 '재진' 표시도 사라짐)
@@ -1020,19 +1064,21 @@ export function updateTodayTests(p, tests, sel, detail) {
   return { ...p, assigned, done, doneAt, detail: nextDetail };
 }
 
-// 보이는 목록(list, queueKey 순) 안에서 pk 환자를 toIndex 자리로 옮김
-export function moveInQueue(mutatePatients, list, pk, toIndex) {
+// 보이는 목록(list, 그 화면 순서) 안에서 pk 환자를 toIndex 자리로 옮김
+// consult: 진료 대기 화면 — 진료 순서 칸(consultKey)만 옮김 (시력·검사 순서는 그대로)
+export function moveInQueue(mutatePatients, list, pk, toIndex, { consult = false } = {}) {
+  const keyOf = consult ? consultOrderKey : (p) => p.queueKey;
   const from = list.findIndex(p => patientKey(p) === pk);
   if (from < 0 || toIndex === from || toIndex < 0 || toIndex >= list.length) return;
   const rest = list.filter(p => patientKey(p) !== pk);
   const before = rest[toIndex - 1];
   const after = rest[toIndex];
   let newKey;
-  if (before && after) newKey = (before.queueKey + after.queueKey) / 2;
-  else if (before) newKey = before.queueKey + 0.5;
-  else if (after) newKey = after.queueKey - 0.5;
+  if (before && after) newKey = (keyOf(before) + keyOf(after)) / 2;
+  else if (before) newKey = keyOf(before) + 0.5;
+  else if (after) newKey = keyOf(after) - 0.5;
   else return;
-  mutatePatients(prev => prev.map(p => (patientKey(p) === pk ? { ...p, queueKey: newKey } : p)));
+  mutatePatients(prev => prev.map(p => (patientKey(p) !== pk ? p : consult ? { ...p, consultKey: newKey } : { ...p, queueKey: newKey })));
 }
 
 /* 시력·안압 값 */

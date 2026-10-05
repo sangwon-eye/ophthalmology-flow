@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -166,7 +166,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const dropsReady = mine.filter(p => p.checkin && !p.consultDone && !p.seen && (redoActive(p) || crActive(p, doctorPrefs)) && ['due', 'ready'].includes(dilationState(p, doctorPrefs, waitMin).status));
   // 띵동: 이 교수님 진료실에 진료 호출이 생기면 (진료실 앞 PC 등), CR·산동 점안 시간이 되면. 교수님을 바꾸면 기준만 다시 잡음
   useChime([...mine.filter(inConsult).map(patientKey), ...dropsReady.map(p => `drop:${patientKey(p)}`)], { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
-  const waiting = mine.filter(p => consultWaiting(p, settings, doctorPrefs)).sort(byQueue);
+  const waiting = mine.filter(p => consultWaiting(p, settings, doctorPrefs)).sort(byConsultQueue);
   const onHold = mine.filter(p => p.consultHold && !p.consultDone && !p.seen && (!allDone(p, settings) || p.treatRequest));
   const testing = mine.filter(p => !p.consultDone && !p.consultHold && !p.seen && p.checkin && !allDone(p, settings) && !inTreatRoom(p, settings)).length;
   const residentCount = mine.filter(p => inTreatRoom(p, settings)).length;
@@ -274,16 +274,15 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       showToast(`처치 지정 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 설명 완료(귀가)되었습니다' : '이미 다른 곳에서 처리되었습니다'}`);
       return true;
     };
-    // CR·산동 후 다시 진료: 진료실 'CR·산동 점안' 칸으로, 같이 고른 처치는 다시 진료가 끝난 뒤 시작. 점안이 끝나면 진료 대기 맨 앞
+    // CR·산동 후 다시 진료: 진료실 'CR·산동 점안' 칸으로, 같이 고른 처치는 다시 진료가 끝난 뒤 시작.
+    // 점안이 끝나 진료 대기로 들어오면 2번째 (placeConsultArrivals, 10-05 사용자 결정 — 예전 '맨 앞')
     if (redoKind) {
       const keys = ['redo', 'seen', 'seenAt', 'calledRoom', 'dropsBefore', 'drops', 'dropsExtra', 'cr', 'dilateOverride', 'queueKey'];
       const before = Object.fromEntries(keys.map(k => [k, p[k]]));
       const next = await mutatePatients(prev => {
         const cur = prev.find(x => patientKey(x) === pk);
         if (changed(cur)) return prev;
-        const others = prev.filter(x => patientKey(x) !== pk && x.date === p.date && x.doctor === p.doctor && !x.consultDone && !x.seen && typeof x.queueKey === 'number');
-        const frontKey = others.length ? Math.min(...others.map(x => x.queueKey)) - 0.001 : undefined;
-        return prev.map(x => (x === cur ? { ...x, ...redoPatch(x, redoKind, { at, from: doctor, pending: items, frontKey }) } : x));
+        return prev.map(x => (x === cur ? { ...x, ...redoPatch(x, redoKind, { at, from: doctor, pending: items }) } : x));
       }).catch(() => null);
       if (notApplied(next, rec => rec.redo?.at === at)) return;
       // 되돌리기: 아직 이 다시 진료 그대로일 때만
@@ -654,7 +653,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
             <DraggableList
               items={waiting}
               getKey={patientKey}
-              onMove={(key, to) => moveInQueue(mutatePatients, waiting, key, to)}
+              onMove={(key, to) => moveInQueue(mutatePatients, waiting, key, to, { consult: true })}
               renderItem={(p, i, handle) => {
                 const pk = patientKey(p);
                 return (
@@ -663,8 +662,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     index={i}
                     color="amber"
                     handle={handle}
-                    onUp={() => moveInQueue(mutatePatients, waiting, pk, i - 1)}
-                    onDown={() => moveInQueue(mutatePatients, waiting, pk, i + 1)}
+                    onUp={() => moveInQueue(mutatePatients, waiting, pk, i - 1, { consult: true })}
+                    onDown={() => moveInQueue(mutatePatients, waiting, pk, i + 1, { consult: true })}
                   >
                     {redoActive(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-300">{REDO_SHORT[p.redo.kind]}</span>}
                     <div className="w-full mb-1">

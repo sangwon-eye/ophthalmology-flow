@@ -1,6 +1,6 @@
 // 최상위 App (저장소 동기화와 화면 전환)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
+import { placeConsultArrivals, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -157,7 +157,7 @@ export default function App() {
     }
     setRole(key);
   };
-  const [patients, mutatePatients, syncPatients, markPatients] = useSharedStore('daily-patients', loadDaily, []);
+  const [patients, mutatePatientsRaw, syncPatients, markPatients] = useSharedStore('daily-patients', loadDaily, []);
   // FU 지정: 평소에는 명단에 있는 환자 것만 받고, 고칠 때도 그 환자 칸만 저장 (관리자 'FU 지정 관리' 탭은 연 동안만 전체)
   const [fuMap, , syncFu, markFu, mutateFuEntry] = useSharedStore('fu-designations', loadFu, {});
   // mapFn: FU 묶음({ [id]: 기록 })을 받아 새 묶음을 돌려주는 함수 (saveFollowup 등). 그 환자 칸만 서버에 저장
@@ -169,6 +169,10 @@ export default function App() {
   const [todayOverride, mutateTodayOverride, syncTodayOverride, markTodayOverride] = useSharedStore('today-override', loadTodayOverride, null);
   const [boardNotices, mutateBoardNotices, syncBoardNotices, markBoardNotices] = useSharedStore('board-notices', loadNotices, { notices: {}, presets: NOTICE_PRESETS });
   const [lastSync, setLastSync] = useState(null);
+  // 명단 저장마다(서버 최신 값으로 다시 적용될 때도) 진료 대기로 새로 들어온 환자 자리 정리: 1번이 되면 2번째로 (placeConsultArrivals)
+  const orderRef = useRef({ settings, doctorPrefs });
+  orderRef.current = { settings, doctorPrefs };
+  const mutatePatients = useCallback((updater) => mutatePatientsRaw(prev => placeConsultArrivals(prev, updater(prev), orderRef.current.settings, orderRef.current.doctorPrefs)), [mutatePatientsRaw]);
   setVisionTestIds(settings.tests.filter(t => t.roomId === 'vision').map(t => t.id));
   setNoDilateTests(settings.tests.filter(noDilateTest).map(t => ({ id: t.id, short: t.short || t.name })));
   // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
