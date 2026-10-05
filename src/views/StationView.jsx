@@ -1,7 +1,7 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, byExamQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { TwoStepButton, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
@@ -82,8 +82,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const notCheckedIn = isVision
     ? patients.filter(p => !p.consultDone && !p.checkin && inSession(p, session) && (!q || (p.name || '').includes(q) || String(p.id).includes(q))).sort(nameSort ? byName : byQueue)
     : [];
-  // 검사실은 검사실 순서(진료실에서 추가 검사로 보낸 환자는 앞쪽, examBoost), 시력방은 진료 순서 그대로
-  const roomList = isVision ? visionWaiting(patients).sort(byQueue) : roomWaiting(patients, settings, room.id).sort(byExamQueue);
+  const roomList = (isVision ? visionWaiting(patients) : roomWaiting(patients, settings, room.id)).sort(byQueue);
   // 검사실 묶음(시력방·처치실을 뺀 모든 검사실): 윗줄에 같은 묶음의 다른 검사실 대기도 '보기만'으로, 띵동도 묶음 전체
   const isExamRoom = !isVision && room.builtin !== 'treat' && !embedded;
   const groupRooms = isExamRoom ? examRooms(settings) : [];
@@ -355,7 +354,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
           items={nameSort ? [...shown].sort(byName) : shown}
           locked={nameSort}
           getKey={patientKey}
-          onMove={(key, to) => moveInQueue(mutatePatients, shown, key, to, { exam: !isVision })}
+          onMove={(key, to) => moveInQueue(mutatePatients, shown, key, to)}
           renderItem={(p, _i, handle) => {
             // 가나다순으로 보여도 번호는 실제 대기 순서
             const idx = shown.indexOf(p);
@@ -374,8 +373,8 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 index={idx}
                 color={color}
                 handle={handle}
-                onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1, { exam: !isVision })}
-                onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1, { exam: !isVision })}
+                onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
+                onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
                 onToggleFirst={isVision ? () => toggleFirstVisit(pk, !p.firstVisit) : undefined}
                 stale={room?.builtin === 'treat' && !locked && !tests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t)) ? staleMinutes(p, settings) : 0}
               >

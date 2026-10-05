@@ -137,16 +137,6 @@ export function newId(prefix) {
 // 같은 날 두 번째 교수님 진료(2차 진료)는 visit 2, 3… 으로 따로 기록합니다.
 export function patientKey(p) { return `${p.id}::${p.date}${p.visit > 1 ? `::${p.visit}` : ''}`; }
 export function byQueue(a, b) { return a.queueKey - b.queueKey; }
-// 진료실에서 추가 검사로 보낸 환자 (10-05 사용자 결정 — 공평하게): 검사실에서는 앞쪽(examBoost.key)으로 부르고,
-// 진료 순서(queueKey)는 원래 예약시간 자리 그대로 → 검사를 마치고 돌아오면 원래 순서대로 진료 대기.
-// examBoost = { key, tests: [그때 보낸 검사 id], at } 새 칸. 보낸 검사가 하나라도 남아 있을 때만 씀 (다 끝나면 저절로 안 씀)
-export function examBoostActive(p) {
-  const b = p?.examBoost;
-  return !!b && typeof b.key === 'number' && Array.isArray(b.tests) && b.tests.some(id => p.assigned?.[id] && !p.done?.[id]);
-}
-export function examOrderKey(p) { return examBoostActive(p) ? p.examBoost.key : p.queueKey; }
-// 검사실(처치실 검사 포함) 대기 순서
-export function byExamQueue(a, b) { return examOrderKey(a) - examOrderKey(b); }
 
 export function roomColor(settings, roomId) {
   const i = settings.rooms.findIndex(r => r.id === roomId);
@@ -1030,22 +1020,19 @@ export function updateTodayTests(p, tests, sel, detail) {
   return { ...p, assigned, done, doneAt, detail: nextDetail };
 }
 
-// 보이는 목록(list, 그 화면의 순서) 안에서 pk 환자를 toIndex 자리로 옮김
-// exam: 검사실 화면 — 추가 검사로 보낸 환자(examBoost)는 검사실 순서만 옮기고 진료 순서는 그대로
-export function moveInQueue(mutatePatients, list, pk, toIndex, { exam = false } = {}) {
-  const keyOf = exam ? examOrderKey : (p) => p.queueKey;
+// 보이는 목록(list, queueKey 순) 안에서 pk 환자를 toIndex 자리로 옮김
+export function moveInQueue(mutatePatients, list, pk, toIndex) {
   const from = list.findIndex(p => patientKey(p) === pk);
   if (from < 0 || toIndex === from || toIndex < 0 || toIndex >= list.length) return;
   const rest = list.filter(p => patientKey(p) !== pk);
   const before = rest[toIndex - 1];
   const after = rest[toIndex];
   let newKey;
-  if (before && after) newKey = (keyOf(before) + keyOf(after)) / 2;
-  else if (before) newKey = keyOf(before) + 0.5;
-  else if (after) newKey = keyOf(after) - 0.5;
+  if (before && after) newKey = (before.queueKey + after.queueKey) / 2;
+  else if (before) newKey = before.queueKey + 0.5;
+  else if (after) newKey = after.queueKey - 0.5;
   else return;
-  mutatePatients(prev => prev.map(p => (patientKey(p) !== pk ? p
-    : exam && examBoostActive(p) ? { ...p, examBoost: { ...p.examBoost, key: newKey } } : { ...p, queueKey: newKey })));
+  mutatePatients(prev => prev.map(p => (patientKey(p) === pk ? { ...p, queueKey: newKey } : p)));
 }
 
 /* 시력·안압 값 */
@@ -1420,7 +1407,7 @@ export function roomWaiting(patients, settings, roomId) {
 export function earliestExamPatient(patients, settings) {
   const ids = examRooms(settings).map(r => r.id);
   const list = patients.filter(p => !p.consultDone && !activeVf(p) && !prepHolding(p, settings) && ids.some(id => roomPending(p, settings, id)));
-  return [...list].sort(byExamQueue)[0] || null;
+  return [...list].sort(byQueue)[0] || null;
 }
 // '[끝 · 확인]'을 눌러야 완료되는 처치실 시간 재기 검사 중 시간이 된 것 (예: Schirmer)
 export function treatTimedDue(p, settings, now = Date.now()) {

@@ -1,8 +1,7 @@
 import { chromium, getKey, editKey, tester, BASE } from '../lib.mjs';
 // 10-05 사용자 결정
-// 1) 진료실 [보내기 → 검사실]로 추가 검사를 보낸 환자: 검사실에서는 앞쪽(2번째쯤)으로 부르지만, 진료 순서는 원래 예약시간 자리 그대로
-//    (예: 9시30분 환자가 먼저 진료 → 추가 검사 → 돌아왔을 때 9시 환자가 아직 진료 대기면 9시 환자 뒤로) — 공평하게
-//    검사실에서 위·아래로 옮겨도 진료 순서는 그대로
+// 1) 진료실 [보내기 → 검사실]로 추가 검사를 보낸 환자도 순서를 당기지 않음 — 검사실·진료실 모두 원래 예약 순서대로 (공평하게)
+//    (예: 9시30분 환자가 먼저 진료 → 추가 검사 → 검사실에서도 예약이 빠른 사람 뒤, 돌아왔을 때 9시 환자가 진료 대기면 9시 환자 뒤로)
 // 2) FU(다음 내원) 지정 창도 오른쪽 클릭으로 단안·프로토콜 칸 (검사실 검사와 같은 방식)
 const pt = async (n) => (await getKey('daily-patients')).value.find(p => p.name === n);
 const allDone = { visionIop: true, oct: true, wfp: true, vf: true, idra: true, gat: true };
@@ -26,23 +25,14 @@ await modal().locator('label').filter({ hasText: '검사실' }).locator('input')
 await modal().getByRole('button', { name: /^WFP/ }).first().click(); // 오늘 이미 했으면 '(오늘 함 · 다시)'가 붙음
 await modal().getByRole('button', { name: '보내기', exact: true }).click(); await W(1200);
 let j = await pt('조현우');
-ok(j.queueKey === 570, `진료 순서 번호는 그대로 (${j.queueKey})`);
-ok(j.examBoost && j.examBoost.key < 540 && j.examBoost.tests.includes('wfp'), `검사실 순서만 앞쪽 (${j.examBoost?.key})`);
+ok(j.queueKey === 570 && !j.examBoost, `순서 번호는 그대로 (${j.queueKey})`);
 await back();
 
-// 검사실(31번방): 2번째로 부름 — 임수빈(500) · 조현우 · 장민호(510)
+// 검사실(31번방): 예약 순서대로 — 임수빈(500) · 장민호(510) · 조현우(570)
 await pick('31번방');
-const order = async () => {
-  const t = await page.locator('body').innerText();
-  return ['임수빈', '조현우', '장민호'].map(n => t.indexOf(n));
-};
-let [a, b, c] = await order();
-ok(a >= 0 && b > a && c > b, `검사실: 임수빈 → 조현우 → 장민호 (${a}, ${b}, ${c})`);
-// 검사실에서 아래로 옮기면 검사실 순서만 바뀌고 진료 순서는 그대로
-await cardOf('조현우').getByRole('button', { name: '아래로' }).click(); await W(1200);
-j = await pt('조현우');
-[a, b, c] = await order();
-ok(c < b && j.queueKey === 570, `검사실에서 아래로: 장민호 다음, 진료 순서 번호 그대로 (${j.examBoost?.key}, ${j.queueKey})`);
+const t0 = await page.locator('body').innerText();
+const [a, b, c] = ['임수빈', '장민호', '조현우'].map(n => t0.indexOf(n));
+ok(a >= 0 && b > a && c > b, `검사실: 임수빈 → 장민호 → 조현우 (${a}, ${b}, ${c})`);
 await back();
 
 // 검사를 마치고 돌아옴 → 9시 환자(서준호) 뒤

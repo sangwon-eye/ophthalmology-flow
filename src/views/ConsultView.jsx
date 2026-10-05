@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byExamQueue, examBoostActive, examOrderKey, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, pendingRooms, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -444,8 +444,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     setExtraModalFor(null);
     applyExtraTests(pk, allTests.filter(t => sel[t.id]).map(t => t.id), detail, undefined);
   };
-  // 검사를 추가(또는 다시)하고 검사실 대기열 앞쪽으로 보냅니다. sendNote 가 있으면 전달 메모도 남깁니다.
-  // 진료 순서(queueKey)는 바꾸지 않음 → 검사 후 돌아오면 원래 예약시간 자리 (10-05 사용자: 공평하게). 검사실 순서만 examBoost
+  // 검사를 추가(또는 다시)합니다. sendNote 가 있으면 전달 메모도 남깁니다.
+  // 순서(queueKey)는 바꾸지 않음 — 검사실·진료실 모두 원래 예약 순서대로 (10-05 사용자: 공평하게, 앞으로 당기지 않음)
   const applyExtraTests = (pk, chosen, detail, sendNote) => {
     if (!chosen.length) return;
     mutatePatients(prev => {
@@ -459,19 +459,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
         done[k] = false;
         if (detail?.[k]) nextDetail[k] = detail[k];
       });
-      const others = prev
-        .filter(p => patientKey(p) !== pk && p.date === target.date && !p.consultDone && pendingRooms(p, settings).length > 0)
-        .sort(byExamQueue);
-      const own = examOrderKey(target);
-      let boosted = own;
-      if (others.length === 1) boosted = examOrderKey(others[0]) + 0.0005;
-      else if (others.length >= 2) boosted = (examOrderKey(others[0]) + examOrderKey(others[1])) / 2;
-      boosted = Math.min(boosted, own);
-      // 그전에 보낸 검사가 아직 남아 있으면 함께 (검사실 순서는 더 앞쪽 것)
-      const keep = examBoostActive(target) ? target.examBoost.tests.filter(id => !chosen.includes(id) && target.assigned?.[id] && !target.done?.[id]) : [];
-      const examBoost = { key: boosted, tests: [...keep, ...chosen], at: Date.now() };
       return prev.map(p => (patientKey(p) === pk
-        ? { ...p, assigned, done, detail: nextDetail, orders: clearOrders(p, chosen), calledRoom: null, consultHold: true, examBoost, ...(sendNote !== undefined ? { sendNote } : {}) }
+        ? { ...p, assigned, done, detail: nextDetail, orders: clearOrders(p, chosen), calledRoom: null, consultHold: true, ...(sendNote !== undefined ? { sendNote } : {}) }
         : p));
     });
   };
@@ -484,7 +473,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     setSendFor(null);
     const sendNote = note ? { text: note, from: doctor, at } : null;
     const tests = { done: p.done, doneAt: p.doneAt, assigned: p.assigned, detail: p.detail };
-    const scalars = { queueKey: p.queueKey, examBoost: p.examBoost ?? null, calledRoom: p.calledRoom, consultHold: p.consultHold, sendNote: p.sendNote, treatRequest: p.treatRequest, orders: p.orders,
+    const scalars = { queueKey: p.queueKey, calledRoom: p.calledRoom, consultHold: p.consultHold, sendNote: p.sendNote, treatRequest: p.treatRequest, orders: p.orders,
       ...(dest === 'vision' ? { measureOk: p.measureOk ?? null, vaOk: p.vaOk ?? null, nctOk: p.nctOk ?? null } : {}) };
     // 되돌리기: 보낼 때 바꾼 검사(고른 검사·시력/안압)만 원래대로, 그사이 다른 PC가 완료한 다른 검사는 그대로
     const touched = dest === 'exam' ? allTests.filter(t => sel[t.id]).map(t => t.id) : dest === 'vision' ? [VISION_KEY] : [];
