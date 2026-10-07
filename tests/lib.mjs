@@ -35,6 +35,24 @@ export function tester(page, { keepRole = false } = {}) {
   return { errors, ok, W, pick, back, cardOf };
 }
 
+// 귀가(설명 완료)시키기: 이전 시력·안압은 귀가한 날의 값만 남음 (10-07 사용자 결정).
+// 그 환자를 설명 대기로 옮긴 뒤 진료실에서 [설명 완료 · FU 나중에] — 화면에서 눌러야 App이 이전 기록을 고침
+export async function dischargeVia(page, name) {
+  let doctor = '';
+  await editKey('daily-patients', list => list.map(p => {
+    if (p.name !== name) return p;
+    doctor = p.doctor;
+    return { ...p, seen: true, seenAt: Date.now(), calledRoom: null, procedures: [], consultDone: false };
+  }));
+  await page.goto(`${BASE}/`); await page.waitForTimeout(1200);
+  await page.getByRole('button', { name: /^진료실/ }).first().click(); await page.waitForTimeout(600);
+  await page.getByRole('button', { name: doctor, exact: true }).first().click(); await page.waitForTimeout(1200);
+  await page.locator('#consult-explain').locator('div.bg-white').filter({ has: page.getByText(name, { exact: true }) }).last()
+    .getByRole('button', { name: '설명 완료 · FU 나중에' }).click();
+  await page.waitForTimeout(1500);
+  await page.goto(`${BASE}/`); await page.waitForTimeout(800);
+}
+
 // 시력방 측정: [시력] → (첫 칸 값) [확인], [NCT] 버튼이 있으면 → [확인] (NCT 빈칸 경고는 한 번 더 [확인])
 export async function measureVision(page, card, va = '') {
   const confirm = async () => {

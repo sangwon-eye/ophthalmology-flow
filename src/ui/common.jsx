@@ -1661,22 +1661,31 @@ export function ProcedureList({ p, performer, onCancel }) {
 }
 
 // 처치 후 검사 고르기 (10-07): [처치 완료] 옆 '검사 추가 후 완료'. 처치에서 고른 눈(OD·OS)이 하나면 검사도 처음부터 그 눈으로
-export function PostTestModal({ p, items, tests, settings, mainIds, onConfirm, onCancel }) {
+// reconsultOption: 진료 후 처치면 '검사 끝나면 재진료' 체크 칸 (켜면 검사 후 같은 교수님 진료 대기로 — 처치 후 재진료, 10-07)
+export function PostTestModal({ p, items, tests, settings, mainIds, reconsultOption = false, onConfirm, onCancel }) {
+  const [recon, setRecon] = useState(false);
   const eyes = [...new Set((items || []).map(i => i.eye).filter(e => e === 'OD' || e === 'OS'))];
   const initialDetail = eyes.length === 1 ? Object.fromEntries(tests.map(t => [t.id, { eye: eyes[0] }])) : {};
+  const goTo = recon ? '진료 대기(재진료)' : p.seen ? '설명 대기' : '진료 대기';
   return (
     <TestCheckModal
       key={`post-${patientKey(p)}`}
       mainIds={mainIds}
       title={`${p.name}님 처치 후 검사`}
-      subtitle={`${(items || []).map(procLabel).join(', ')} 처치를 완료하고, 고른 검사를 오늘 검사에 넣습니다 (이미 한 검사는 다시). 검사가 끝나면 ${p.seen ? '설명 대기' : '진료 대기'}로 갑니다.${eyes.length === 1 ? ` 검사는 처치한 눈(${eyes[0]})으로 맞춰 두었습니다 (바꾸려면 오른쪽 클릭).` : ''}`}
+      subtitle={`${(items || []).map(procLabel).join(', ')} 처치를 완료하고, 고른 검사를 오늘 검사에 넣습니다 (이미 한 검사는 다시). 검사가 끝나면 ${goTo}로 갑니다.${eyes.length === 1 ? ` 검사는 처치한 눈(${eyes[0]})으로 맞춰 두었습니다 (바꾸려면 오른쪽 클릭).` : ''}`}
+      info={reconsultOption ? (
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input type="checkbox" checked={recon} onChange={e => setRecon(e.target.checked)} className="w-4 h-4" />
+          검사 끝나면 재진료 <span className="text-xs text-slate-400">(같은 교수님 진료 대기로)</span>
+        </label>
+      ) : null}
       tests={tests}
       settings={settings}
       initial={{}}
       initialDetail={initialDetail}
       openDetail={false}
-      confirmLabel="처치 완료 · 검사로"
-      onConfirm={onConfirm}
+      confirmLabel={recon ? '처치 완료 · 검사 후 재진료' : '처치 완료 · 검사로'}
+      onConfirm={(sel, detail) => onConfirm(sel, detail, reconsultOption && recon)}
       onCancel={onCancel}
     />
   );

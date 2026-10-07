@@ -454,6 +454,28 @@ export function postTestsPending(p) {
 export function homeBlocked(p) {
   return pendingProcedures(p).length > 0 || postTestsPending(p);
 }
+/* 처치 후 재진료 (10-07 사용자 결정): 진료 후 처치의 [처치 완료]·[교수님 처치 완료] 옆 '완료 후 재진료'
+   - 처치를 시행하고(확인 시간이 있는 처치도 확인을 기다리지 않음) 같은 교수님 진료 대기로. 확인은 처치실 '결과 확인'·처치 칸에서 그대로
+   - '검사 추가 후 완료' 창의 '검사 끝나면 재진료'를 켜면 검사가 끝난 뒤 진료 대기로
+   - 표시·순서는 다른 재진료와 같음: 진료실 카드 'YAG · OS 후 재진', 환자용 '재진료'(isReconsult), 진료 대기 순서 규칙(placeConsultArrivals)
+   - 새 칸 procReconsult = { at, names, prev } — prev 는 되돌리기용(설명 대기 시각·설명 먼저) */
+export function procReconsultPatch(x, names, at) {
+  if (x.consultDone || !x.seen) return {};
+  return {
+    seen: false, seenAt: null, calledRoom: null, explainedEarly: false,
+    procReconsult: { at, names, prev: { seenAt: x.seenAt ?? null, explainedEarly: !!x.explainedEarly } },
+  };
+}
+// 되돌리기: 서버 기록이 아직 그 버튼이 바꾼 그대로(진료 호출 전)일 때만 설명 대기로
+export function undoProcReconsultPatch(x, at) {
+  const r = x.procReconsult;
+  if (!r || r.at !== at || x.seen || x.consultDone || x.calledRoom) return {};
+  return { seen: true, seenAt: r.prev?.seenAt || at, explainedEarly: !!r.prev?.explainedEarly, procReconsult: null };
+}
+// 진료실 카드 표시 (다시 진료 완료 전까지)
+export function procReconsultLabel(p) {
+  return p?.procReconsult?.at && !p.consultDone && !p.seen ? `${p.procReconsult.names || '처치'} 후 재진` : '';
+}
 // 처치를 보낼 때: '산동 필요' 처치가 있으면 산동 예정을 켬. 이미 점안한 기록은 그대로 (그 시각부터 계속)
 export function procDilatePatch(x, items) {
   if (!items.some(i => i.dilate) || x.dilateOverride === true) return {};
@@ -511,7 +533,9 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
     const b = before.get(patientKey(p));
     if (!b || b === p || !p.checkin) return;
     if (p.restoredAt && p.restoredAt !== b.restoredAt) return; // 되돌리기: 원래 자리 그대로
-    if (consultWaiting(p, settings, prefs) && wasBeforeConsult(b, settings, prefs)) arrivals.push(i);
+    // 처치 후 재진료: 설명 대기에서 바로 진료 대기로 온 것도 새로 들어온 것 (검사가 있으면 검사가 끝날 때 위 규칙으로)
+    const procBack = !!b.seen && !!p.procReconsult?.at && p.procReconsult.at !== b.procReconsult?.at;
+    if (consultWaiting(p, settings, prefs) && (wasBeforeConsult(b, settings, prefs) || procBack)) arrivals.push(i);
   });
   if (!arrivals.length) return next;
   const out = [...next];
@@ -557,10 +581,10 @@ export function consultProtectCount(settings) {
   const n = Math.round(Number(settings?.consultProtectCount ?? 1));
   return Number.isFinite(n) && n >= 0 ? n : 1;
 }
-// 진료 중에 [보내기]·[추가 검사]·CR·산동 다시 진료로 나갔다 돌아온 환자 → 환자용 진료실 명단에 '재진료' (10-07 사용자:
+// 진료 중에 [보내기]·[추가 검사]·CR·산동 다시 진료·처치 후 재진료로 나갔다 돌아온 환자 → 환자용 진료실 명단에 '재진료' (10-07 사용자:
 // 예약이 빨라 앞에 들어가도 다른 환자가 이해하게). 직원 화면은 예전 표시('진료 후 추가검사'·'CR/산동 후 재진') 그대로
 export function isReconsult(p) {
-  return !!p && (!!p.consultHold || (!!p.redo?.kind && !p.redo.cancelledAt));
+  return !!p && (!!p.consultHold || (!!p.redo?.kind && !p.redo.cancelledAt) || !!p.procReconsult?.at);
 }
 // 환자용 진료실 명단의 예약시간 '9:30' (10-07 사용자: 순서가 바뀐 이유를 보여 줌). 지각·예약시간 없음은 ''
 export function boardReservation(p) {
@@ -1236,6 +1260,39 @@ export function previousMeasure(p, history) {
 // 환자번호별로 오늘 + 지난 1회 측정 기록만 보관 (이전 시력·안압은 다음 내원 때 한 번 보면 됨).
 // 매 내원 측정값은 그날 명단 기록(월별 보관 파일)에 모두 남아 있어, 나중에 추이를 볼 때는 그것을 씁니다.
 export const HISTORY_KEEP = 2;
+// 이전 시력·안압은 귀가(설명 완료)한 날의 값만 (10-07 사용자 결정): 그날 기록이 귀가 상태일 때만 그날 값을 남기고,
+// 귀가를 되돌리면 빠지고 다시 귀가하면 다시 남음, 귀가 뒤 값을 고치면 고친 값으로. 진료가 없는 명단도 같은 규칙.
+// App의 mutatePatients가 명단 저장마다 저장 전(서버 최신 값)·저장 후를 비교해 바뀐 환자만 고침 (예전에는 시력방 입력 순간 저장)
+export function historyVisitDone(p) { return !!p?.consultDone; }
+export function historyChanges(base, saved) {
+  if (!Array.isArray(base) || !Array.isArray(saved) || base === saved) return [];
+  const before = new Map(base.map(p => [patientKey(p), p]));
+  const touched = new Map();
+  saved.forEach(p => {
+    if (!p?.id || !p.date) return;
+    const b = before.get(patientKey(p));
+    if (b === p) return;
+    const done = historyVisitDone(p);
+    const changed = done !== historyVisitDone(b)
+      || (done && JSON.stringify(normalizeMeasure(p.measure)) !== JSON.stringify(normalizeMeasure(b?.measure)));
+    if (changed) touched.set(`${p.id}::${p.date}`, { id: p.id, date: p.date });
+  });
+  return [...touched.values()].map(({ id, date }) => {
+    // 같은 날 기록이 여럿(2차 진료)이면 귀가한 기록 중 값이 있는 것, 그중 가장 늦게 귀가한 기록의 값
+    const pick = saved.filter(x => x.id === id && x.date === date && historyVisitDone(x) && hasAnyValue(x.measure))
+      .sort((a, b) => (b.consultDoneAt || 0) - (a.consultDoneAt || 0))[0];
+    return { id, date, measure: pick ? normalizeMeasure(pick.measure) : null };
+  });
+}
+// 그날 값을 통째로 바꿈 (measure 가 없거나 비었으면 그날 기록을 뺌)
+export function setHistoryDay(list, date, measure) {
+  const cur = Array.isArray(list) ? list : [];
+  const others = cur.filter(r => r.date !== date);
+  const next = (hasAnyValue(measure) ? [{ ...normalizeMeasure(measure), date }, ...others] : others)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, HISTORY_KEEP);
+  return next.length ? next : null;
+}
 export function mergeHistoryEntry(list, date, patch) {
   const cur = Array.isArray(list) ? list : [];
   const existing = cur.find(r => r.date === date);

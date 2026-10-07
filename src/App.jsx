@@ -1,6 +1,6 @@
 // 최상위 App (저장소 동기화와 화면 전환)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { placeConsultArrivals, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
+import { placeConsultArrivals, historyChanges, setHistoryDay, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, SexAge, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -173,7 +173,19 @@ export default function App() {
   // 명단 저장마다(서버 최신 값으로 다시 적용될 때도) 진료 대기로 새로 들어온 환자 자리 정리: 1번이 되면 2번째로 (placeConsultArrivals)
   const orderRef = useRef({ settings, doctorPrefs });
   orderRef.current = { settings, doctorPrefs };
-  const mutatePatients = useCallback((updater) => mutatePatientsRaw(prev => placeConsultArrivals(prev, updater(prev), orderRef.current.settings, orderRef.current.doctorPrefs)), [mutatePatientsRaw]);
+  // 저장이 끝나면 귀가 상태가 바뀌었거나 귀가 뒤 값이 바뀐 환자만 이전 시력·안압 기록을 고침 (historyChanges — 귀가한 날의 값만 남김)
+  const mutatePatients = useCallback((updater) => {
+    const bases = new WeakMap();
+    const run = mutatePatientsRaw(prev => {
+      const next = placeConsultArrivals(prev, updater(prev), orderRef.current.settings, orderRef.current.doctorPrefs);
+      if (next && typeof next === 'object') bases.set(next, prev);
+      return next;
+    });
+    run.then(saved => {
+      historyChanges(bases.get(saved), saved).forEach(({ id, date, measure }) => mutateHistoryEntry(id, list => setHistoryDay(list, date, measure)));
+    }, () => {});
+    return run;
+  }, [mutatePatientsRaw, mutateHistoryEntry]);
   setVisionTestIds(settings.tests.filter(t => t.roomId === 'vision').map(t => t.id));
   setNoDilateTests(settings.tests.filter(noDilateTest).map(t => ({ id: t.id, short: t.short || t.name })));
   // 직접 정한 날짜는 정한 날(컴퓨터 날짜 기준)에만 적용되고, 다음 날에는 저절로 풀립니다.
@@ -279,7 +291,6 @@ export default function App() {
         patients={patientsToday}
         history={history}
         mutatePatients={mutatePatients}
-        mutateHistoryEntry={mutateHistoryEntry}
         onBack={onBack}
         lastSync={lastSync}
       />
@@ -296,7 +307,6 @@ export default function App() {
         doctorPrefs={doctorPrefs}
         history={history}
         mutatePatients={mutatePatients}
-        mutateHistoryEntry={mutateHistoryEntry}
         onBack={onBack}
         lastSync={lastSync}
       />

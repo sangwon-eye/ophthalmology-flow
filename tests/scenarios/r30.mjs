@@ -1,4 +1,4 @@
-import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES , measureVision } from '../lib.mjs';
+import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES , measureVision, dischargeVia } from '../lib.mjs';
 const list0 = (await getKey('daily-patients')).value;
 const today = list0[0].date;
 const nextWeek = new Date(new Date(today).getTime() + 7 * 86400000).toISOString().slice(0, 10);
@@ -39,10 +39,11 @@ await m.locator('input').nth(1).fill('0.6');
 await m.getByRole('button', { name: '저장', exact: true }).click(); await W(1000);
 ok(await cc.getByText(/0\.6/).count() >= 1, '차트리뷰 중 이전 시력 직접 입력 → 보임');
 await back();
-// 오늘 측정 저장 → 전체 기록에 합쳐지고 옛 환자 기록 보존
+// 오늘 측정 저장 → 귀가하면(10-07: 귀가한 날의 값만) 전체 기록에 합쳐지고 옛 환자 기록 보존
 await pick('시력');
 await measureVision(page, cardOf('최민지'), '0.5');
 await W(1500);
+await dischargeVia(page, '최민지');
 const full = (await getKey('measure-history')).value;
 ok(full['9999999'] && full[choi.id].some(x => x.date === today) && full['7000001'], '저장 후에도 옛 환자 기록 그대로 + 오늘 기록 추가');
 await W(5000);
