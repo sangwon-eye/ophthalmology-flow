@@ -9,7 +9,7 @@ await editKey('settings', s => ({ ...s, consultFrontCount: 3 }));
 await editKey('daily-patients', list => list.map(p => {
   if (p.doctor === '김선웅' && !['서준호', '신종희', '조현우', '최민지', '임수빈', '정대현', '장민호'].includes(p.name)) return { ...p, doctor: '나상훈' };
   if (p.name === '서준호') return waiting(p, { reservation: '09:00', checkin: '08:30', queueKey: 540.0510 });
-  if (p.name === '신종희') return waiting(p, { reservation: '09:30', checkin: '08:30', queueKey: 570.0510 });
+  if (p.name === '신종희') return waiting(p, { reservation: '09:30', checkin: '08:30', queueKey: 570.0510, consultHold: true }); // 진료 중 보냈다 돌아옴 → 재진료
   if (p.name === '조현우') return waiting(p, { reservation: '10:00', checkin: '08:30', queueKey: 600.0510 });
   if (p.name === '최민지') return waiting(p, { reservation: '09:10', checkin: '10:20', late: true, queueKey: 100550.062 }); // 지각
   if (p.name === '임수빈') return testing(p, { reservation: '08:20', checkin: '08:10', queueKey: 500.0490 }); // 예약 가장 빠름, 검사 늦게 끝남
@@ -50,7 +50,13 @@ const row = (masked) => page.getByText(new RegExp(`^${masked.replace('*', '\\*')
 ok(/9:00 예약/.test(await row('서*호').innerText()), '복도 끝 모니터: 서*호 9:00 예약');
 ok(/10:30 예약/.test(await row('장*호').innerText()), '복도 끝 모니터: 장*호 10:30 예약');
 ok(!/예약/.test(await row('최*지').innerText()), '지각 환자는 예약시간 표시 안 함');
+ok(/재진료/.test(await row('신*희').innerText()) && !/재진료/.test(await row('서*호').innerText()), '진료 중 보냈다 돌아온 환자만 "재진료"');
+const t1 = await row('서*호').innerText();
+ok(t1.indexOf('9:00') < t1.indexOf('서*호') && t1.indexOf('서*호') < t1.indexOf('(0444)'), `한 줄 배열: 예약시간 · 이름 · 번호 뒷 4자리 (${t1.replace(/\n/g, ' ')})`);
 await page.screenshot({ path: `${SP}/r90-board-all.png` });
+await page.setViewportSize({ width: 1536, height: 864 }); await W(400);
+await page.screenshot({ path: `${SP}/r90-board-all-1536.png` }); // 병원 큰 TV(1920, 125%)
+await page.setViewportSize({ width: 1366, height: 900 });
 await page.goto(`${BASE}/`); await W();
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
 await page.getByRole('button', { name: /^김선웅 진료실/ }).click(); await W(1500);

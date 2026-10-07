@@ -550,11 +550,16 @@ export function consultFrontCount(settings) {
   const n = Math.round(Number(settings?.consultFrontCount ?? 5));
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
-// 환자용 진료실 명단의 예약시간 (10-07 사용자: 순서가 바뀐 이유를 보여 줌). 지각·예약시간 없음은 쓰지 않음
+// 진료 중에 [보내기]·[추가 검사]·CR·산동 다시 진료로 나갔다 돌아온 환자 → 환자용 진료실 명단에 '재진료' (10-07 사용자:
+// 예약이 빨라 앞에 들어가도 다른 환자가 이해하게). 직원 화면은 예전 표시('진료 후 추가검사'·'CR/산동 후 재진') 그대로
+export function isReconsult(p) {
+  return !!p && (!!p.consultHold || (!!p.redo?.kind && !p.redo.cancelledAt));
+}
+// 환자용 진료실 명단의 예약시간 '9:30' (10-07 사용자: 순서가 바뀐 이유를 보여 줌). 지각·예약시간 없음은 ''
 export function boardReservation(p) {
   if (!p || p.late || !hasReservation(p)) return '';
   const m = String(p.reservation).match(/(\d{1,2}):(\d{2})/);
-  return m ? `${Number(m[1])}:${m[2]} 예약` : '';
+  return m ? `${Number(m[1])}:${m[2]}` : '';
 }
 
 export function getStage(p, settings) {
