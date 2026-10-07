@@ -24,12 +24,14 @@ export function StationView(props) {
   return <StationScreen {...props} />;
 }
 
-// 시력방: [오늘 검사 ▾]를 누르면 오늘 지정된 검사(보기만)와 시력방 검사 바꾸기가 펼쳐짐
+// 시력방: 오늘 검사 이름을 작게 늘어놓아 무슨 검사가 있는지 보이게 (10-07 사용자, 진료실 '오늘 검사' 줄처럼).
+// 바꿀 일은 드물어서 옆 작은 글씨 [변경]을 누르면 검사 바꾸기가 펼쳐짐
 function VisionTodayTests({ p, tests, children }) {
   const [open, setOpen] = useState(false);
   const list = tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id]);
   return <>
-    <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} className="text-xs text-slate-500 hover:text-slate-800 underline">오늘 검사 {list.length}{open ? ' 접기' : ' 보기'}</button>
+    <span className="text-xs text-slate-600 break-keep"><span className="text-slate-400 mr-1">오늘 검사</span>{list.length ? list.map(t => testLabelWithOptions(t, p.detail?.[t.id])).join(', ') : '없음'}</span>
+    <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} aria-label={open ? '오늘 검사 접기' : '오늘 검사 변경'} className="text-xs text-slate-400 hover:text-slate-800 underline">{open ? '접기' : '변경'}</button>
     {open && (
       <div className="order-last w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1.5">
         <div className="flex flex-wrap items-center gap-1.5">{children}</div>
@@ -520,7 +522,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                       <button type="button" onClick={() => patchPatient(mutatePatients, pk, () => ({ dilateSkip: true }))} title="점안은 다음 검사실·처치실에서 기록할 수 있어요"
                         className="text-xs text-slate-500 hover:text-slate-800 underline">점안 없이 넘기기</button>
                     )}
-                    {/* 오늘 검사는 평소엔 접어 두고, 눌렀을 때만 (시력방은 대부분 바꿀 일이 없음) */}
+                    {/* 오늘 검사는 이름만 작게, 바꾸기는 [변경]을 눌렀을 때만 (시력방은 대부분 바꿀 일이 없음) */}
                     <VisionTodayTests p={p} tests={allTests}>{picker}</VisionTodayTests>
                     <TwoStepButton onConfirm={() => mutatePatients(prev => prev.map(x => patientKey(x) === pk ? undoCheckin(x) : x))} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1" armedClassName="ml-auto text-xs px-2 py-1 rounded border border-rose-400 bg-rose-50 text-rose-700 font-medium"><RotateCcw size={12} />접수 취소</TwoStepButton>
                   </>;
