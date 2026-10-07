@@ -441,7 +441,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     if (!Array.isArray(next)) return; // 저장 실패: 위쪽 빨간 띠로 안내
     const rec = next.find(x => patientKey(x) === pk);
     if (rec?.consultDoneAt !== at) {
-      showToast(`귀가 처리 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 귀가 처리되었습니다' : rec && homeBlocked(rec) ? '처치나 검사가 남아 있습니다' : '이미 다른 곳에서 처리되었습니다'}`);
+      showToast(`귀가 처리 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 귀가 처리되었습니다' : rec && pendingProcedures(rec).length ? '처치가 새로 들어와 있습니다' : rec && homeBlocked(rec) ? '처치 뒤 검사가 남아 있습니다' : '이미 다른 곳에서 처리되었습니다'}`);
       return;
     }
     const nextVisit = next.find(x => x.primaryKey === pk && x.linkActivatedAt === at)?.doctor;
@@ -562,7 +562,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                   {nextVisitNote(p)}
                   {early ? (
                     homeBlocked(p)
-                      ? <span className="text-sm text-slate-500">처치·검사가 끝나면 귀가 처리할 수 있어요</span>
+                      ? <span className="text-sm text-slate-500">{pendingProcedures(p).length ? '처치가 끝나면 귀가 처리할 수 있어요' : '검사가 끝나면 귀가 처리할 수 있어요'}</span>
                       : <button type="button" onClick={() => goHome(p)} className="text-sm px-4 py-2 rounded-lg bg-slate-800 text-white font-medium">귀가</button>
                   ) : <>
                     <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
