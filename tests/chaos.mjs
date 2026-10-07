@@ -43,7 +43,9 @@ fs.writeFileSync(keyFile, JSON.stringify(item));
 const setFile = path.join(work, 'data', 'keys', 'settings.json');
 const setItem = JSON.parse(fs.readFileSync(setFile, 'utf8'));
 // 시범 운영 '시력방 건너뛰기'를 켜고 시험하려면 PILOT_SKIP=1 (시력방 화면의 [접수]가 시력방을 건너뜀)
-setItem.value = JSON.stringify({ ...JSON.parse(setItem.value), dilationWaitMin: Number(process.env.DILATE_MIN || 1), ...(process.env.PILOT_SKIP ? { pilotSkipVision: true } : {}) });
+setItem.value = JSON.stringify({ ...JSON.parse(setItem.value), dilationWaitMin: Number(process.env.DILATE_MIN || 1), ...(process.env.PILOT_SKIP ? { pilotSkipVision: true } : {}),
+  // 처치 후 확인을 켜고 시험하려면 PROC_CHECK=1 (모든 처치 1분 뒤 확인)
+  ...(process.env.PROC_CHECK ? { procedures: JSON.parse(setItem.value).procedures.map(x => ({ ...x, checkMin: 1 })) } : {}) });
 fs.writeFileSync(setFile, JSON.stringify(setItem));
 const logFd = fs.openSync(path.join(work, 'server-out.txt'), 'w');
 const srv = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env: { ...process.env, OPH_DATA_DIR: path.join(work, 'data'), OPH_PORT: String(PORT) }, stdio: ['ignore', logFd, logFd] });
@@ -52,7 +54,7 @@ const { chromium } = await import('./lib.mjs');
 const browser = await chromium.launch();
 const roles = [['시력', null], ['시력', null], ['31번방', null], ['6번방', null], ['처치실', null], ['진료실', '김선웅'], ['진료실', '나상훈'], ['진료실', '이종혁'], ['진료실', '김선웅']];
 const errors = []; const saveFails = []; let clicks = 0;
-const SAFE = /^(접수|시력|NCT|완료|▶|종료|검사 지정|History 설문지|History 입력|예진 완료|처치 완료|진료 전 처치 완료|진료 호출|진료 완료|설명 완료|귀가|점안|CR \d회|\d회 점안|산동|확인|끝|시작|지정|처방 전|보내기|추가 검사|처치|오늘 검사|Schirmer|OCT|VF|WFP|IDRA|GAT|ARK|FAG|FP|AS-OCT|Specular|B-scan|연구)/;
+const SAFE = /^([^·]+ \d\d:\d\d · (확인 대기|\d+분 지남 · 확인)$|접수|시력|NCT|완료|▶|종료|검사 지정|History 설문지|History 입력|예진 완료|처치 완료|진료 전 처치 완료|진료 호출|진료 완료|설명 완료|귀가|점안|CR \d회|\d회 점안|산동|확인|끝|시작|지정|처방 전|보내기|추가 검사|처치|오늘 검사|Schirmer|OCT|VF|WFP|IDRA|GAT|ARK|FAG|FP|AS-OCT|Specular|B-scan|연구)/;
 const AVOID = /삭제|접수 취소|처치 취소|되돌리기|취소|메인 화면|설정|글씨|자동|가나다|예약시간순|오전|오후|전체|띵동|교수|소리|접기|보기|감사|누르면|한 번 더/;
 const MODAL_OK = /^(확인|저장|설명 완료|검사 지정|처치 지정|보내기|추가 검사 등록|설명 완료 · FU 나중에|적용|지정 완료)$/;
 async function drive(page, ms) {

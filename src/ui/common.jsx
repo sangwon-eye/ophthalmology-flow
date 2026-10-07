@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { REDO_LABEL, sexAgeLabel, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -1366,6 +1366,39 @@ export function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCa
 // togglesOnly: 산동/CR 켜고 끄는 버튼만 (점안 기록·상태 표시 없이)
 // group: 카드 버튼 줄 안에 산동·점안을 한 덩어리로 (줄이 넘치면 함께 다음 줄로)
 // dropsOnly: 점안 버튼만 (다시 진료 환자의 점안 칸 — 산동·CR 켜기/끄기 칩 없이)
+// 처치 후 확인 (10-07 사용자 결정, 산동 확인과 같은 방식 — 버튼을 늘리지 않음):
+// 시행한 처치 하나에 버튼 하나. 시간 전 'YAG · OS 11:05 · 확인 대기'(한 번 누르면 3초 동안 [지금 완료] [시행 취소]),
+// 시간이 지나면 노란 'N분 지남 · 확인' → 누르면 끝. 서버 기록이 보이던 시행 그대로일 때만 저장
+export function ProcCheckRow({ p, mutatePatients, filter = () => true }) {
+  const [armed, setArmed] = useState(null);
+  const [, setTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(t); }, []);
+  useEffect(() => { if (!armed) return undefined; const t = setTimeout(() => setArmed(null), 3000); return () => clearTimeout(t); }, [armed]);
+  const items = checkItems(p).filter(filter);
+  if (!items.length) return null;
+  const pk = patientKey(p);
+  const now = Date.now();
+  const confirm = (c) => { setArmed(null); patchPatient(mutatePatients, pk, x => confirmProcCheckPatch(x, c.list, c.i.uid, c.i.performedAt, Date.now())); };
+  const cancel = (c) => { setArmed(null); patchPatient(mutatePatients, pk, x => cancelProcCheckPatch(x, c.list, c.i.uid, c.i.performedAt)); };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {items.map(c => {
+        const due = procCheckDue(c.i, now);
+        const mins = Math.floor((now - c.i.performedAt) / 60000);
+        const label = `${procLabel(c.i)} ${fmtClock(c.i.performedAt)}`;
+        if (due) return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} className="text-sm px-4 py-2 rounded-lg bg-yellow-300 border border-yellow-500 text-yellow-950 font-semibold">{label} · {mins}분 지남 · 확인</button>;
+        if (armed === c.i.uid) return (
+          <span key={c.i.uid} className="flex items-center gap-1">
+            <button type="button" onClick={() => confirm(c)} className="text-sm px-3 py-2 rounded-lg bg-green-600 text-white font-medium">지금 완료</button>
+            <button type="button" onClick={() => cancel(c)} className="text-sm px-3 py-2 rounded-lg border border-rose-400 bg-rose-50 text-rose-700 font-medium">시행 취소</button>
+          </span>
+        );
+        return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => setArmed(c.i.uid)} title={`${c.i.checkMin}분 뒤 확인 · 누르면 [지금 완료] [시행 취소]`} className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">{label} · 확인 대기</button>;
+      })}
+    </div>
+  );
+}
+
 export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false, crStatusOnly = false, dropsOnly = false }) {
   const pk = patientKey(p);
   const crAvail = !!prefs?.[p.doctor]?.cr;
@@ -1439,7 +1472,7 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
         // 추가 점안이 있으면 버튼 하나에 마지막 시각과 횟수만 (누르면 마지막 추가 점안만 취소)
         const extraLast = !cr && st.extra.length ? st.extra[st.extra.length - 1] : 0;
         const shown = extraLast || t;
-        // 산동 완료: 따로 칸을 두지 않고 마지막 점안 버튼이 초록 '산동 완료 11:18' (CR은 '4회 … · 완료')
+        // 산동 완료: 따로 칸을 두지 않고 마지막 점안 버튼이 초록 '산동 완료 11:18' (CR은 '3회 … · 완료')
         const doneHere = st.status === 'ready' && i === st.total - 1;
         const isArmed = armed === i && !!t;
         const undoOk = doneHere && st.ok; // 확인으로 완료된 것: 두 번 누르면 확인만 취소 (점안 기록은 그대로)
@@ -1618,15 +1651,38 @@ export function ProcedureList({ p, performer, onCancel }) {
         <div key={x.uid} className={x.done ? 'text-slate-400 line-through' : ''}>
           <span className="font-medium">{procLabel(x)}</span>
           <span className="text-xs text-slate-400 ml-1">{PERFORMER_LABEL[x.performer]}</span>
+          {!x.done && x.performedAt && <span className="text-xs text-amber-700 ml-1">시행 {fmtClock(x.performedAt)} · 확인 대기</span>}
           {x.note && <span className="text-xs text-yellow-800 ml-2">{x.note}</span>}
-          {!x.done && onCancel && <TwoStepButton onConfirm={() => onCancel(x.uid)} className="ml-3 rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700" armedClassName="ml-3 rounded-lg border border-rose-500 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700">처치 취소</TwoStepButton>}
+          {!x.done && !x.performedAt && onCancel && <TwoStepButton onConfirm={() => onCancel(x.uid)} className="ml-3 rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700" armedClassName="ml-3 rounded-lg border border-rose-500 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700">처치 취소</TwoStepButton>}
         </div>
       ))}
     </div>
   );
 }
 
-export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onNoFu, onDelete, onCancel, mainIds = null }) {
+// 처치 후 검사 고르기 (10-07): [처치 완료] 옆 '검사 추가 후 완료'. 처치에서 고른 눈(OD·OS)이 하나면 검사도 처음부터 그 눈으로
+export function PostTestModal({ p, items, tests, settings, mainIds, onConfirm, onCancel }) {
+  const eyes = [...new Set((items || []).map(i => i.eye).filter(e => e === 'OD' || e === 'OS'))];
+  const initialDetail = eyes.length === 1 ? Object.fromEntries(tests.map(t => [t.id, { eye: eyes[0] }])) : {};
+  return (
+    <TestCheckModal
+      key={`post-${patientKey(p)}`}
+      mainIds={mainIds}
+      title={`${p.name}님 처치 후 검사`}
+      subtitle={`${(items || []).map(procLabel).join(', ')} 처치를 완료하고, 고른 검사를 오늘 검사에 넣습니다 (이미 한 검사는 다시). 검사가 끝나면 ${p.seen ? '설명 대기' : '진료 대기'}로 갑니다.${eyes.length === 1 ? ` 검사는 처치한 눈(${eyes[0]})으로 맞춰 두었습니다 (바꾸려면 오른쪽 클릭).` : ''}`}
+      tests={tests}
+      settings={settings}
+      initial={{}}
+      initialDetail={initialDetail}
+      openDetail={false}
+      confirmLabel="처치 완료 · 검사로"
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
+}
+
+export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, openDetail = true, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onNoFu, onDelete, onCancel, mainIds = null }) {
   const [delArmed, setDelArmed] = useState(false);
   const [preSel, setPreSel] = useState(() => preProcChoice?.initial || []);
   const tests = orderForPicking(rawTests, settings);
@@ -1645,6 +1701,8 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
   // 단안·프로토콜 칸은 필요할 때만 펼침 (이미 값이 있으면 펼친 상태로 시작)
   const [extraOpen, setExtraOpen] = useState(() => {
     const out = {};
+    // openDetail=false: 처치 후 검사처럼 눈만 미리 맞춰 두고 칸은 접어 둠 (검사 이름 옆에 '(OD만)'으로 보임)
+    if (!openDetail) return out;
     Object.keys(initialDetail || {}).forEach(k => {
       const d = cleanDetail(initialDetail[k]);
       if (d.note.trim() || d.eye !== 'OU') out[k] = true;
@@ -1791,7 +1849,7 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
             {(followup ? !!followup.prefs?.[followupDoctor]?.cr : dilation.crAvailable) && (
               <label className="flex items-center gap-2 mt-3 text-sm text-slate-700 cursor-pointer">
                 <input type="checkbox" checked={dil.cr} onChange={e => setDil(d => ({ ...d, cr: e.target.checked }))} className="w-4 h-4" />
-                CR (조절마비 굴절검사, 4회 점안)
+                CR (조절마비 굴절검사, 3회 점안)
               </label>
             )}
           </div>

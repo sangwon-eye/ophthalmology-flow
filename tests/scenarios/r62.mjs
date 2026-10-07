@@ -25,14 +25,14 @@ await page.getByRole('button', { name: '나상훈', exact: true }).first().click
 const drops = section('CR·산동 점안');
 ok(await drops.getByText('권나은', { exact: true }).count() === 1, 'FU CR 환자는 CR·산동 점안 칸에');
 ok(!(await inWaiting('권나은')), 'CR 끝나기 전에는 진료 대기에 없음');
-for (let i = 1; i <= 4; i++) { await cardOf('권나은').getByRole('button', { name: `${i}회 점안` }).click(); await W(400); }
-ok((await pt('권나은')).drops.filter(Boolean).length === 4, '진료실에서 CR 4회 점안 기록');
+for (let i = 1; i <= 3; i++) { await cardOf("권나은").getByRole("button", { name: `${i}회 점안` }).click(); await W(400); }
+ok((await pt('권나은')).drops.filter(Boolean).length === 3, '진료실에서 CR 3회 점안 기록');
 ok(!/완료까지/.test(await cardOf('권나은').innerText()), '남은 시간 글은 따로 쓰지 않음 (기존 산동·CR과 같게)');
 await W(2600);
 const c0 = await chimes();
 await setP('권나은', p => ({ drops: p.drops.map(t => t - 20 * 60000) }));
 await W(4500);
-// 10-03 산동 확인: 시간이 지나도 저절로 들어가지 않음 → 띵동 + 4회 버튼이 노란 'N분 지남 · 확인'
+// 10-03 산동 확인: 시간이 지나도 저절로 들어가지 않음 → 띵동 + 3회 버튼이 노란 'N분 지남 · 확인'
 ok(!(await inWaiting('권나은')), '시간이 지나도 확인 전에는 진료 대기에 없음');
 ok(await chimes() === c0 + 1, 'CR 시간 됨 → 띵동');
 await cardOf('권나은').getByRole('button', { name: /분 지남 · 확인$/ }).click(); await W(1500);

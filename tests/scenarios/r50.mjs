@@ -5,7 +5,7 @@ const now = Date.now();
 const ago = (m) => now - m * 60000;
 await editKey('daily-patients', list => list.map(p => {
   if (p.name === '장민호') return { ...p, dilateOverride: true, drops: [ago(20)] };
-  if (p.name === '한지훈') return { ...p, cr: true, drops: [ago(40), ago(35), ago(30), ago(25)] };
+  if (p.name === '한지훈') return { ...p, cr: true, drops: [ago(40), ago(35), ago(25)] };
   if (p.name === '윤지아') return { ...p, dilateOverride: true, drops: [ago(20)] }; // VF(산동 금지)가 남아 있음
   return p;
 }));

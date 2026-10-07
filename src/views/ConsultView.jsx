@@ -1,10 +1,10 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
-import { ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -316,18 +316,31 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   };
 
   // 교수님 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 그대로 남김)
-  const finishProfProcedure = (p) => {
+  // 처치 후 확인 시간이 있는 처치(설정 > 처치, 예: YAG)는 시행 시각만 적고 '확인 대기' (확인해야 끝남 — 10-07)
+  // post: '검사 추가 후 완료'로 고른 검사 (처치 후 검사, 끝나면 설명 대기로 — 그때까지 [귀가]는 막음)
+  const [postFor, setPostFor] = useState(null);
+  const finishProfProcedure = (p, post = null) => {
     const pk = patientKey(p);
     const at = Date.now();
-    const ids = new Set(pendingProcedures(p, 'prof').map(i => i.uid));
-    patch(pk, x => ({ procedures: (x.procedures || []).map(i => (ids.has(i.uid) && !i.done ? { ...i, done: true, doneAt: at } : i)) })).then(list => {
+    const ids = new Set(notPerformed(pendingProcedures(p, 'prof')).map(i => i.uid));
+    const tests = post ? allTests.filter(t => post.sel[t.id]).map(t => t.id) : [];
+    const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
+    const before = { assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, postTests: p.postTests };
+    patch(pk, x => (x.consultDone ? {} : {
+      procedures: (x.procedures || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)),
+      ...addPostTestsPatch(x, tests, detail),
+    })).then(list => {
       const rec = Array.isArray(list) ? list.find(x => patientKey(x) === pk) : null;
       if (!rec) return;
-      const leftProf = pendingProcedures(rec, 'prof');
+      const leftProf = notPerformed(pendingProcedures(rec, 'prof'));
+      const waiting = checkItems(rec).filter(c => c.i.performedAt === at);
       const next = leftProf.length ? `새로 들어온 교수님 처치가 남아 있습니다: ${leftProf.map(procLabel).join(', ')}`
-        : pendingProcedures(rec, 'resident').length ? '처치실로' : rec.explainedEarly ? '귀가 대기' : '설명 가능';
-      showToast(`${p.name} 처치 완료, ${next}`, () => patch(pk, x => ({
-        procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
+        : waiting.length ? `${waiting.map(c => `${c.i.checkMin}분`).join(', ')} 뒤 확인`
+          : tests.length ? '검사실로 (검사 후 설명 대기)'
+            : pendingProcedures(rec, 'resident').length ? '처치실로' : rec.explainedEarly ? '귀가 대기' : '설명 가능';
+      showToast(`${p.name} ${waiting.length ? `${waiting.map(c => procLabel(c.i)).join(', ')} 시행` : '처치 완료'}, ${next}`, () => patch(pk, x => ({
+        procedures: (x.procedures || []).map(i => (i.doneAt === at || (!i.done && i.performedAt === at) ? { ...i, done: false, doneAt: null, performedAt: undefined, checkMin: undefined } : i)),
+        ...(tests.length ? { ...restoreKeys(x, before, tests), postTests: before.postTests } : {}),
       })));
     }, () => {});
   };
@@ -365,7 +378,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const next = await mutatePatients(prev => {
       const cur = prev.find(x => patientKey(x) === pk);
       if (!cur || cur.consultDone || cur.explainedEarly || !cur.seen) return prev;
-      const early = pendingProcedures(cur).length > 0;
+      const early = homeBlocked(cur); // 처치(확인 대기 포함)나 처치 후 검사가 남았으면 설명만 먼저
       let list = withFu(prev.map(x => (x !== cur ? markFuture(x) : early
         ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
         : { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined })));
@@ -422,13 +435,13 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const at = Date.now();
     const next = await mutatePatients(prev => {
       const cur = prev.find(x => patientKey(x) === pk);
-      if (!cur || cur.consultDone || !cur.explainedEarly || pendingProcedures(cur).length) return prev;
+      if (!cur || cur.consultDone || !cur.explainedEarly || homeBlocked(cur)) return prev;
       return activateLinked(prev.map(x => (x === cur ? { ...x, consultDone: true, consultDoneAt: at } : x)), pk, settings, at);
     }).catch(() => null);
     if (!Array.isArray(next)) return; // 저장 실패: 위쪽 빨간 띠로 안내
     const rec = next.find(x => patientKey(x) === pk);
     if (rec?.consultDoneAt !== at) {
-      showToast(`귀가 처리 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 귀가 처리되었습니다' : rec && pendingProcedures(rec).length ? '처치가 새로 들어와 있습니다' : '이미 다른 곳에서 처리되었습니다'}`);
+      showToast(`귀가 처리 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 귀가 처리되었습니다' : rec && homeBlocked(rec) ? '처치나 검사가 남아 있습니다' : '이미 다른 곳에서 처리되었습니다'}`);
       return;
     }
     const nextVisit = next.find(x => x.primaryKey === pk && x.linkActivatedAt === at)?.doctor;
@@ -535,18 +548,21 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 <SimpleCard key={patientKey(p)} p={p} tone="emerald" badges={<>
                   {ps === 'doing' && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300">처치 중</span>}
                   {ps === 'done' && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold border border-green-300">처치 완료</span>}
+                  {postTestsPending(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 font-semibold border border-sky-300">검사 중 · {allTests.filter(t => (p.postTests || []).includes(t.id) && p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ')}</span>}
                   {early && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료{p.fuLater ? ' · FU 나중에' : ''}</span>}
                 </>}>
                   <TodayDoneLine p={p} tests={allTests} prefs={doctorPrefs} />
                   <ProcedureList p={p} onCancel={early ? undefined : uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
                   {procDilatePending(p) && <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />}
-                  {pendingProcedures(p, 'prof').length > 0 && (
+                  {notPerformed(pendingProcedures(p, 'prof')).length > 0 && <>
                     <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
-                  )}
+                    <button type="button" onClick={() => setPostFor(p)} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다. 검사가 끝나면 설명 대기로 돌아옵니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 추가 후 완료</button>
+                  </>}
+                  <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={c => c.list === 'procedures' && c.i.performer === 'prof'} />
                   {nextVisitNote(p)}
                   {early ? (
-                    ps === 'doing'
-                      ? <span className="text-sm text-slate-500">처치가 끝나면 귀가 처리할 수 있어요</span>
+                    homeBlocked(p)
+                      ? <span className="text-sm text-slate-500">처치·검사가 끝나면 귀가 처리할 수 있어요</span>
                       : <button type="button" onClick={() => goHome(p)} className="text-sm px-4 py-2 rounded-lg bg-slate-800 text-white font-medium">귀가</button>
                   ) : <>
                     <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
@@ -720,6 +736,12 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
         </>
       )}
 
+      {postFor && (
+        <PostTestModal p={postFor} tests={allTests} settings={settings} mainIds={mainTestIds(doctorPrefs, postFor.doctor)}
+          items={notPerformed(pendingProcedures(postFor, 'prof'))}
+          onConfirm={(sel, detail) => { const p = postFor; setPostFor(null); finishProfProcedure(p, { sel, detail }); }}
+          onCancel={() => setPostFor(null)} />
+      )}
       {explainFor && (
         <TestCheckModal
           key={`explain-${patientKey(explainFor)}`}

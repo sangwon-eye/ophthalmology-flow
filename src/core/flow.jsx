@@ -383,12 +383,75 @@ export function inResidentProcedure(p) {
   return !p.consultDone && pendingProcedures(p, 'resident').length > 0;
 }
 // 진료 후 보낸 처치 중 '산동 필요'(설정 > 처치)가 남아 있음 → 설명 대기·처치실 카드에 [산동] 점안 버튼
+// (이미 시행하고 확인만 기다리는 처치는 뺌)
 export function procDilatePending(p) {
-  return pendingProcedures(p).some(x => x.dilate);
+  return pendingProcedures(p).some(x => x.dilate && !x.performedAt);
 }
 // 처치 이름 + 눈 (예: PRP · OS)
 export function procLabel(x) {
   return `${x.name}${['OU', 'OD', 'OS'].includes(x.eye) ? ` · ${x.eye}` : ''}`;
+}
+
+/* 처치 후 확인 (10-07 사용자 결정): YAG·Probing처럼 시행하고 N분 뒤 확인해야 끝나는 처치 */
+// 설정 > 처치의 '처치 후 확인 N분' (0·비어 있음 = 확인 없음)
+export function procCheckMin(settings, procId) {
+  const n = Number((settings?.procedures || []).find(x => x.id === procId)?.checkMin);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+// [처치 완료]를 누름: 확인 시간이 있는 처치는 시행 시각만 적고 남겨 둠(확인 대기 — 처치가 남은 것과 같음), 없으면 바로 완료
+export function performProcItem(i, settings, at) {
+  if (i.done || i.performedAt) return i;
+  const m = procCheckMin(settings, i.procId);
+  return m ? { ...i, performedAt: at, checkMin: m } : { ...i, done: true, doneAt: at };
+}
+export function awaitingCheck(i) {
+  return !!i && !i.done && !!i.performedAt;
+}
+// 아직 시행 전인 처치 ([처치 완료] 버튼이 할 일)
+export function notPerformed(list) {
+  return (list || []).filter(i => !i.done && !i.performedAt);
+}
+export function procCheckDue(i, now = Date.now()) {
+  return awaitingCheck(i) && now - i.performedAt >= (Number(i.checkMin) || 0) * 60000;
+}
+// 확인을 기다리는 처치 (진료 후 처치 procedures + 진료 전 처치 preProcs)
+export function checkItems(p) {
+  return [
+    ...(p.procedures || []).filter(awaitingCheck).map(i => ({ list: 'procedures', i })),
+    ...(p.preProcs || []).filter(awaitingCheck).map(i => ({ list: 'preProcs', i })),
+  ];
+}
+// 확인: 서버 기록이 화면에 보이던 시행 그대로일 때만 (그사이 다른 PC가 확인·취소했으면 그대로)
+export function confirmProcCheckPatch(x, list, uid, performedAt, at) {
+  const items = x[list] || [];
+  if (!items.some(i => i.uid === uid && awaitingCheck(i) && i.performedAt === performedAt)) return {};
+  return { [list]: items.map(i => (i.uid === uid ? { ...i, done: true, doneAt: at, checkedAt: at } : i)) };
+}
+// 시행 취소 (확인 전): 시행 전으로 되돌림
+export function cancelProcCheckPatch(x, list, uid, performedAt) {
+  const items = x[list] || [];
+  if (!items.some(i => i.uid === uid && awaitingCheck(i) && i.performedAt === performedAt)) return {};
+  return { [list]: items.map(i => (i.uid === uid ? { ...i, performedAt: undefined, checkMin: undefined } : i)) };
+}
+
+/* 처치 후 검사 (10-07 사용자 결정): [처치 완료] 옆 '검사 추가 후 완료' — 직원이 그때그때 (예: PRP 후 그 눈 WFP) */
+// 고른 검사를 오늘 검사에 넣음 (이미 했으면 다시). 진료 전 처치는 검사 후 진료 대기로, 진료 후 처치는 검사 후 설명 대기로
+export function addPostTestsPatch(x, ids, detail) {
+  if (!ids.length) return {};
+  const assigned = { ...x.assigned }, done = { ...x.done }, doneAt = { ...(x.doneAt || {}) }, nextDetail = { ...(x.detail || {}) };
+  ids.forEach(k => {
+    assigned[k] = true; done[k] = false; doneAt[k] = null;
+    if (detail?.[k]) nextDetail[k] = detail[k]; else delete nextDetail[k];
+  });
+  return { assigned, done, doneAt, detail: nextDetail, orders: clearOrders(x, ids), postTests: [...new Set([...(x.postTests || []), ...ids])] };
+}
+// 처치 후 검사가 남음 (진료 후 처치면 이게 끝나야 [귀가] — 설명 먼저는 됨)
+export function postTestsPending(p) {
+  return (p.postTests || []).some(id => p.assigned?.[id] && !p.done?.[id]);
+}
+// 귀가(설명 완료로 바로 끝내기)를 막는 것: 남은 처치(확인 대기 포함) 또는 처치 후 검사
+export function homeBlocked(p) {
+  return pendingProcedures(p).length > 0 || postTestsPending(p);
 }
 // 처치를 보낼 때: '산동 필요' 처치가 있으면 산동 예정을 켬. 이미 점안한 기록은 그대로 (그 시각부터 계속)
 export function procDilatePatch(x, items) {
@@ -572,10 +635,12 @@ export function unreleaseRedo(x) {
   const back = (x.procedures || []).filter(i => ids.has(i.uid) && !i.done);
   return { procedures: (x.procedures || []).filter(i => !(ids.has(i.uid) && !i.done)), redo: { ...x.redo, pending: [...(x.redo.pending || []), ...back], released: [] } };
 }
+// CR 점안 횟수 (10-07 사용자: 총 3회, 예전 4회 — 예전 기록의 4번째 점안은 보지 않음)
+export const CR_DROPS = 3;
 export function dilationState(p, prefs, waitMin, now = Date.now()) {
   const cr = crActive(p, prefs);
   if (!cr && !needsDilation(p, prefs)) return { need: false };
-  const total = cr ? 4 : 1;
+  const total = cr ? CR_DROPS : 1;
   const drops = Array.from({ length: total }, (_, i) => (p.drops || [])[i] || null);
   const given = drops.filter(Boolean).length;
   // 추가 점안(산동이 덜 됐을 때, CR 제외): 기존 점안 기록과 따로 두고, 기다리는 시간은 마지막 추가 점안부터 다시
@@ -1547,7 +1612,7 @@ export function treatWork(patients, settings, now = Date.now()) {
     triage: patients.filter(needsTriageAssign),
     procs: patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)),
     prep: patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).length > 0),
-    check: patients.filter(p => prepChecks(p, settings).length > 0 || treatTimedDue(p, settings, now).length > 0),
+    check: patients.filter(p => prepChecks(p, settings).length > 0 || treatTimedDue(p, settings, now).length > 0 || (!p.consultDone && checkItems(p).some(c => procCheckDue(c.i, now)))),
     preProc: patients.filter(p => !p.consultDone && pastVision(p) && preProcPending(p)),
     exams: patients.filter(p => !p.consultDone && roomPending(p, settings, treatId)),
   };
@@ -1565,6 +1630,8 @@ export function treatChimeKeys(patients, settings, now = Date.now()) {
     prepPendingTests(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) keys.push(`due:${pk}:${t.id}`); });
     prepChecks(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) keys.push(`due:${pk}:${t.id}`); });
     if (inResidentProcedure(p) && procDilatePending(p) && dilationState(p, null, settings.dilationWaitMin, now).status === 'ready') keys.push(`dil:${pk}`);
+    // 처치 후 확인 시간이 됨 (교수님 처치도 처치실에서 알림 — 10-07 사용자)
+    if (!p.consultDone) checkItems(p).forEach(c => { if (procCheckDue(c.i, now)) keys.push(`pchk:${pk}:${c.i.uid}`); });
   });
   return keys;
 }

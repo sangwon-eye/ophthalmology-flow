@@ -90,7 +90,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
         prepCompletes: !!t.prepCompletes,
       })),
       procedures: (draft.procedures || [])
-        .map(x => ({ ...x, name: (x.name || '').trim() }))
+        .map(x => ({ ...x, name: (x.name || '').trim(), checkMin: Math.max(0, Math.round(Number(x.checkMin) || 0)) || undefined }))
         .filter(x => x.name),
       vision: {
         name: (draft.vision?.name || '').trim() || DEFAULT_SETTINGS.vision.name,
@@ -429,6 +429,11 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                   <input type="checkbox" checked={!!x.memoField} onChange={e => updateProc(x.id, { memoField: e.target.checked })} className="w-4 h-4" />
                   메모 칸
                 </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-700" title="시행 후 이 시간이 지나 [확인]을 눌러야 처치가 끝납니다 (예: YAG, Probing). 0이면 [처치 완료]로 바로 끝">
+                  처치 후 확인
+                  <input type="number" min="0" aria-label={`${x.name || '처치'} 처치 후 확인 분`} value={x.checkMin ?? ''} placeholder="0" onChange={e => updateProc(x.id, { checkMin: e.target.value })} className="w-16 border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                  분
+                </label>
                 <button type="button" aria-label="위로" onClick={() => moveProc(x.id, 'up')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronUp size={14} /></button>
                 <button type="button" aria-label="아래로" onClick={() => moveProc(x.id, 'down')} className="p-1.5 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>
                 <ConfirmButton label="삭제" onConfirm={() => deleteProc(x.id)} />
@@ -540,7 +545,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="font-medium text-slate-900 mb-1">산동 대기 시간</div>
-            <p className="text-sm text-slate-500 mb-3">점안 후 이 시간이 지나면 '산동 완료'로 표시돼요. CR은 4번째 점안부터 계산합니다.</p>
+            <p className="text-sm text-slate-500 mb-3">점안 후 이 시간이 지나면 '산동 완료'로 표시돼요. CR은 3번째(마지막) 점안부터 계산합니다.</p>
             <div className="flex items-center gap-2">
               <input type="number" min="1" value={draft.dilationWaitMin} onChange={e => updateDraft(d => ({ ...d, dilationWaitMin: e.target.value }))} className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
               <span className="text-sm text-slate-600">분</span>

@@ -1,7 +1,7 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
-import { ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
+import { performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatTimedDue, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
+import { ProcCheckRow, PostTestModal, ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, ProcedureList, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
@@ -131,6 +131,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       patients.forEach(p => sortedTests(settings).filter(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t)).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${prepLabel(t)} 끝 · 확인해주세요` }); }));
       prepList.forEach(p => prepPendingTests(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${prepLabel(t)} 끝 · 확인해주세요` }); }));
       checkList.forEach(p => prepChecks(p, settings).forEach(t => { if (prepDue(prepOf(p, t), t, now)) due.push({ k: `${patientKey(p)}:${t.id}`, text: `${p.name} ${t.short || t.name} 확인할 시간` }); }));
+      patients.filter(p => !p.consultDone).forEach(p => checkItems(p).forEach(c => { if (procCheckDue(c.i, now)) due.push({ k: `${patientKey(p)}:pchk:${c.i.uid}`, text: `${p.name} ${procLabel(c.i)} 확인할 시간` }); }));
       patients.filter(p => inResidentProcedure(p) && procDilatePending(p)).forEach(p => { if (dilationState(p, null, settings.dilationWaitMin, now).status === 'ready') due.push({ k: `${patientKey(p)}:dil`, text: `${p.name} 산동 완료 · ${pendingProcedures(p, 'resident').map(procLabel).join(', ')}` }); });
       const fresh = seenDue.current ? due.filter(d => !seenDue.current.has(d.k)) : [];
       seenDue.current = new Set(due.map(d => d.k));
@@ -208,36 +209,57 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     }), rec => prepNow(rec, t)?.at === at, `${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`,
     () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.at === at ? restoreKeys(x, before, [t.id]) : {})));
   };
+  // 처치 후 검사 (10-07): [처치 완료] 옆 '검사 추가 후 완료' → 검사 고르기 창
+  const [postFor, setPostFor] = useState(null); // { p, kind: 'pre' | 'resident' }
+  const postIds = (sel) => allTests.filter(t => sel[t.id]).map(t => t.id);
+  // [처치 완료] 되돌리기: 이 버튼이 시행·완료한 항목만 시행 전으로 (처치 후 검사는 아직 시작 전이면 원래대로)
+  const unperform = (list, at) => (x) => ({
+    [list]: (x[list] || []).map(i => (i.doneAt === at || (!i.done && i.performedAt === at) ? { ...i, done: false, doneAt: null, performedAt: undefined, checkMin: undefined } : i)),
+  });
+  const undoPost = (before, ids) => (x) => (ids.length ? { ...restoreKeys(x, before, ids), postTests: before.postTests } : {});
   // 진료 전 처치 (예: PRP, YAG): 처치 완료 후 검사가 있으면 검사실, 없으면 진료 대기로
+  // 처치 후 확인 시간이 있는 처치(설정 > 처치)는 시행 시각만 적고 '확인 대기' (확인해야 끝남)
   const preProcList = [...work.preProc].sort(order);
-  const finishPreProcs = (p) => {
+  const finishPreProcs = (p, post = null) => {
     const pk = patientKey(p);
     const at = Date.now();
-    // 화면에 보이던 진료 전 처치만 완료
-    const ids = new Set((p.preProcs || []).filter(i => !i.done).map(i => i.uid));
-    patchPatient(mutatePatients, pk, x => ({ preProcs: (x.preProcs || []).map(i => (i.done || !ids.has(i.uid) ? i : { ...i, done: true, doneAt: at })) }));
-    const next = { ...p, preProcs: (p.preProcs || []).map(i => ({ ...i, done: true })) };
-    showToast(`${p.name} 진료 전 처치 완료, ${pendingRooms(next, settings).length ? '검사실로' : '진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
-      preProcs: (x.preProcs || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
+    // 화면에 보이던 진료 전 처치만 (시행 전인 것)
+    const ids = new Set(notPerformed(p.preProcs).map(i => i.uid));
+    const tests = post ? postIds(post.sel) : [];
+    const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
+    const before = { assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, postTests: p.postTests };
+    patchPatient(mutatePatients, pk, x => ({
+      preProcs: (x.preProcs || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)),
+      ...addPostTestsPatch(x, tests, detail),
+    }));
+    const next = { ...p, preProcs: (p.preProcs || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)), ...addPostTestsPatch(p, tests, detail) };
+    const waiting = checkItems(next).filter(c => c.list === 'preProcs' && c.i.performedAt === at);
+    showToast(waiting.length ? `${p.name} ${waiting.map(c => procLabel(c.i)).join(', ')} 시행 · ${waiting.map(c => `${c.i.checkMin}분`).join(', ')} 뒤 확인`
+      : `${p.name} 진료 전 처치 완료, ${pendingRooms(next, settings).length ? '검사실로' : '진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
+      ...unperform('preProcs', at)(x), ...undoPost(before, tests)(x),
     })));
   };
 
   // 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 하지 않은 것이므로 그대로 남김)
-  const finishResident = (p) => {
+  const finishResident = (p, post = null) => {
     const pk = patientKey(p);
     const at = Date.now();
-    const ids = new Set(pendingProcedures(p, 'resident').map(i => i.uid));
-    patchPatient(mutatePatients, pk, x => ({
-      procedures: (x.procedures || []).map(i => (ids.has(i.uid) && !i.done ? { ...i, done: true, doneAt: at } : i)),
+    const ids = new Set(notPerformed(pendingProcedures(p, 'resident')).map(i => i.uid));
+    const tests = post ? postIds(post.sel) : [];
+    const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
+    const before = { assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, postTests: p.postTests };
+    patchPatient(mutatePatients, pk, x => (x.consultDone ? {} : {
+      procedures: (x.procedures || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)),
+      ...addPostTestsPatch(x, tests, detail),
     })).then(next => {
       const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
       if (!rec) return;
-      const left = pendingProcedures(rec, 'resident');
-      const undo = () => patchPatient(mutatePatients, pk, x => ({
-        procedures: (x.procedures || []).map(i => (i.doneAt === at ? { ...i, done: false, doneAt: null } : i)),
-      }));
+      const left = notPerformed(pendingProcedures(rec, 'resident'));
+      const waiting = checkItems(rec).filter(c => c.list === 'procedures' && c.i.performedAt === at);
+      const undo = () => patchPatient(mutatePatients, pk, x => ({ ...unperform('procedures', at)(x), ...undoPost(before, tests)(x) }));
       showToast(left.length ? `${p.name} 처치 완료 · 새로 들어온 처치가 남아 있습니다: ${left.map(procLabel).join(', ')}`
-        : `${p.name} 처치 완료, ${rec.explainedEarly ? '진찰실에서 귀가 처리' : '설명 대기로'}`, undo);
+        : waiting.length ? `${p.name} ${waiting.map(c => procLabel(c.i)).join(', ')} 시행 · ${waiting.map(c => `${c.i.checkMin}분`).join(', ')} 뒤 확인`
+          : `${p.name} 처치 완료, ${tests.length ? '검사실로' : rec.explainedEarly ? '진찰실에서 귀가 처리' : '설명 대기로'}`, undo);
     }, () => {});
   };
 
@@ -263,7 +285,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   const prepStarted = (p) => prepPendingTests(p, settings).some(t => prepOf(p, t)?.startedAt);
   const staleOf = (p) => staleMinutes(p, settings, now);
   const summary = [
-    { id: 'treat-check', label: '결과 확인', list: checkList, due: checkList.filter(p => timedDue(p, now).length > 0 || prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length },
+    { id: 'treat-check', label: '결과 확인', list: checkList, due: checkList.filter(p => timedDue(p, now).length > 0 || prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now)) || checkItems(p).some(c => procCheckDue(c.i, now))).length },
     { id: 'treat-preproc', label: '진료 전 처치', list: preProcList, stale: preProcList.filter(staleOf).length },
     { id: 'treat-prep', label: '검사 준비', list: prepList,
       due: prepList.filter(p => prepPendingTests(p, settings).some(t => prepDue(prepOf(p, t), t, now))).length,
@@ -284,6 +306,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           <SectionTitle hint="시간이 된 검사를 모아 봅니다. 바로 넘어가는 검사(예: MMP)는 시작부터 여기 있고, [끝 · 확인]을 눌러야 하는 검사(예: Schirmer)는 시간이 되면 올라옵니다. 결과를 보고 [확인]을 눌러주세요.">결과 확인 · {checkList.length}명</SectionTitle>
           {checkList.map(p => (
             <SimpleCard key={patientKey(p)} p={p} tone="violet">
+              <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={c => procCheckDue(c.i)} />
               {timedDue(p).map(t => (
                 <div key={`due-${t.id}`} className="flex items-center gap-2 flex-wrap mr-4">
                   <span className="text-sm font-semibold text-slate-900">{t.short || t.name}</span>
@@ -321,8 +344,12 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                   {(p.preProcs || []).filter(x => !x.done).map(x => <span key={x.uid} className="font-semibold mr-3">{x.name}</span>)}
                   {sortedTests(settings).some(t => p.assigned?.[t.id] && !p.done?.[t.id]) && <span className="text-xs text-slate-500">처치 후 검사: {sortedTests(settings).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ')}</span>}
                 </div>
-                <button type="button" onClick={() => finishPreProcs(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium shrink-0">처치 완료</button>
+                {notPerformed(p.preProcs).length > 0 && <span className="flex items-center gap-2 shrink-0">
+                  <button type="button" onClick={() => setPostFor({ p, kind: 'pre' })} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 추가 후 완료</button>
+                  <button type="button" onClick={() => finishPreProcs(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">처치 완료</button>
+                </span>}
               </div>
+              <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={c => c.list === 'preProcs'} />
               <DilationRow compact crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
             </SimpleCard>
           ))}
@@ -433,11 +460,13 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                   <ProcedureList p={p} performer="resident" onCancel={uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
                   {pendingProcedures(p, 'prof').length > 0 && <div className="text-xs text-slate-400 mt-0.5">교수님 처치도 남음: {pendingProcedures(p, 'prof').map(procLabel).join(', ')}</div>}
                 </div>
-                {inResidentProcedure(p) && <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium shrink-0">
-                  처치 완료
-                </button>}
+                {inResidentProcedure(p) && notPerformed(pendingProcedures(p, 'resident')).length > 0 && <span className="flex items-center gap-2 shrink-0">
+                  <button type="button" onClick={() => setPostFor({ p, kind: 'resident' })} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 추가 후 완료</button>
+                  <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">처치 완료</button>
+                </span>}
               </div>
             )}
+            <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={c => c.list === 'procedures' && c.i.performer === 'resident'} />
             <DilationRow compact crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
           </SimpleCard>
         ))}
@@ -451,6 +480,12 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
         ))}
       </RecentDone>
 
+      {postFor && (
+        <PostTestModal p={postFor.p} tests={allTests} settings={settings} mainIds={mainTestIds(doctorPrefs, postFor.p.doctor)}
+          items={postFor.kind === 'pre' ? notPerformed(postFor.p.preProcs) : notPerformed(pendingProcedures(postFor.p, 'resident'))}
+          onConfirm={(sel, detail) => { const { p, kind } = postFor; setPostFor(null); (kind === 'pre' ? finishPreProcs : finishResident)(p, { sel, detail }); }}
+          onCancel={() => setPostFor(null)} />
+      )}
       {reqFor && (
         <TestCheckModal
           key={`req-${patientKey(reqFor)}`}
