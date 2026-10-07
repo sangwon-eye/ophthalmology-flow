@@ -52,6 +52,7 @@ export const DEFAULT_SETTINGS = {
   treatStaleMin: 20, // 처치실: 마지막 진행 후 이 시간(분)이 지나면 카드 강조 (0 = 끔)
   lateGraceMin: 0, // 바코드 접수에서만: 예약시간보다 이 시간 넘게 늦게 찍으면 지각
   consultFrontCount: 5, // 복도 끝 모니터(진료실 전체)·QR 다시 찍기: 교수님마다 앞에서부터 이 인원은 '진료실 앞으로 이동' (0 = 끔)
+  consultProtectCount: 1, // 진료 순서 보호 인원: 진료 대기 앞에서부터 이 인원은 새로 들어온 환자에게 밀리지 않음 (0 = 보호 없음, 10-07 사용자: 안내 인원과 분리)
   // 같은 날 2차 진료(다른 교수님)로 넘어갈 때 처치실에서 추가 검사를 확인할지
   linkCheckAdded: true,    // 진료 중에 추가된 2차 진료
   linkCheckPlanned: false, // 미리 명단에 예정된 2차 진료
@@ -491,8 +492,9 @@ export function consultQueue(patients, doctor, settings, prefs) {
   return patients.filter(p => p.doctor === doctor && consultWaiting(p, settings, prefs)).sort(byConsultQueue);
 }
 // 검사·점안이 끝나 진료 대기로 '새로' 들어온 환자 자리 (모든 명단 저장에서 서버 최신 값으로 다시 계산 — App의 mutatePatients)
-//  - 앞 N명 보호 (10-07 사용자, 예전 '1번 보호'를 넓힘): N = 설정 '진료실 앞으로 안내할 인원'(0이면 1). 이미 진료실 앞으로
-//    안내받은 앞 N명은 절대 뒤로 밀리지 않음 → 예약 순서로 그 안에 들어가게 되면 N번째 바로 뒤로 (새 환자의 consultKey)
+//  - 앞 N명 보호 (10-07 사용자, 예전 '1번 보호'를 넓힘): N = 설정 '진료 순서 보호 인원'(기본 1, 0이면 보호 없음 —
+//    '진료실 앞으로 안내할 인원'과는 따로, 10-07 사용자). 앞 N명은 절대 뒤로 밀리지 않음 → 예약 순서로 그 안에 들어가게 되면
+//    N번째 바로 뒤로 (새 환자의 consultKey)
 //  - 예약시간이 같으면 진료 대기에 먼저 들어온(검사가 먼저 끝난) 사람이 앞 (10-07 사용자, 접수 순서 아님. 지각은 예전대로)
 //  - 그 밖에는 예약 순서 자리 그대로. 추가 검사에서 돌아온 환자·CR·산동 후 다시 진료도 같은 규칙 (예외 없음)
 //  - 되돌리기는 새로 들어온 것이 아님: [호출 취소](진료 중에서)·[진료 완료 취소](설명 대기에서)는 그대로,
@@ -529,9 +531,9 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
       if (cancelRedo) a.consultKey = keys[0] - 0.001;
       else if (typeof a.queueKey === 'number') {
         let must = -Infinity;
-        // 앞 N명(진료실 앞으로 안내받은 사람)은 밀지 않음
-        const guard = Math.min(Math.max(1, consultFrontCount(settings)), keys.length);
-        if (a.queueKey < keys[guard - 1]) must = keys[guard - 1];
+        // 앞 N명(진료 순서 보호 인원)은 밀지 않음 (0명이면 보호 없이 예약 순서)
+        const guard = Math.min(consultProtectCount(settings), keys.length);
+        if (guard > 0 && a.queueKey < keys[guard - 1]) must = keys[guard - 1];
         // 같은 예약시간(지각 제외)이면 먼저 들어와 기다리는 사람 뒤 = 검사가 끝난 순서 (10-07 사용자)
         if (!a.late) {
           const base = Math.floor(a.queueKey);
@@ -545,10 +547,15 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
   });
   return out;
 }
-// 진료실 앞으로 안내할 인원 (설정 > 기타, 기본 5명, 0 = 끔)
+// 진료실 앞으로 안내할 인원 (설정 > 기타, 기본 5명, 0 = 끔) — 복도 끝 모니터·QR 다시 찍기 안내만
 export function consultFrontCount(settings) {
   const n = Math.round(Number(settings?.consultFrontCount ?? 5));
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+// 진료 순서 보호 인원 (설정 > 기타, 기본 1명, 0 = 보호 없음) — 진료 대기 순서(placeConsultArrivals)만
+export function consultProtectCount(settings) {
+  const n = Math.round(Number(settings?.consultProtectCount ?? 1));
+  return Number.isFinite(n) && n >= 0 ? n : 1;
 }
 // 진료 중에 [보내기]·[추가 검사]·CR·산동 다시 진료로 나갔다 돌아온 환자 → 환자용 진료실 명단에 '재진료' (10-07 사용자:
 // 예약이 빨라 앞에 들어가도 다른 환자가 이해하게). 직원 화면은 예전 표시('진료 후 추가검사'·'CR/산동 후 재진') 그대로

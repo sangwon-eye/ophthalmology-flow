@@ -1,11 +1,11 @@
 import { chromium, SP, editKey, tester, BASE } from '../lib.mjs';
 // 진료 대기 순서 (10-07 사용자 결정, 이름은 모두 가상)
-// - 앞 N명 보호: N = 설정 '진료실 앞으로 안내할 인원'. 이미 진료실 앞으로 안내받은 앞 N명은 밀리지 않음 (예전 '1번 보호'를 넓힘)
+// - 앞 N명 보호: N = 설정 '진료 순서 보호 인원'(10-07에 '진료실 앞으로 안내할 인원'과 분리). 앞 N명은 밀리지 않음 (예전 '1번 보호'를 넓힘)
 // - 예약시간이 같으면 진료 대기에 먼저 들어온(검사가 먼저 끝난) 사람이 앞 (접수 순서 아님)
 // - 환자용 진료실 명단에 '9:00 예약' (지각·예약 없음은 표시 안 함)
 const testing = (p, extra) => ({ ...p, doctor: '김선웅', assigned: { visionIop: true, wfp: true }, done: { visionIop: true }, measureOk: 1, calledRoom: null, seen: false, consultDone: false, procedures: [], late: false, ...extra });
 const waiting = (p, extra) => ({ ...testing(p, extra), done: { visionIop: true, wfp: true } });
-await editKey('settings', s => ({ ...s, consultFrontCount: 3 }));
+await editKey('settings', s => ({ ...s, consultFrontCount: 3, consultProtectCount: 3 }));
 await editKey('daily-patients', list => list.map(p => {
   if (p.doctor === '김선웅' && !['서준호', '신종희', '조현우', '최민지', '임수빈', '정대현', '장민호'].includes(p.name)) return { ...p, doctor: '나상훈' };
   if (p.name === '서준호') return waiting(p, { reservation: '09:00', checkin: '08:30', queueKey: 540.0510 });
