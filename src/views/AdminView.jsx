@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw, ArrowDown } from 'lucide-react';
-import { laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
+import { ageYears, laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
 import { ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
@@ -439,7 +439,8 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
   const [tab, setTab] = useState('upload');
   const [batchDate, setBatchDate] = useState(todayISO());
   const [batchDoctor, setBatchDoctor] = useState('');
-  const [manual, setManual] = useState({ id: '', name: '', reservation: '', firstVisit: false });
+  const EMPTY_MANUAL = { id: '', name: '', reservation: '', firstVisit: false, sex: '', age: '' };
+  const [manual, setManual] = useState(EMPTY_MANUAL);
   const [manageDate, setManageDate] = useState(todayISO());
   const [fuSearch, setFuSearch] = useState('');
   const [fuEdit, setFuEdit] = useState(null);
@@ -544,8 +545,11 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     if (!manual.id || !manual.name) { setMessage('환자번호와 이름을 입력해주세요.'); return; }
     if (!batchDoctor) { setMessage('먼저 담당 교수를 선택해주세요.'); return; }
     if (isArchivedDate(batchDate)) { setMessage(PAST_DATE_MSG); return; }
+    // 나이: 엑셀과 같은 규칙 ('80', '80세', '11세5개월' → 11). 비워도 됨, 잘못 적으면 추가하지 않고 안내
+    const age = ageYears(manual.age);
+    if (String(manual.age).trim() && age === null) { setMessage('나이는 숫자로 적어주세요 (예: 80, 아이는 11세5개월도 됩니다).'); return; }
     const currentFu = await loadEntries('fu-designations', [manual.id.trim()]);
-    const np = buildPatient({ ...manual, id: manual.id.trim(), name: manual.name.trim(), reservation: normalizeTime(manual.reservation), date: batchDate, doctor: batchDoctor }, currentFu, settings);
+    const np = buildPatient({ ...manual, id: manual.id.trim(), name: manual.name.trim(), reservation: normalizeTime(manual.reservation), sex: manual.sex, age, date: batchDate, doctor: batchDoctor }, currentFu, settings);
     const stats = await upsert([np]);
     if (stats?.linked.length) {
       const l = stats.linked[0];
@@ -556,7 +560,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     else if (stats?.timeChanged.length) setMessage(`${manual.name}님은 이미 명단에 있어 예약시간만 ${np.reservation}(으)로 바꿨습니다. 진행 상황은 그대로입니다.`);
     else if (stats?.unchanged.length) setMessage(`${manual.name}님은 이미 ${batchDate} ${batchDoctor} 명단에 있습니다.`);
     else setMessage(`${manual.name}님을 ${batchDate} ${batchDoctor} 명단에 추가했습니다.${hasFollowupApplied(np) ? ' (이전 정보 적용)' : ''}`);
-    setManual({ id: '', name: '', reservation: '', firstVisit: false });
+    setManual(EMPTY_MANUAL);
   };
 
   const archived = useArchivedPatients(manageDate, patients);
@@ -736,7 +740,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       {tab === 'upload' && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="font-medium text-slate-900 mb-1">엑셀 명단 올리기</div>
-          <p className="text-sm text-slate-500 mb-3">엑셀 첫 줄 제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의 (제목 글자가 정확히 같아야 함, 칸 순서·다른 칸은 상관없음, 재진 외에는 초진). 진료의가 교수 관리에 등록된 이름과 맞지 않는 환자는 등록하지 않습니다.</p>
+          <p className="text-sm text-slate-500 mb-3">엑셀 첫 줄 제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의 (제목 글자가 정확히 같아야 함, 칸 순서·다른 칸은 상관없음, 재진 외에는 초진). 성별 · 나이 칸(또는 '성별/나이' 한 칸)이 있으면 함께 읽어 이름 옆에 'M/80'으로 보여 줍니다 (남 → M, 여 → F, 11세5개월 → 11, 없어도 됨). 진료의가 교수 관리에 등록된 이름과 맞지 않는 환자는 등록하지 않습니다.</p>
           <div className="flex gap-3 flex-wrap items-center">
             <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium cursor-pointer">
               <Upload size={16} /> 엑셀 올리기
@@ -760,6 +764,13 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
               <input type="checkbox" checked={manual.firstVisit} onChange={e => setManual({ ...manual, firstVisit: e.target.checked })} className="w-4 h-4" />
               초진
             </label>
+            {/* 성별·나이 (비워도 됨) — 직원 화면 이름 옆 'M/80' */}
+            <select aria-label="성별" value={manual.sex} onChange={e => setManual({ ...manual, sex: e.target.value })} className={INPUT}>
+              <option value="">성별 (비워도 됨)</option>
+              <option value="M">남 (M)</option>
+              <option value="F">여 (F)</option>
+            </select>
+            <input placeholder="나이 (예: 80, 비워도 됨)" value={manual.age} onChange={e => setManual({ ...manual, age: e.target.value })} className={INPUT} />
           </div>
           <button type="button" onClick={handleManualAdd} className="px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium">명단에 추가</button>
         </div>

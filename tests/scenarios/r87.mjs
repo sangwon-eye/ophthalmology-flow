@@ -48,6 +48,34 @@ await page.locator('input[type=file]').setInputFiles(fileC); await W(1500);
 l = await list();
 ok(!!rec('7300006') && !('sex' in rec('7300006')), '성별·나이 칸이 없는 명단도 그대로 등록');
 ok(await page.getByText("'성별'·'나이' 칸이 없어").count() === 1, '결과 창: 성별·나이 칸 없음 안내');
+ok(await page.getByText(/성별 · 나이 칸\(또는 '성별\/나이' 한 칸\)/).count() === 1, '엑셀 안내 문구에 성별·나이');
+// 데모 샘플에도 성별·나이 (10-07 사용자 요청)
+await page.getByRole('button', { name: '데모 샘플 넣기' }).click(); await W(1500);
+l = await list();
+ok(rec('10001')?.sex === 'M' && rec('10001')?.age === 72 && rec('10005')?.sex === 'F' && rec('10005')?.age === 11, '데모 샘플: 성별·나이 들어감');
+// 환자 추가 창: 성별·나이 칸 (비워도 됨, 나이는 엑셀과 같은 규칙)
+await page.getByRole('button', { name: '환자 추가', exact: true }).click(); await W(300);
+const ageBox = page.getByPlaceholder(/^나이/);
+const sexBox = page.getByLabel('성별', { exact: true });
+await page.getByPlaceholder('환자번호', { exact: true }).fill('7300007');
+await page.getByPlaceholder('이름', { exact: true }).fill('파하연');
+await sexBox.selectOption('F');
+await ageBox.fill('11세5개월');
+await page.getByRole('button', { name: '명단에 추가', exact: true }).click(); await W(1200);
+l = await list();
+ok(rec('7300007')?.sex === 'F' && rec('7300007')?.age === 11, '환자 추가: 여 · 11세5개월 → F, 11');
+ok(await ageBox.inputValue() === '' && await sexBox.inputValue() === '', '추가한 뒤 성별·나이 칸 비움');
+await page.getByPlaceholder('환자번호', { exact: true }).fill('7300008');
+await page.getByPlaceholder('이름', { exact: true }).fill('거너연');
+await ageBox.fill('모름');
+await page.getByRole('button', { name: '명단에 추가', exact: true }).click(); await W(800);
+l = await list();
+ok(!rec('7300008') && await page.getByText(/나이는 숫자로 적어주세요/).count() === 1, '나이를 잘못 적으면 추가하지 않고 안내');
+await ageBox.fill('');
+await page.getByRole('button', { name: '명단에 추가', exact: true }).click(); await W(1200);
+l = await list();
+ok(!!rec('7300008') && !('sex' in rec('7300008')) && !('age' in rec('7300008')), '성별·나이를 비워도 추가');
+await page.screenshot({ path: `${SP}/r87-manual.png` });
 
 // 화면 표시: 명단 관리
 await page.getByRole('button', { name: '명단 관리', exact: true }).click(); await W(800);

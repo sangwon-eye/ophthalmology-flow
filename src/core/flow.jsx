@@ -1395,11 +1395,11 @@ export function matchDoctor(text, doctors) {
 
 export function sampleRows() {
   return [
-    { id: '10001', name: '김민수', reservation: '09:00' },
-    { id: '10002', name: '이서연', reservation: '09:00' },
-    { id: '10003', name: '박지훈', reservation: '09:10' },
-    { id: '10004', name: '최유진', reservation: '09:20' },
-    { id: '10005', name: '정하늘', reservation: '09:30' },
+    { id: '10001', name: '김민수', reservation: '09:00', sex: 'M', age: 72 },
+    { id: '10002', name: '이서연', reservation: '09:00', sex: 'F', age: 34 },
+    { id: '10003', name: '박지훈', reservation: '09:10', sex: 'M', age: 58 },
+    { id: '10004', name: '최유진', reservation: '09:20', sex: 'F', age: 66 },
+    { id: '10005', name: '정하늘', reservation: '09:30', sex: 'F', age: 11 },
   ];
 }
 
