@@ -491,8 +491,10 @@ export function consultQueue(patients, doctor, settings, prefs) {
   return patients.filter(p => p.doctor === doctor && consultWaiting(p, settings, prefs)).sort(byConsultQueue);
 }
 // 검사·점안이 끝나 진료 대기로 '새로' 들어온 환자 자리 (모든 명단 저장에서 서버 최신 값으로 다시 계산 — App의 mutatePatients)
-//  - 예약 순서로 1번이 되면 2번째로: 지금 1번(곧 들어갈 환자)은 그대로 두고, 1번의 consultKey 를 새 환자 바로 앞으로
-//  - 2번째 이후면 예약 순서 자리 그대로. CR·산동 후 다시 진료도 같은 규칙 (10-05 사용자: 규칙 하나로 — 예외를 두지 않음)
+//  - 앞 N명 보호 (10-07 사용자, 예전 '1번 보호'를 넓힘): N = 설정 '진료실 앞으로 안내할 인원'(0이면 1). 이미 진료실 앞으로
+//    안내받은 앞 N명은 절대 뒤로 밀리지 않음 → 예약 순서로 그 안에 들어가게 되면 N번째 바로 뒤로 (새 환자의 consultKey)
+//  - 예약시간이 같으면 진료 대기에 먼저 들어온(검사가 먼저 끝난) 사람이 앞 (10-07 사용자, 접수 순서 아님. 지각은 예전대로)
+//  - 그 밖에는 예약 순서 자리 그대로. 추가 검사에서 돌아온 환자·CR·산동 후 다시 진료도 같은 규칙 (예외 없음)
 //  - 되돌리기는 새로 들어온 것이 아님: [호출 취소](진료 중에서)·[진료 완료 취소](설명 대기에서)는 그대로,
 //    [보내기]의 [되돌리기]는 restoredAt(새 칸)이 바뀐 저장이라 그대로, [다시 진료 취소](진료 중에 보낸 것)는 예전처럼 맨 앞
 //  - 시력·검사 순서(queueKey)는 건드리지 않음
@@ -521,10 +523,23 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
       .filter(([p, j]) => j !== i && !pendingIdx.has(j) && p.doctor === a.doctor && p.date === a.date && consultWaiting(p, settings, prefs))
       .sort((x, y) => consultOrderKey(x[0]) - consultOrderKey(y[0]));
     if (others.length) {
-      const [first, fj] = others[0];
-      const k1 = consultOrderKey(first);
-      if (cancelRedo) a.consultKey = k1 - 0.001;
-      else if (typeof a.queueKey === 'number' && a.queueKey < k1) out[fj] = { ...first, consultKey: a.queueKey - 0.001 };
+      const keys = others.map(([p]) => consultOrderKey(p));
+      // k 바로 뒤 자리 (아주 작은 틈 안에서 예약 순서를 지킴 — 그 뒤 예약의 환자보다 앞, 같은 자리로 밀린 환자끼리는 예약 순서)
+      const after = (k) => k + 1e-5 * (0.1 + 0.8 * Math.min(1, Math.max(0, a.queueKey / 200000)));
+      if (cancelRedo) a.consultKey = keys[0] - 0.001;
+      else if (typeof a.queueKey === 'number') {
+        let must = -Infinity;
+        // 앞 N명(진료실 앞으로 안내받은 사람)은 밀지 않음
+        const guard = Math.min(Math.max(1, consultFrontCount(settings)), keys.length);
+        if (a.queueKey < keys[guard - 1]) must = keys[guard - 1];
+        // 같은 예약시간(지각 제외)이면 먼저 들어와 기다리는 사람 뒤 = 검사가 끝난 순서 (10-07 사용자)
+        if (!a.late) {
+          const base = Math.floor(a.queueKey);
+          const same = others.filter(([p]) => !p.late && typeof p.queueKey === 'number' && Math.floor(p.queueKey) === base).map(([p]) => consultOrderKey(p));
+          if (same.length) must = Math.max(must, ...same);
+        }
+        if (a.queueKey <= must) a.consultKey = after(must);
+      }
     }
     out[i] = a;
   });
@@ -534,6 +549,12 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
 export function consultFrontCount(settings) {
   const n = Math.round(Number(settings?.consultFrontCount ?? 5));
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+// 환자용 진료실 명단의 예약시간 (10-07 사용자: 순서가 바뀐 이유를 보여 줌). 지각·예약시간 없음은 쓰지 않음
+export function boardReservation(p) {
+  if (!p || p.late || !hasReservation(p)) return '';
+  const m = String(p.reservation).match(/(\d{1,2}):(\d{2})/);
+  return m ? `${Number(m[1])}:${m[2]} 예약` : '';
 }
 
 export function getStage(p, settings) {

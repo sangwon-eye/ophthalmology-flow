@@ -8,6 +8,8 @@ const pt = async (n) => (await getKey('daily-patients')).value.find(p => p.name 
 const allDone = { visionIop: true, oct: true, wfp: true, vf: true, idra: true, gat: true };
 const waitingRec = (p, extra) => ({ ...p, checkin: '08:30', done: { ...p.done, ...allDone }, measureOk: 1, calledRoom: null, seen: false, consultDone: false, procedures: [], ...extra });
 const testingRec = (p, extra) => ({ ...p, doctor: '김선웅', checkin: '08:20', assigned: { visionIop: true, wfp: true }, done: { visionIop: true }, measureOk: 1, calledRoom: null, seen: false, ...extra });
+// 10-07: '1번 보호'가 '앞 N명 보호'(N = 진료실 앞으로 안내할 인원)로 넓어짐 → 이 시나리오는 N=1(예전 규칙과 같음)로 확인
+await editKey('settings', st => ({ ...st, consultFrontCount: 1 }));
 await editKey('daily-patients', list => list.map(p => {
   if (p.name === '서준호') return waitingRec(p, { doctor: '김선웅', queueKey: 540 });
   if (p.name === '조현우') return waitingRec(p, { doctor: '김선웅', queueKey: 600 });

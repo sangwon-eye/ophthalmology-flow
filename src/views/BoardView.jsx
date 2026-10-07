@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone } from 'lucide-react';
-import { WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { boardReservation, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
 import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
@@ -135,12 +135,16 @@ export function patientBoardName(p) {
 }
 
 // 순번 칸 (시력방·진료실). 1번은 연한 색 바탕 + 모서리에 '다음 순서' 배지 (칸 높이는 다른 칸과 같게)
-export function BoardNumberRow({ n, name, color, compact, note }) {
+// sub: 이름 옆 작은 글씨 (진료실 명단의 '9:30 예약')
+export function BoardNumberRow({ n, name, color, compact, note, sub }) {
   const c = DARK[color] || DARK.blue;
   return (
     <div className={`relative flex items-center gap-3 border ${note ? c.next : 'bg-slate-800 border-slate-700'} rounded-lg px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       <div className={`${compact ? 'w-7 h-7 text-base' : 'w-9 h-9 text-xl'} rounded-full ${c.num} flex items-center justify-center font-bold shrink-0`}>{n}</div>
-      <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-bold text-white`}>{name}</div>
+      <div className="min-w-0 flex flex-wrap items-baseline gap-x-2">
+        <span className={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`}>{name}</span>
+        {sub && <span data-resv className={`${compact ? 'text-sm' : 'text-base'} text-slate-300 whitespace-nowrap`}>{sub}</span>}
+      </div>
       {note && <span className={`absolute ${compact ? '-top-2.5 text-xs' : '-top-3 text-sm'} right-3 whitespace-nowrap rounded-full ${c.badge} px-2.5 py-0.5 font-bold`}>{note}</span>}
     </div>
   );
@@ -178,14 +182,14 @@ export function WaitNotice({ patients, kind, compact, inline }) {
 
 // 앞 순서 큰 칸 (진료실 앞 모니터·시력방 TV)
 // 글자 위아래 여백: 맑은 고딕은 글자가 아래로 처져 보여서 줄 높이를 넉넉히(leading-snug) 주고 위아래 여백을 같게
-function BigRow({ label, name, size, tone = 'amber', n, muted = false }) {
+function BigRow({ label, name, size, tone = 'amber', n, muted = false, sub = '' }) {
   const c = DARK[tone] || DARK.amber;
   const S = {
-    xxl: { box: 'px-6 py-4 gap-5', name: 'text-7xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
-    xl: { box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
-    lg: { box: 'px-5 py-3 gap-4', name: 'text-5xl', tag: 'text-xl px-3 py-1', num: 'w-14 h-14 text-3xl' },
-    md: { box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-1', num: 'w-12 h-12 text-2xl' },
-    sm: { box: 'px-3 py-2 gap-3', name: 'text-3xl', tag: 'text-base px-2.5 py-0.5', num: 'w-10 h-10 text-xl' },
+    xxl: { sub: 'text-3xl', box: 'px-6 py-4 gap-5', name: 'text-7xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
+    xl: { sub: 'text-3xl', box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
+    lg: { sub: 'text-2xl', box: 'px-5 py-3 gap-4', name: 'text-5xl', tag: 'text-xl px-3 py-1', num: 'w-14 h-14 text-3xl' },
+    md: { sub: 'text-xl', box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-1', num: 'w-12 h-12 text-2xl' },
+    sm: { sub: 'text-lg', box: 'px-3 py-2 gap-3', name: 'text-3xl', tag: 'text-base px-2.5 py-0.5', num: 'w-10 h-10 text-xl' },
   }[size];
   // muted: 진료 중 (이미 진료실 안에 있어 덜 눈에 띄게, 회색 칸)
   const box = muted ? 'bg-slate-800/60 border-slate-700' : label ? c.next : 'bg-slate-800 border-slate-600';
@@ -195,16 +199,17 @@ function BigRow({ label, name, size, tone = 'amber', n, muted = false }) {
       {label ? <span className={`shrink-0 whitespace-nowrap rounded-full ${tag} ${S.tag} leading-snug font-bold`}>{label}</span>
         : <span className={`${S.num} shrink-0 rounded-full ${c.num} flex items-center justify-center font-bold`}>{n}</span>}
       <span className={`${S.name} leading-snug min-w-0 ${size === 'sm' ? 'font-extrabold' : 'font-bold'} ${muted ? 'text-slate-200' : 'text-white'} whitespace-nowrap`}>{name}</span>
+      {sub && <span data-resv className={`${S.sub} leading-snug text-slate-300 whitespace-nowrap`}>{sub}</span>}
     </div>
   );
 }
-function SmallRest({ list, start, color }) {
+function SmallRest({ list, start, color, withTime = false }) {
   if (!list.length) return null;
   return (
     <div className="mt-4">
       <div className="text-lg text-slate-400 mb-2">그다음 순서</div>
       <div className="grid gap-2" style={boardGrid(15)}>
-        {list.map((p, i) => <BoardNumberRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} color={color} compact />)}
+        {list.map((p, i) => <BoardNumberRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} color={color} compact sub={withTime ? boardReservation(p) : ''} />)}
       </div>
     </div>
   );
@@ -395,15 +400,15 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
         <BoardNotice text={notice} />
         <div className="space-y-3">
           {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} size="md" muted />}
-          {waiting[0] && <BigRow label="다음 순서" name={patientBoardName(waiting[0])} size="xxl" />}
+          {waiting[0] && <BigRow label="다음 순서" name={patientBoardName(waiting[0])} size="xxl" sub={boardReservation(waiting[0])} />}
           {waiting.length > 1 && (
             <div className="grid grid-cols-2 gap-3">
-              {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="md" />)}
+              {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="md" sub={boardReservation(p)} />)}
             </div>
           )}
         </div>
         {!waiting.length && <div className="text-2xl text-slate-500 py-4">진료 대기 환자가 없습니다</div>}
-        <SmallRest list={waiting.slice(3)} start={4} color="amber" />
+        <SmallRest list={waiting.slice(3)} start={4} color="amber" withTime />
         {testing > 0 && <div className="text-lg text-slate-400 mt-4">{testingLabel} {testing}명</div>}
       </div>
     );
@@ -431,7 +436,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
             <div className="text-2xl font-extrabold text-yellow-200 mb-2.5 break-keep">진료실 앞으로 이동해 주세요</div>
             <div className="grid gap-2.5" style={boardGrid(17)}>
               {waiting.slice(0, front).map((p, i) => (
-                <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="amber" note={i === 0 ? '다음 순서' : ''} />
+                <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="amber" note={i === 0 ? '다음 순서' : ''} sub={boardReservation(p)} />
               ))}
             </div>
           </div>
@@ -439,7 +444,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
             <div data-rest className="mt-4">
               <div className="text-lg font-bold text-slate-300 mb-2 break-keep">큰 복도에서 기다려 주세요</div>
               <div className="grid gap-2" style={boardGrid(13)}>
-                {waiting.slice(front).map((p, i) => <BoardNumberRow key={patientKey(p)} n={front + i + 1} name={patientBoardName(p)} color="amber" compact />)}
+                {waiting.slice(front).map((p, i) => <BoardNumberRow key={patientKey(p)} n={front + i + 1} name={patientBoardName(p)} color="amber" compact sub={boardReservation(p)} />)}
               </div>
             </div>
           )}
@@ -447,7 +452,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
       ) : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>
           {waiting.map((p, i) => (
-            <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="amber" compact={compact} note={i === 0 ? '다음 순서' : ''} />
+            <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="amber" compact={compact} note={i === 0 ? '다음 순서' : ''} sub={boardReservation(p)} />
           ))}
         </div>
       )}
