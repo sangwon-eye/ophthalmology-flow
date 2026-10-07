@@ -73,7 +73,7 @@ ok(await inSec('consult-explain', '황도윤').getByRole('button', { name: '귀�
 
 // 3) 진료 후 처치 + 처치 후 검사: 김선웅 설명 대기 송하린 PRP(OD) '검사 추가 후 완료' → WFP(OD 다시) → 검사 후 설명 대기
 await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1200);
-await inSec('consult-explain', '송하린').getByRole('button', { name: '검사 추가 후 완료' }).click(); await W(400);
+await inSec('consult-explain', '송하린').getByRole('button', { name: '검사 · 재진료' }).click(); await W(400); // 진료 후 처치는 '검사 · 재진료' 하나 (10-07)
 await modal().locator('label').filter({ hasText: /^WFP/ }).locator('input').check(); await W(200);
 await page.screenshot({ path: `${SP}/r89-post-modal.png` });
 await modal().getByRole('button', { name: '처치 완료 · 검사로' }).click(); await W(1500);

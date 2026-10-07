@@ -318,9 +318,9 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
 
   // 교수님 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 그대로 남김)
   // 처치 후 확인 시간이 있는 처치(설정 > 처치, 예: YAG)는 시행 시각만 적고 '확인 대기' (확인해야 끝남 — 10-07)
-  // post: '검사 추가 후 완료'로 고른 검사 (처치 후 검사, 끝나면 설명 대기로 — 그때까지 [귀가]는 막음)
+  // post: '검사 · 재진료' 창에서 고른 검사 (처치 후 검사, 끝나면 설명 대기로 — 그때까지 [귀가]는 막음)
   const [postFor, setPostFor] = useState(null);
-  // reconsult: '완료 후 재진료'·검사 창 '검사 끝나면 재진료' (10-07) — 같은 교수님 진료 대기로 (procReconsultPatch)
+  // reconsult: '검사 · 재진료' 창의 [재진료] (10-07) — 같은 교수님 진료 대기로, 검사도 고르면 검사 뒤 (procReconsultPatch)
   const finishProfProcedure = (p, post = null, reconsult = false) => {
     const pk = patientKey(p);
     const at = Date.now();
@@ -571,8 +571,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                   {procDilatePending(p) && <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />}
                   {notPerformed(pendingProcedures(p, 'prof')).length > 0 && <>
                     <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
-                    <button type="button" onClick={() => setPostFor(p)} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다. 검사가 끝나면 설명 대기로 돌아옵니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 추가 후 완료</button>
-                    <button type="button" onClick={() => finishProfProcedure(p, null, true)} title="처치를 완료하고 진료 대기로 보냅니다 (확인 시간이 있는 처치도 바로)" className="text-xs text-slate-500 hover:text-slate-800 underline">완료 후 재진료</button>
+                    <button type="button" onClick={() => setPostFor(p)} title="처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 · 재진료</button>
                   </>}
                   <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={c => c.list === 'procedures' && c.i.performer === 'prof'} />
                   {nextVisitNote(p)}

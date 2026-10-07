@@ -1660,38 +1660,46 @@ export function ProcedureList({ p, performer, onCancel }) {
   );
 }
 
-// 처치 후 검사 고르기 (10-07): [처치 완료] 옆 '검사 추가 후 완료'. 처치에서 고른 눈(OD·OS)이 하나면 검사도 처음부터 그 눈으로
-// reconsultOption: 진료 후 처치면 '검사 끝나면 재진료' 체크 칸 (켜면 검사 후 같은 교수님 진료 대기로 — 처치 후 재진료, 10-07)
+// 처치 후 검사 고르기 (10-07): 진료 전 처치는 [처치 완료] 옆 '검사 추가 후 완료'. 처치에서 고른 눈(OD·OS)이 하나면 검사도 처음부터 그 눈으로
+// reconsultOption: 진료 후 처치는 카드의 '검사 · 재진료' 하나로 이 창 하나 (10-07 사용자 — 글씨 두 개를 합침):
+//   맨 위 [재진료](같은 교수님 진료 대기로) + 아래 검사 고르기, 둘 다 / 하나만. 확인 버튼 글자가 고른 대로 바뀜, 아무것도 안 고르면 못 누름
+const anyPicked = (sel) => Object.values(sel || {}).some(Boolean);
 export function PostTestModal({ p, items, tests, settings, mainIds, reconsultOption = false, onConfirm, onCancel }) {
   const [recon, setRecon] = useState(false);
   const eyes = [...new Set((items || []).map(i => i.eye).filter(e => e === 'OD' || e === 'OS'))];
   const initialDetail = eyes.length === 1 ? Object.fromEntries(tests.map(t => [t.id, { eye: eyes[0] }])) : {};
-  const goTo = recon ? '진료 대기(재진료)' : p.seen ? '설명 대기' : '진료 대기';
+  const names = (items || []).map(procLabel).join(', ');
+  const eyeNote = eyes.length === 1 ? ` 검사는 처치한 눈(${eyes[0]})으로 맞춰 두었습니다 (바꾸려면 오른쪽 클릭).` : '';
+  const common = { mainIds, tests, settings, initial: {}, initialDetail, openDetail: false, onCancel };
+  if (!reconsultOption) {
+    return (
+      <TestCheckModal key={`post-${patientKey(p)}`} {...common}
+        title={`${p.name}님 처치 후 검사`}
+        subtitle={`${names} 처치를 완료하고, 고른 검사를 오늘 검사에 넣습니다 (이미 한 검사는 다시). 검사가 끝나면 ${p.seen ? '설명 대기' : '진료 대기'}로 갑니다.${eyeNote}`}
+        confirmLabel="처치 완료 · 검사로"
+        onConfirm={(sel, detail) => onConfirm(sel, detail, false)} />
+    );
+  }
   return (
-    <TestCheckModal
-      key={`post-${patientKey(p)}`}
-      mainIds={mainIds}
-      title={`${p.name}님 처치 후 검사`}
-      subtitle={`${(items || []).map(procLabel).join(', ')} 처치를 완료하고, 고른 검사를 오늘 검사에 넣습니다 (이미 한 검사는 다시). 검사가 끝나면 ${goTo}로 갑니다.${eyes.length === 1 ? ` 검사는 처치한 눈(${eyes[0]})으로 맞춰 두었습니다 (바꾸려면 오른쪽 클릭).` : ''}`}
-      info={reconsultOption ? (
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-          <input type="checkbox" checked={recon} onChange={e => setRecon(e.target.checked)} className="w-4 h-4" />
-          검사 끝나면 재진료 <span className="text-xs text-slate-400">(같은 교수님 진료 대기로)</span>
+    <TestCheckModal key={`post-${patientKey(p)}`} {...common}
+      title={`${p.name}님 처치 완료 후`}
+      subtitle={`${names} 처치를 완료하고, 재진료와 검사 중 필요한 것을 고릅니다 (둘 다 고르면 검사가 끝난 뒤 재진료).${eyeNote}`}
+      info={<>
+        <label className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer ${recon ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+          <input type="checkbox" aria-label="재진료" checked={recon} onChange={e => setRecon(e.target.checked)} className="w-5 h-5" />
+          <span className="font-semibold text-slate-900">재진료</span>
+          <span className="text-sm text-slate-500">같은 교수님 진료 대기로</span>
         </label>
-      ) : null}
-      tests={tests}
-      settings={settings}
-      initial={{}}
-      initialDetail={initialDetail}
-      openDetail={false}
-      confirmLabel={recon ? '처치 완료 · 검사 후 재진료' : '처치 완료 · 검사로'}
-      onConfirm={(sel, detail) => onConfirm(sel, detail, reconsultOption && recon)}
-      onCancel={onCancel}
-    />
+        <div className="mt-4 text-sm font-medium text-slate-700">검사 추가 <span className="text-xs font-normal text-slate-400">(고르지 않아도 됨 · 이미 한 검사는 다시)</span></div>
+      </>}
+      confirmLabel={sel => (recon && anyPicked(sel) ? '처치 완료 · 검사 후 재진료' : recon ? '처치 완료 · 재진료' : anyPicked(sel) ? '처치 완료 · 검사로' : '재진료나 검사를 고르세요')}
+      canConfirm={sel => recon || anyPicked(sel)}
+      onConfirm={(sel, detail) => onConfirm(sel, detail, recon)} />
   );
 }
 
-export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, openDetail = true, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, onConfirm, onLater, onNoFu, onDelete, onCancel, mainIds = null }) {
+// confirmLabel·canConfirm 은 고른 검사(sel)에 따라 바꿀 수 있음 (함수로 주면) — 처치 완료 후 창
+export function TestCheckModal({ title, subtitle, info, tests: rawTests, settings, initial, initialDetail, openDetail = true, dilation, triageChoice, followup, linkDoctors, preProcChoice, confirmLabel, canConfirm, onConfirm, onLater, onNoFu, onDelete, onCancel, mainIds = null }) {
   const [delArmed, setDelArmed] = useState(false);
   const [preSel, setPreSel] = useState(() => preProcChoice?.initial || []);
   const tests = orderForPicking(rawTests, settings);
@@ -1750,7 +1758,7 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
         <h3 className="text-lg font-medium mb-1 text-slate-900">{title}</h3>
-        {subtitle && <p className="text-sm text-slate-500 mb-4">{subtitle}</p>}
+        {subtitle && <p className="text-sm text-slate-500 mb-4 break-keep">{subtitle}</p>}
         {info && <div className="mb-4">{info}</div>}
         {followup && <div className="text-sm text-indigo-700 mb-3">다음 내원 담당: {followupDoctor || '미지정'}</div>}
         {/* 2열 체크 칸. 세부 입력(단안·옵션)이 열린 칸만 한 줄 전체를 쓴다 */}
@@ -1865,8 +1873,8 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
         )}
         {!followup && preProcBlock}
         <div className="flex gap-3">
-          <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
-          <button type="button" onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor, preProcs: preSel }, triageRequired, linkDoctor)} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">{confirmLabel}</button>
+          <button type="button" onClick={onCancel} className="flex-1 px-3 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="button" disabled={typeof canConfirm === 'function' && !canConfirm(sel)} onClick={() => onConfirm(sel, pickDetail(detail, sel, tests), { ...dil, doctor: followupDoctor, preProcs: preSel }, triageRequired, linkDoctor)} className="flex-1 px-3 py-3 rounded-xl bg-amber-600 text-white font-medium leading-snug break-keep disabled:bg-slate-300 disabled:text-slate-500">{typeof confirmLabel === 'function' ? confirmLabel(sel) : confirmLabel}</button>
         </div>
         {(onLater || onNoFu) && (
           <div className="flex gap-2 mt-2">

@@ -454,9 +454,9 @@ export function postTestsPending(p) {
 export function homeBlocked(p) {
   return pendingProcedures(p).length > 0 || postTestsPending(p);
 }
-/* 처치 후 재진료 (10-07 사용자 결정): 진료 후 처치의 [처치 완료]·[교수님 처치 완료] 옆 '완료 후 재진료'
+/* 처치 후 재진료 (10-07 사용자 결정): 진료 후 처치의 [처치 완료]·[교수님 처치 완료] 옆 '검사 · 재진료' 창의 [재진료]
    - 처치를 시행하고(확인 시간이 있는 처치도 확인을 기다리지 않음) 같은 교수님 진료 대기로. 확인은 처치실 '결과 확인'·처치 칸에서 그대로
-   - '검사 추가 후 완료' 창의 '검사 끝나면 재진료'를 켜면 검사가 끝난 뒤 진료 대기로
+   - 같은 창에서 검사도 고르면 검사가 끝난 뒤 진료 대기로
    - 표시·순서는 다른 재진료와 같음: 진료실 카드 'YAG · OS 후 재진', 환자용 '재진료'(isReconsult), 진료 대기 순서 규칙(placeConsultArrivals)
    - 새 칸 procReconsult = { at, names, prev } — prev 는 되돌리기용(설명 대기 시각·설명 먼저) */
 export function procReconsultPatch(x, names, at) {

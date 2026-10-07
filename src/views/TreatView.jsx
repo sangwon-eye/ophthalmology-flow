@@ -241,7 +241,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   };
 
   // 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 하지 않은 것이므로 그대로 남김)
-  // reconsult: '완료 후 재진료'·검사 창 '검사 끝나면 재진료' (진료 후 처치만, 10-07) — 같은 교수님 진료 대기로 (procReconsultPatch)
+  // reconsult: '검사 · 재진료' 창의 [재진료] (진료 후 처치만, 10-07) — 같은 교수님 진료 대기로, 검사도 고르면 검사 뒤 (procReconsultPatch)
   const finishResident = (p, post = null, reconsult = false) => {
     const pk = patientKey(p);
     const at = Date.now();
@@ -471,8 +471,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                   {pendingProcedures(p, 'prof').length > 0 && <div className="text-xs text-slate-400 mt-0.5">교수님 처치도 남음: {pendingProcedures(p, 'prof').map(procLabel).join(', ')}</div>}
                 </div>
                 {inResidentProcedure(p) && notPerformed(pendingProcedures(p, 'resident')).length > 0 && <span className="flex items-center gap-2 shrink-0">
-                  {p.seen && <button type="button" onClick={() => finishResident(p, null, true)} title="처치를 완료하고 같은 교수님 진료 대기로 보냅니다 (확인 시간이 있는 처치도 바로)" className="text-xs text-slate-500 hover:text-slate-800 underline">완료 후 재진료</button>}
-                  <button type="button" onClick={() => setPostFor({ p, kind: 'resident' })} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 추가 후 완료</button>
+                  <button type="button" onClick={() => setPostFor({ p, kind: 'resident' })} title={p.seen ? '처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다' : '처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다'} className="text-xs text-slate-500 hover:text-slate-800 underline">{p.seen ? '검사 · 재진료' : '검사 추가 후 완료'}</button>
                   <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">처치 완료</button>
                 </span>}
               </div>
