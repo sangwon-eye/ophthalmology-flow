@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -169,8 +169,10 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   useChime([...mine.filter(inConsult).map(patientKey), ...dropsReady.map(p => `drop:${patientKey(p)}`)], { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
   const waiting = mine.filter(p => consultWaiting(p, settings, doctorPrefs)).sort(byConsultQueue);
   // 진료 보류: 진료 중 [보내기]로 나간 환자 + 처치 후 검사를 마치고 재진료할 환자 (procReconsult)
-  const onHold = mine.filter(p => (p.consultHold || procReconsultLabel(p)) && !p.consultDone && !p.seen && (!allDone(p, settings) || p.treatRequest));
-  const testing = mine.filter(p => !p.consultDone && !p.consultHold && !procReconsultLabel(p) && !p.seen && p.checkin && !allDone(p, settings) && !inTreatRoom(p, settings)).length;
+  // '나중에 확인' 결과(MMP)를 기다리는 환자는 검사가 남은 것과 같이 셈 (10-07 사용자: '검사 진행 중'에 포함)
+  const notReady = (p) => !allDone(p, settings) || resultChecksPending(p, settings);
+  const onHold = mine.filter(p => (p.consultHold || procReconsultLabel(p)) && !p.consultDone && !p.seen && (notReady(p) || p.treatRequest));
+  const testing = mine.filter(p => !p.consultDone && !p.consultHold && !procReconsultLabel(p) && !p.seen && p.checkin && notReady(p) && !inTreatRoom(p, settings)).length;
   const residentCount = mine.filter(p => inTreatRoom(p, settings)).length;
   const recent = mine
     .filter(p => p.consultDone)
@@ -393,7 +395,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const next = await mutatePatients(prev => {
       const cur = prev.find(x => patientKey(x) === pk);
       if (!cur || cur.consultDone || cur.explainedEarly || !cur.seen) return prev;
-      const early = homeBlocked(cur); // 처치(확인 대기 포함)나 처치 후 검사가 남았으면 설명만 먼저
+      const early = homeBlocked(cur, settings); // 처치(확인 대기 포함)·처치 후 검사·'나중에 확인' 결과(MMP)가 남았으면 설명만 먼저
       let list = withFu(prev.map(x => (x !== cur ? markFuture(x) : early
         ? { ...x, explainedEarly: at, fuLater: later, referred: noFu ? at : undefined }
         : { ...x, consultDone: true, consultDoneAt: at, fuLater: later, referred: noFu ? at : undefined })));
@@ -450,13 +452,13 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const at = Date.now();
     const next = await mutatePatients(prev => {
       const cur = prev.find(x => patientKey(x) === pk);
-      if (!cur || cur.consultDone || !cur.explainedEarly || homeBlocked(cur)) return prev;
+      if (!cur || cur.consultDone || !cur.explainedEarly || homeBlocked(cur, settings)) return prev;
       return activateLinked(prev.map(x => (x === cur ? { ...x, consultDone: true, consultDoneAt: at } : x)), pk, settings, at);
     }).catch(() => null);
     if (!Array.isArray(next)) return; // 저장 실패: 위쪽 빨간 띠로 안내
     const rec = next.find(x => patientKey(x) === pk);
     if (rec?.consultDoneAt !== at) {
-      showToast(`귀가 처리 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 귀가 처리되었습니다' : rec && pendingProcedures(rec).length ? '처치가 새로 들어와 있습니다' : rec && homeBlocked(rec) ? '처치 뒤 검사가 남아 있습니다' : '이미 다른 곳에서 처리되었습니다'}`);
+      showToast(`귀가 처리 안 됨 · ${p.name} 환자는 ${rec?.consultDone ? '이미 귀가 처리되었습니다' : rec && pendingProcedures(rec).length ? '처치가 새로 들어와 있습니다' : rec && postTestsPending(rec) ? '처치 뒤 검사가 남아 있습니다' : rec && resultChecksPending(rec, settings) ? `${resultCheckNames(rec, settings)} 결과 확인 전입니다` : '이미 다른 곳에서 처리되었습니다'}`);
       return;
     }
     const nextVisit = next.find(x => x.primaryKey === pk && x.linkActivatedAt === at)?.doctor;
@@ -563,6 +565,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 <SimpleCard key={patientKey(p)} p={p} tone="emerald" badges={<>
                   {ps === 'doing' && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300">처치 중</span>}
                   {ps === 'done' && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold border border-green-300">처치 완료</span>}
+                  {resultChecksPending(p, settings) && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300">{resultCheckNames(p, settings)} 결과 확인 전</span>}
                   {postTestsPending(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 font-semibold border border-sky-300">검사 중 · {allTests.filter(t => (p.postTests || []).includes(t.id) && p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ')}</span>}
                   {early && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료{p.fuLater ? ' · FU 나중에' : ''}</span>}
                 </>}>
@@ -576,8 +579,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                   <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={c => c.list === 'procedures' && c.i.performer === 'prof'} />
                   {nextVisitNote(p)}
                   {early ? (
-                    homeBlocked(p)
-                      ? <span className="text-sm text-slate-500">{pendingProcedures(p).length ? '처치가 끝나면 귀가 처리할 수 있어요' : '검사가 끝나면 귀가 처리할 수 있어요'}</span>
+                    homeBlocked(p, settings)
+                      ? <span className="text-sm text-slate-500">{pendingProcedures(p).length ? '처치가 끝나면 귀가 처리할 수 있어요' : postTestsPending(p) ? '검사가 끝나면 귀가 처리할 수 있어요' : `${resultCheckNames(p, settings)} 결과를 확인하면 귀가 처리할 수 있어요`}</span>
                       : <button type="button" onClick={() => goHome(p)} className="text-sm px-4 py-2 rounded-lg bg-slate-800 text-white font-medium">귀가</button>
                   ) : <>
                     <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">

@@ -1,7 +1,7 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
 import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
-import { COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
+import { resultChecksPending, COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
 import { shiftISO, visionNames } from '../core/storage.jsx';
 import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
 import { consultRoomLabel, patientBoardName } from './BoardView.jsx';
@@ -142,6 +142,8 @@ export function kioskGuide(p, patients, settings, prefs) {
     return { title: '검사가 한 곳 남았습니다', note: `${withRo(r?.patientName || r?.name || '검사실')} 이동해 주세요` };
   }
   if (needsTriageExam(p, settings)) return toTreat;
+  // '나중에 확인' 결과(MMP)를 기다리는 중 (10-07): 남은 검사 안내가 먼저, 결과 확인 뒤 진료 대기(모니터)에 이름이 나옴
+  if (resultChecksPending(p, settings)) return { title: '검사 결과를 기다리고 있습니다', note: '큰 복도에서 기다려 주세요' };
   const n = consultFrontCount(settings);
   if (n && consultQueue(patients, p.doctor, settings, prefs).slice(0, n).some(x => patientKey(x) === patientKey(p))) return toRoomFront;
   return { title: `${room}에서 진료 예정입니다`, note: '복도 끝 모니터를 확인해 주세요' };

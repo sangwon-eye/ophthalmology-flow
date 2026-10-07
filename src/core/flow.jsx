@@ -213,6 +213,14 @@ export function prepDue(st, t, now = Date.now()) { return !!st?.startedAt && now
 export function prepChecks(p, settings) {
   return sortedTests(settings).filter(t => (hasPrep(t) || isTimed(t)) && prepGoMode(t) && p.assigned?.[t.id] && prepOf(p, t)?.go && !prepOf(p, t)?.checked);
 }
+// '나중에 확인' 결과가 남음 (10-07 사용자 결정, 예: MMP): 다른 검사는 그대로 진행, 진료 대기는 확인 뒤(consultWaiting),
+// 귀가도 확인 뒤(homeBlocked — 설명은 먼저 됨). 확인하면 다른 환자처럼 진료 대기로 새로 들어옴(placeConsultArrivals)
+export function resultChecksPending(p, settings) {
+  return !!settings?.tests && prepChecks(p, settings).length > 0;
+}
+export function resultCheckNames(p, settings) {
+  return settings?.tests ? prepChecks(p, settings).map(t => t.short || t.name).join(', ') : '';
+}
 // 진행 중 호출 금지: 설정 칩. 정하지 않았으면 VF(시야검사)만 기본으로 켜짐 (다른 검사와 같은 칩으로 끌 수도 있음)
 export function holdCallOf(t) { return typeof t?.holdCall === 'boolean' ? t.holdCall : isVfTest(t || {}); }
 // 검사 준비·시간 재기 중(시작~확인)이고 호출 금지인 검사 (예: Schirmer): 다른 검사실에서 부르지 않음
@@ -450,9 +458,9 @@ export function addPostTestsPatch(x, ids, detail) {
 export function postTestsPending(p) {
   return (p.postTests || []).some(id => p.assigned?.[id] && !p.done?.[id]);
 }
-// 귀가(설명 완료로 바로 끝내기)를 막는 것: 남은 처치(확인 대기 포함) 또는 처치 후 검사
-export function homeBlocked(p) {
-  return pendingProcedures(p).length > 0 || postTestsPending(p);
+// 귀가(설명 완료로 바로 끝내기)를 막는 것: 남은 처치(확인 대기 포함), 처치 후 검사, '나중에 확인' 결과(예: MMP — 10-07)
+export function homeBlocked(p, settings) {
+  return pendingProcedures(p).length > 0 || postTestsPending(p) || resultChecksPending(p, settings);
 }
 /* 처치 후 재진료 (10-07 사용자 결정): 진료 후 처치의 [처치 완료]·[교수님 처치 완료] 옆 '검사 · 재진료' 창의 [재진료]
    - 처치를 시행하고(확인 시간이 있는 처치도 확인을 기다리지 않음) 같은 교수님 진료 대기로. 확인은 처치실 '결과 확인'·처치 칸에서 그대로
@@ -503,6 +511,7 @@ export function inConsult(p) {
 // prefs(교수님 설정)를 주면 CR 환자는 CR 점안이 끝나야 진료 대기 (진료실 간호사가 CR 담당)
 export function consultWaiting(p, settings, prefs) {
   return !p.consultDone && !p.seen && !p.calledRoom && !p.treatRequest && allDone(p, settings)
+    && !resultChecksPending(p, settings)
     && !dropsPending(p, prefs, settings?.dilationWaitMin);
 }
 // 진료 대기 순서 (10-05 사용자 결정): 시력·검사·진료 모두 같은 기준(queueKey: 예약시간 → 접수시각, 지각은 뒤).
@@ -607,6 +616,7 @@ export function getStage(p, settings) {
   const rooms = pendingRooms(p, settings);
   if (rooms.length) return { label: `${rooms.map(r => r.name).join(', ')} 검사 대기`, area: 'exam' };
   if (needsTriageExam(p, settings)) return { label: '처치실 대기 (예진)', area: 'triageExam' };
+  if (!p.seen && !p.calledRoom && resultChecksPending(p, settings)) return { label: `${resultCheckNames(p, settings)} 결과 확인 대기`, area: 'exam' };
   if (inProfProcedure(p)) return { label: p.explainedEarly ? '설명 완료 · 교수님 처치 후 귀가' : '교수님 처치 중 (설명 대기)', area: 'profProc' };
   if (inResidentProcedure(p)) return { label: p.explainedEarly ? '처치실 (설명 완료 · 처치 후 귀가)' : '처치실 대기 (처치)', area: 'resProc' };
   if (p.seen && p.explainedEarly) return { label: '처치 완료 · 귀가 대기', area: 'explain' };

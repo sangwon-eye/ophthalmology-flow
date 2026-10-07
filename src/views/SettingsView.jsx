@@ -257,7 +257,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                       <input type="number" min="0" aria-label={`${t.short || t.name} 시간 재기 분`} value={t.prepWaitMin ?? 20} onChange={e => updateTest(t.id, { prepWaitMin: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-16 bg-white" />분
                       <select aria-label={`${t.short || t.name} 시간 재기 방식`} value={t.prepMode === 'go' ? 'go' : 'confirm'} onChange={e => updateTest(t.id, { prepMode: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white">
                         <option value="confirm">시간이 되면 [끝 · 확인]을 눌러야 완료 (예: Schirmer)</option>
-                        <option value="go">누르면 바로 완료, 시간이 되면 처치실에 확인 알림 (예: MMP)</option>
+                        <option value="go">누르면 바로 다음 검사로, 시간이 되면 처치실에 확인 알림 · 진료·귀가는 확인 뒤 (예: MMP)</option>
                       </select>
                     </div>
                   )}
