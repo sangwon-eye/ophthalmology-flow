@@ -83,6 +83,29 @@ ok(await cardOf('가나연').getByText('M/80', { exact: true }).count() >= 1, '�
 ok(await cardOf('다라연').getByText('F/11', { exact: true }).count() === 1, '명단 관리: 다라연 F/11');
 ok(await cardOf('사아연').getByText(/^[MF]\/\d+$/).count() === 0, '명단 관리: 칸이 없으면 표시 없음');
 await page.screenshot({ path: `${SP}/r87-admin.png` });
+// [정보 수정]에서도 성별·나이 (10-07 사용자): 넣기 / 같은 날 그 환자 모든 기록(2차 진료 포함) / 비우면 지움 / 잘못 적으면 안내
+const editInfo = async (name, sex, age) => {
+  await cardOf(name).getByRole('button', { name: '정보 수정', exact: true }).first().click(); await W(300);
+  const m = page.locator('.fixed.inset-0').last();
+  await m.getByLabel('성별', { exact: true }).selectOption(sex);
+  await m.getByLabel('나이', { exact: true }).fill(age);
+  await m.getByRole('button', { name: '저장', exact: true }).click(); await W(1200);
+};
+await editInfo('사아연', 'F', '45세');
+l = await list();
+ok(rec('7300004')?.sex === 'F' && rec('7300004')?.age === 45, '정보 수정: 사아연 F/45');
+ok(await cardOf('사아연').getByText('F/45', { exact: true }).count() === 1, '정보 수정 후 바로 표시');
+await editInfo('가나연', 'M', '81');
+l = await list();
+ok(rec('7300001', '김선웅')?.age === 81 && rec('7300001', '이종혁')?.age === 81, '정보 수정: 같은 날 2차 진료 기록도 함께');
+await editInfo('사아연', '', '');
+l = await list();
+ok(!rec('7300004')?.sex && rec('7300004')?.age === undefined, '정보 수정: 비우면 지움');
+await editInfo('사아연', 'M', '모름');
+ok(await page.getByText(/나이는 숫자로 적어주세요/).count() === 1 && !(await list()).find(p => p.id === '7300004')?.sex, '정보 수정: 나이를 잘못 적으면 저장 안 함');
+await page.keyboard.press('Escape');
+const left = page.locator('.fixed.inset-0').last().getByRole('button', { name: '취소', exact: true });
+if (await left.count()) { await left.click(); await W(200); }
 await back();
 // 시력방(접수 전 명단)·검사실 카드
 await pick('시력');

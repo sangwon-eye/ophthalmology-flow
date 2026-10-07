@@ -643,8 +643,11 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       setMessage(`환자번호 ${id}는 ${p.date} 명단에 이미 있습니다.`);
       return;
     }
+    // 나이: 엑셀·환자 추가와 같은 규칙, 비우면 지움, 잘못 적으면 저장하지 않고 안내
+    const age = ageYears(info.age);
+    if (String(info.age ?? '').trim() && age === null) { setMessage('나이는 숫자로 적어주세요 (예: 80, 아이는 11세5개월도 됩니다).'); return; }
     setInfoEdit(null);
-    mutatePatients(prev => editPatientInfo(prev, patientKey(p), { id, name: info.name, reservation: normalizeTime(info.reservation) }));
+    mutatePatients(prev => editPatientInfo(prev, patientKey(p), { id, name: info.name, reservation: normalizeTime(info.reservation), sex: info.sex, age }));
     setMessage(`${info.name.trim()}님 정보를 수정했습니다.`);
   };
   const swapOrder = (p) => mutatePatients(prev => swapLinkOrder(prev, patientKey(p), doctorPrefs));

@@ -494,16 +494,27 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
 
 // 명단 관리: 이름·환자번호·예약시간 수정
 export function PatientInfoModal({ patient, onSave, onCancel }) {
-  const [v, setV] = useState({ id: patient.id || '', name: patient.name || '', reservation: patient.reservation || '' });
+  const [v, setV] = useState({ id: patient.id || '', name: patient.name || '', reservation: patient.reservation || '', sex: patient.sex === 'M' || patient.sex === 'F' ? patient.sex : '', age: Number.isInteger(patient.age) ? String(patient.age) : '' });
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md">
         <h3 className="text-lg font-medium text-slate-900 mb-1">{patient.name}님 정보 수정</h3>
-        <p className="text-sm text-slate-500 mb-4">이름·환자번호는 같은 날 이 환자의 모든 진료에 함께 바뀝니다. 이미 접수한 환자는 예약시간을 바꿔도 대기 순서는 그대로입니다.</p>
+        <p className="text-sm text-slate-500 mb-4">이름·환자번호·성별·나이는 같은 날 이 환자의 모든 진료에 함께 바뀝니다. 이미 접수한 환자는 예약시간을 바꿔도 대기 순서는 그대로입니다.</p>
         <div className="space-y-3">
           <Field label="이름"><input value={v.name} onChange={e => setV({ ...v, name: e.target.value })} className={INPUT} /></Field>
           <Field label="환자번호"><input value={v.id} onChange={e => setV({ ...v, id: e.target.value })} className={INPUT} /></Field>
           <Field label="예약시간 (예: 09:30)"><input value={v.reservation} onChange={e => setV({ ...v, reservation: e.target.value })} className={INPUT} /></Field>
+          {/* 성별·나이 (비워도 됨) — 직원 화면 이름 옆 'M/80' */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="성별">
+              <select aria-label="성별" value={v.sex} onChange={e => setV({ ...v, sex: e.target.value })} className={INPUT}>
+                <option value="">비워 둠</option>
+                <option value="M">남 (M)</option>
+                <option value="F">여 (F)</option>
+              </select>
+            </Field>
+            <Field label="나이 (예: 80, 11세5개월)"><input aria-label="나이" value={v.age} onChange={e => setV({ ...v, age: e.target.value })} className={INPUT} /></Field>
+          </div>
         </div>
         {v.id.trim() !== patient.id && <p className="text-xs text-amber-700 mt-3">환자번호를 바꾸면 새 번호의 이전 정보(FU)는 자동으로 붙지 않습니다. 필요하면 검사를 직접 지정해주세요.</p>}
         <div className="flex gap-2 mt-6">

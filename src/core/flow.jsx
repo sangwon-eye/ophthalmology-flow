@@ -959,8 +959,9 @@ export function swapLinkOrder(list, waitingKey, prefs) {
     return x;
   });
 }
-// 이름·환자번호는 같은 날 같은 환자의 모든 진료에, 예약시간은 이 진료에만 적용합니다.
-export function editPatientInfo(list, pk, { id, name, reservation }) {
+// 이름·환자번호(그리고 성별·나이)는 같은 날 같은 환자의 모든 진료에, 예약시간은 이 진료에만 적용합니다.
+// sex·age: undefined면 그대로, ''/null이면 지움 (정보 수정 창에서 비운 경우)
+export function editPatientInfo(list, pk, { id, name, reservation, sex, age }) {
   const rec = list.find(x => patientKey(x) === pk);
   if (!rec) return list;
   const newId = String(id || '').trim() || rec.id;
@@ -969,6 +970,8 @@ export function editPatientInfo(list, pk, { id, name, reservation }) {
   const next = list.map(x => {
     if (x.id !== rec.id || x.date !== rec.date) return x;
     let y = { ...x, id: newId, name: String(name || '').trim() || x.name };
+    if (sex !== undefined) y.sex = sex === 'M' || sex === 'F' ? sex : undefined;
+    if (age !== undefined) y.age = Number.isInteger(age) ? age : undefined;
     if (x === rec && reservation !== undefined && reservation !== x.reservation) {
       y = x.checkin ? { ...y, reservation } : { ...y, reservation, queueKey: reservationQueueKey(reservation) };
     }
