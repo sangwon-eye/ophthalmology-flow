@@ -543,6 +543,7 @@ export function UploadResult({ result, patients, onRemove, onShowList }) {
           {stats.linked.length > 0 && <li className="text-fuchsia-800">같은 날 다른 교수님 명단에도 있어 <b>두 교수님 진료로 연결 {stats.linked.length}명</b>: {stats.linked.slice(0, 8).map(p => `${p.name}(${p.first ? `${p.doctor} 먼저 → ${p.others.join(', ')}` : `${p.others.join(', ')} → ${p.doctor}`})`).join(', ')}{stats.linked.length > 8 ? ` 외 ${stats.linked.length - 8}명` : ''} · 검사는 1차 진료 전에 함께 합니다. 순서는 명단 관리에서 바꿀 수 있어요.</li>}
         </ul>
       ) : <div className="text-red-600">저장하지 못했습니다. 서버 연결을 확인하고 다시 올려주세요.</div>}
+      {stats && result.noSexAge && <div className="text-xs text-slate-500">엑셀에 '성별'·'나이' 칸이 없어 성별/나이(예: M/80)는 표시하지 않습니다.</div>}
       {stillMissing.length > 0 && (
         <div className="rounded-lg border border-orange-300 bg-orange-50 p-3">
           <div className="font-medium text-orange-900 mb-1">이번 파일에 없는 환자 {stillMissing.length}명</div>

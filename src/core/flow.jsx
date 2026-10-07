@@ -833,6 +833,9 @@ export function buildPatient(raw, fuMap, settings) {
     doctor: raw.doctor,
     reservation: raw.reservation,
     firstVisit: !!raw.firstVisit,
+    // 명단 엑셀의 성별·나이 (화면에 'M/80'). 칸이 없는 명단이면 저장하지 않음 (예전 기록과 같음)
+    sex: raw.sex === 'M' || raw.sex === 'F' ? raw.sex : undefined,
+    age: Number.isInteger(raw.age) ? raw.age : undefined,
     checkin: '',
     late: false,
     queueKey: reservationQueueKey(raw.reservation),
@@ -978,11 +981,18 @@ export function editPatientInfo(list, pk, { id, name, reservation }) {
 // 명단을 다시 올려도 이미 있는 환자의 진행 상황·검사 지정은 그대로 두고, 예약시간만 새 값으로 바꿉니다.
 // 이미 접수한 환자는 대기 순서(직접 끌어서 바꾼 순서 포함)를 건드리지 않고 예약시간 글자만 바꿉니다.
 // 같은 날 다른 교수님 명단에 이미 있으면 2차 진료로 연결합니다.
+// 성별·나이는 진행 상황과 무관한 정보라 같은 날 같은 환자의 모든 기록에 새 값으로 맞춥니다
+// (이 기능 전에 올린 명단도 다시 올리면 표시됨, 새 값이 없으면 이미 있던 값을 2차 진료 기록에 이어 씀).
 export function mergePatientList(prev, news, prefs, settings) {
   const stats = { added: [], timeChanged: [], unchanged: [], linked: [] };
   let list = prev;
-  news.forEach(np => {
-    const group = visitGroup(list, np.id, np.date);
+  news.forEach(raw => {
+    let group = visitGroup(list, raw.id, raw.date);
+    const np = withKnownSexAge(raw, group);
+    if (group.some(x => sexAgePatch(x, np))) {
+      list = list.map(x => (x.id === np.id && x.date === np.date && sexAgePatch(x, np) ? { ...x, ...sexAgePatch(x, np) } : x));
+      group = visitGroup(list, np.id, np.date);
+    }
     if (!group.length) { list = [...list, np]; stats.added.push(np); return; }
     const old = group.find(x => x.doctor === np.doctor);
     if (!old) {
@@ -1022,14 +1032,19 @@ export function needsTestCheck(p, prefs) {
 export function lateQueueKey(p, late) {
   return (late ? 100000 : 0) + timeToMin(hasReservation(p) ? p.reservation : p.checkin) + timeToMin(p.checkin) / 10000;
 }
-export function applyCheckin(p, { autoLate = false, graceMin = 0 } = {}) {
+// 시범 운영 '시력방 건너뛰기'(설정 > 기타, 10-07 사용자 결정): 켜 두면 접수(QR·직원)하는 모든 환자가
+// 시력방을 건너뜀 — 프로그램에서만 시력방을 빼는 것(실제 시력검사는 프로그램 밖). 끄면 원래대로, 이미 접수한 환자는 그대로.
+export function pilotSkipVision(settings) {
+  return settings?.pilotSkipVision === true;
+}
+export function applyCheckin(p, { autoLate = false, graceMin = 0, skipVisionRoom = false } = {}) {
   const checkin = nowHHMM();
   const late = !hasReservation(p) || (autoLate
     ? !!p.late || timeToMin(checkin) > timeToMin(p.reservation) + (Number(graceMin) || 0)
     : !!p.late);
   let next = { ...p, checkin, late, queueKey: lateQueueKey({ ...p, checkin }, late) };
-  // 명단 관리에서 '시력검사 없이 바로 진료'로 정한 환자는 접수하자마자 시력/안압을 건너뜁니다.
-  if (p.skipVision && !p.done?.[VISION_KEY]) {
+  // 명단 관리에서 '시력검사 없이 바로 진료'로 정한 환자(또는 시범 운영 '시력방 건너뛰기')는 접수하자마자 시력/안압을 건너뜁니다.
+  if ((p.skipVision || skipVisionRoom) && !p.done?.[VISION_KEY]) {
     next = {
       ...next,
       assigned: { ...next.assigned, ...Object.fromEntries(VISION_TEST_IDS.map(id => [id, false])) },
@@ -1284,6 +1299,62 @@ export function rosterColumns(row) {
   });
   return cols;
 }
+// 성별·나이 (없어도 되는 칸): 병원 엑셀은 성별 '남'/'여', 나이 '80세' (아이는 '11세5개월' → 11). 화면에는 'M/80'.
+// 제목은 '성별'·'나이' 두 칸 또는 '성별/나이' 한 칸 (띄어쓰기·괄호는 무시, '연령'도 됨)
+const SEX_TITLES = ['성별', '성', 'sex'];
+const AGE_TITLES = ['나이', '연령', '만나이', 'age'];
+const SEX_AGE_TITLES = SEX_TITLES.flatMap(a => AGE_TITLES.flatMap(b => ['', '/', '·', ','].flatMap(sep => [a + sep + b, b + sep + a])));
+export function rosterInfoColumns(row) {
+  const cols = {};
+  row.forEach((cell, i) => {
+    const h = String(cell ?? '').replace(/[\s()[\]]/g, '').toLowerCase();
+    if (cols.sex === undefined && SEX_TITLES.includes(h)) cols.sex = i;
+    else if (cols.age === undefined && AGE_TITLES.includes(h)) cols.age = i;
+    else if (cols.sexAge === undefined && SEX_AGE_TITLES.includes(h)) cols.sexAge = i;
+  });
+  return cols;
+}
+// '남'·'남자'·'M' → M, '여'·'여자'·'F' → F (한 칸에 '남/80세'처럼 같이 있어도 됨), 모르면 ''
+export function sexCode(v) {
+  const s = String(v ?? '').trim();
+  if (s.includes('남')) return 'M';
+  if (s.includes('여')) return 'F';
+  const words = s.toLowerCase().split(/[^a-z]+/);
+  if (words.some(w => w === 'm' || w === 'male')) return 'M';
+  if (words.some(w => w === 'f' || w === 'female')) return 'F';
+  return '';
+}
+// '80세' → 80, '11세5개월' → 11 (개월은 버림), '5개월' → 0, '80' → 80. 모르면 null
+export function ageYears(v) {
+  const ok = (n) => (Number.isInteger(n) && n >= 0 && n < 150 ? n : null);
+  if (typeof v === 'number') return Number.isFinite(v) ? ok(Math.floor(v)) : null;
+  const s = String(v ?? '').trim();
+  const years = s.match(/(\d+)\s*세/);
+  if (years) return ok(Number(years[1]));
+  if (/\d+\s*개월/.test(s)) return 0;
+  const n = s.match(/\d+/);
+  return n ? ok(Number(n[0])) : null;
+}
+// 화면 표시: 'M/80' (한쪽만 있으면 그것만, 둘 다 없으면 '' — 예전 기록·칸이 없는 명단)
+export function sexAgeLabel(p) {
+  const sex = p?.sex === 'M' || p?.sex === 'F' ? p.sex : '';
+  const age = Number.isInteger(p?.age) ? String(p.age) : '';
+  return sex && age ? `${sex}/${age}` : sex || age;
+}
+// 새 값(np)과 다를 때만 바꿀 칸 (새 값이 비어 있으면 기존 값을 지우지 않음)
+export function sexAgePatch(x, np) {
+  const patch = {};
+  if ((np.sex === 'M' || np.sex === 'F') && np.sex !== x.sex) patch.sex = np.sex;
+  if (Number.isInteger(np.age) && np.age !== x.age) patch.age = np.age;
+  return Object.keys(patch).length ? patch : null;
+}
+// 새 기록에 성별·나이가 없으면 같은 날 같은 환자의 다른 기록 값을 이어 씀 (직접 추가한 2차 진료 등)
+function withKnownSexAge(np, group) {
+  const sex = np.sex || group.find(x => x.sex === 'M' || x.sex === 'F')?.sex;
+  const age = Number.isInteger(np.age) ? np.age : group.find(x => Number.isInteger(x.age))?.age;
+  if (sex === np.sex && age === np.age) return np;
+  return { ...np, ...(sex ? { sex } : {}), ...(Number.isInteger(age) ? { age } : {}) };
+}
 export function readRoster(ws) {
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
   // 환자번호·이름은 엑셀 화면에 보이는 글자 그대로 읽습니다 (예: 앞자리 0 유지)
@@ -1291,18 +1362,23 @@ export function readRoster(ws) {
   const hi = raw.slice(0, 10).findIndex(r => { const c = rosterColumns(r); return c.id !== undefined && c.name !== undefined; });
   if (hi < 0) return null;
   const cols = rosterColumns(raw[hi]);
+  const info = rosterInfoColumns(raw[hi]);
   const rows = raw.slice(hi + 1).map((r, j) => {
     const view = shown[hi + 1 + j] || [];
-    const text = (k) => (cols[k] === undefined ? '' : String(view[cols[k]] ?? r[cols[k]] ?? '').trim());
+    const cell = (i) => (i === undefined ? '' : String(view[i] ?? r[i] ?? '').trim());
+    const text = (k) => cell(cols[k]);
+    const both = cell(info.sexAge);
     return {
       id: text('id'),
       name: text('name'),
       reservation: cols.reservation === undefined ? '' : normalizeTime(r[cols.reservation]),
       firstVisit: !text('visit').includes('재진'), // '재진'이 아니면 모두 초진
       doctorText: text('doctor'),
+      sex: sexCode(info.sex !== undefined ? cell(info.sex) : both),
+      age: ageYears(info.age !== undefined ? cell(info.age) : both),
     };
   }).filter(r => r.id);
-  return { cols, rows };
+  return { cols, rows, hasSexAge: Object.keys(info).length > 0 };
 }
 // 엑셀의 진료의를 교수 관리에 등록된 이름과 맞춤 ('교수', 띄어쓰기, 괄호 안 글자는 무시)
 export function doctorKey(v) {

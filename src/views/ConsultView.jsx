@@ -4,7 +4,7 @@ import { Check, RotateCcw } from 'lucide-react';
 import { VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
-import { ResultTable, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -54,6 +54,7 @@ export function SimpleCard({ p, tone = 'slate', badges, stale = 0, children }) {
     <div className={`bg-white border ${stale ? 'border-orange-400 ring-2 ring-orange-200' : c.border} rounded-xl px-4 py-3 mb-3`}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="t-name text-slate-900">{p.name}</span>
+        <SexAge p={p} />
         <span className="text-xs text-slate-400">{p.id}</span>
         <StaleChip min={stale} />
         {badges}
@@ -357,7 +358,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     if (linkDoctor) {
       let fu = {};
       try { fu = await loadEntries('fu-designations', [p.id]); } catch { /* 이전 정보 없이 추가 */ }
-      extra = buildPatient({ id: p.id, name: p.name, date: p.date, doctor: linkDoctor, reservation: '', firstVisit: false }, fu, settings);
+      extra = buildPatient({ id: p.id, name: p.name, sex: p.sex, age: p.age, date: p.date, doctor: linkDoctor, reservation: '', firstVisit: false }, fu, settings);
     }
     // 서버의 최신 명단으로 다시 확인: 다른 PC가 먼저 설명 완료했으면 아무것도 바꾸지 않음 (FU도 다시 저장하지 않음 — 먼저 정한 FU를 덮어쓰지 않게)
     // 처치가 아직 남아 있으면: 설명만 끝내고 처치 후 [귀가] 로 마무리 (2차 진료도 귀가 때 시작)
@@ -583,6 +584,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
               <div className="text-sm text-amber-600 font-medium mb-1">현재 진료 중</div>
               <div className="text-2xl font-semibold text-slate-900 mb-1 flex items-center gap-2 flex-wrap">
                 {inRoom.name}
+                <SexAge p={inRoom} className="text-lg text-slate-600 font-normal" />
                 {inRoom.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-normal">초진</span>}
                 {redoActive(inRoom) && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-300 font-normal">{REDO_SHORT[inRoom.redo.kind]}</span>}
                 {inRoom.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-normal">2차 진료 · {inRoom.primaryDoctor} 후</span>}
@@ -697,7 +699,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
               <SectionTitle>진료 보류 (추가 검사 중) · {onHold.length}명</SectionTitle>
               {onHold.map(p => (
                 <div key={patientKey(p)} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-3 mb-2">
-                  <div className="text-sm text-slate-700"><span className="t-name text-slate-900">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span></div>
+                  <div className="text-sm text-slate-700"><span className="t-name text-slate-900">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span></div>
                   <div className="text-xs text-slate-500">{getStage(p, settings).label}</div>
                 </div>
               ))}

@@ -1,9 +1,9 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { resultFieldsOf, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, mergeHistoryEntry, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
-import { TwoStepButton, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 
@@ -218,9 +218,10 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const checkIn = (p) => {
     const pk = patientKey(p);
     // 다른 PC(QR 접수 등)가 방금 접수했으면 그대로 둠 (접수 시각·순서를 덮어쓰지 않음)
-    mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin ? applyCheckin(x) : x)));
+    const skip = pilotSkipVision(settings);
+    mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin ? applyCheckin(x, { skipVisionRoom: skip }) : x)));
     // 되돌리기: [접수 취소]와 같은 조건(시력 측정 전)일 때만, 접수 전에 고른 지각 표시·시력방 검사 지정은 원래대로
-    showToast(`${p.name} 접수${p.skipVision ? ' (시력검사 없이 바로 진료)' : ''}`, () => mutatePatients(prev => prev.map(x => {
+    showToast(`${p.name} 접수${p.skipVision ? ' (시력검사 없이 바로 진료)' : skip ? ' (시범 운영: 시력방 건너뜀)' : ''}`, () => mutatePatients(prev => prev.map(x => {
       if (patientKey(x) !== pk) return x;
       const u = undoCheckin(x);
       if (u === x) return x;
@@ -296,6 +297,12 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
 
   const content = (
     <>
+      {/* 시범 운영 '시력방 건너뛰기'가 켜져 있으면 접수한 환자가 이 화면에 남지 않으므로 이유를 한 줄로 */}
+      {isVision && pilotSkipVision(settings) && (
+        <div data-testid="pilot-skip-vision" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          시범 운영: 시력방 건너뛰기 켜짐 · 접수하면 바로 검사실로 갑니다 (설정 &gt; 기타에서 끕니다)
+        </div>
+      )}
       {embedded && groups.length >= 2 && <SectionTitle hint="다른 검사실 검사를 마친 뒤 진료 전에 하는 검사입니다">진료 전 검사 · {roomList.length}명</SectionTitle>}
 
       {/* 장비 필터(검사실)·검사 대기 인원(시력실)과 정렬을 한 줄에 */}
@@ -551,7 +558,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
-                    <span className="t-name">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
+                    <span className="t-name">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span>
                     {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
                     <DoctorChip p={p} />
                     <PatientMemo p={p} />

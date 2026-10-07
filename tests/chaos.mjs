@@ -42,7 +42,8 @@ fs.writeFileSync(keyFile, JSON.stringify(item));
 // 산동 기다리는 시간을 짧게 (기본 1분, DILATE_MIN=15 처럼 바꿀 수 있음): 시험 시간 안에 '산동 완료'·CR '분 지남 · 확인'까지 나오게
 const setFile = path.join(work, 'data', 'keys', 'settings.json');
 const setItem = JSON.parse(fs.readFileSync(setFile, 'utf8'));
-setItem.value = JSON.stringify({ ...JSON.parse(setItem.value), dilationWaitMin: Number(process.env.DILATE_MIN || 1) });
+// 시범 운영 '시력방 건너뛰기'를 켜고 시험하려면 PILOT_SKIP=1 (시력방 화면의 [접수]가 시력방을 건너뜀)
+setItem.value = JSON.stringify({ ...JSON.parse(setItem.value), dilationWaitMin: Number(process.env.DILATE_MIN || 1), ...(process.env.PILOT_SKIP ? { pilotSkipVision: true } : {}) });
 fs.writeFileSync(setFile, JSON.stringify(setItem));
 const logFd = fs.openSync(path.join(work, 'server-out.txt'), 'w');
 const srv = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env: { ...process.env, OPH_DATA_DIR: path.join(work, 'data'), OPH_PORT: String(PORT) }, stdio: ['ignore', logFd, logFd] });

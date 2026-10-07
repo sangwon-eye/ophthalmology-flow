@@ -1,7 +1,7 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
 import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
-import { COLOR_MAP, INPUT, applyCheckin, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
+import { COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
 import { shiftISO, visionNames } from '../core/storage.jsx';
 import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
 import { consultRoomLabel, patientBoardName } from './BoardView.jsx';
@@ -179,10 +179,17 @@ export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onE
       return;
     }
     const pk = patientKey(p);
+    const skip = pilotSkipVision(s);
     try {
-      await mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin
-        ? applyCheckin(x, { autoLate: true, graceMin: s.lateGraceMin }) : x)));
-      show({ ok: true, title: `${patientBoardName(p)}님 접수되었습니다`, note: kioskNoteFor(p, s), sub: kioskNoteFor(p, s) ? '' : '잠시 기다려 주세요' });
+      const saved = await mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin
+        ? applyCheckin(x, { autoLate: true, graceMin: s.lateGraceMin, skipVisionRoom: skip }) : x)));
+      const note = kioskNoteFor(p, s);
+      // 시범 운영 '시력방 건너뛰기'가 켜져 있으면 처음 찍을 때도 다시 찍었을 때와 같은 '갈 곳' 안내 (직원이 적은 접수 안내가 있으면 그것)
+      // (다시 찍기와 같은 명단: 저장된 최신 명단 중 그날 환자, 2차 진료 대기 기록 제외)
+      const sameDay = skip && !note && Array.isArray(saved) ? saved.filter(x => x.date === p.date && !x.linkWaiting) : [];
+      const rec = sameDay.find(x => patientKey(x) === pk);
+      if (rec?.checkin) show({ ok: true, who: `${patientBoardName(p)}님 접수되었습니다`, ...kioskGuide(rec, sameDay, s, prefs) });
+      else show({ ok: true, title: `${patientBoardName(p)}님 접수되었습니다`, note, sub: note ? '' : '잠시 기다려 주세요' });
     } catch {
       show({ ok: false, title: '지금 접수할 수 없습니다', sub: '접수처에 문의해 주세요' });
     }

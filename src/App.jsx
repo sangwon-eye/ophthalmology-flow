@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { placeConsultArrivals, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
-import { DoctorChip, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
+import { DoctorChip, SexAge, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
 import { StationView } from './views/StationView.jsx';
 import { ConsultView } from './views/ConsultView.jsx';
@@ -118,6 +118,7 @@ export function PatientDirectory({ patients, settings, doctorPrefs, lastSync, on
             <div key={patientKey(p)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="flex items-center gap-2 flex-wrap min-w-[15rem]">
                 <span className="t-name text-slate-900">{p.name}</span>
+                <SexAge p={p} />
                 <span className="text-xs text-slate-400">{p.id}</span>
                 <DoctorChip p={p} />
                 {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}

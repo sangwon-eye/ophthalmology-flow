@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { REDO_LABEL, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { REDO_LABEL, sexAgeLabel, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -197,11 +197,17 @@ export function RecentDone({ count, children }) {
   );
 }
 
+// 성별/나이 (명단 엑셀에서, 예: M/80) — 이름 바로 옆. 칸이 없는 예전 기록은 표시 없음
+export function SexAge({ p, className = 'text-sm text-slate-600' }) {
+  const t = sexAgeLabel(p);
+  return t ? <span className={className}>{t}</span> : null;
+}
+
 export function RecentRow({ p, time, children }) {
   return (
     <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 flex-wrap">
       <div className="text-sm text-slate-700">
-        <span className="t-name text-slate-900">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
+        <span className="t-name text-slate-900">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span>
         {time && <span className="text-xs text-slate-400 ml-2">{time} 완료</span>}
       </div>
       <div className="flex flex-wrap gap-2 justify-end">{children}</div>
@@ -1192,6 +1198,7 @@ export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirs
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="t-name text-slate-900">{p.name}</span>
+          <SexAge p={p} />
           <span className="text-xs text-slate-400">{p.id}</span>
           <DoctorChip p={p} />
           {onToggleFirst

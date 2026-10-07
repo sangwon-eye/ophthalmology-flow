@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw, ArrowDown } from 'lucide-react';
 import { laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
-import { ConfirmButton, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
+import { ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
 import { NOTICE_PRESETS, consultRoomLabel } from './BoardView.jsx';
 import { WAIT_TEXT, WAIT_WINDOW_MIN, estimateWait, shownWait } from '../core/flow.jsx';
@@ -488,7 +488,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
       roster.rows.forEach(r => {
         const doctor = matchDoctor(r.doctorText, doctors);
         if (!doctor) { rejected.push(r); return; }
-        news.push({ id: r.id, name: r.name, reservation: r.reservation, firstVisit: r.firstVisit, date: batchDate, doctor });
+        news.push({ id: r.id, name: r.name, reservation: r.reservation, firstVisit: r.firstVisit, sex: r.sex, age: r.age, date: batchDate, doctor });
       });
       // 같은 환자가 두 교수님 줄에 있으면 두 교수님 진료로 연결됩니다 (mergePatientList)
       const uniq = [...new Map(news.map(r => [`${r.id}::${r.doctor}`, r])).values()].map(r => buildPatient(r, currentFu, settings));
@@ -505,7 +505,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
         .map(p => patientKey(p));
       const perDoctor = fileDoctors.map(d => `${d} ${uniq.filter(p => p.doctor === d).length}명`);
       setMessage('');
-      setUploadResult({ date: batchDate, doctors: fileDoctors, allDoctors: doctors, perDoctor, total: uniq.length, stats, missing, rejected });
+      setUploadResult({ date: batchDate, doctors: fileDoctors, allDoctors: doctors, perDoctor, total: uniq.length, stats, missing, rejected, noSexAge: !roster.hasSexAge });
     } catch (err) {
       return fail('파일을 읽지 못했습니다. 엑셀(.xlsx) 파일인지 확인해주세요.');
     }
@@ -532,8 +532,8 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
-      { 예약: '09:00', 환자번호: '10001', 환자명: '홍길동', 초재진: '재진', 진료의: doctors[0] || '김안과' },
-      { 예약: '09:10', 환자번호: '10002', 환자명: '김철수', 초재진: '초진', 진료의: doctors[1] || doctors[0] || '김안과' },
+      { 예약: '09:00', 환자번호: '10001', 환자명: '홍길동', 성별: '남', 나이: '80세', 초재진: '재진', 진료의: doctors[0] || '김안과' },
+      { 예약: '09:10', 환자번호: '10002', 환자명: '김영희', 성별: '여', 나이: '11세5개월', 초재진: '초진', 진료의: doctors[1] || doctors[0] || '김안과' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '명단');
@@ -875,7 +875,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
             <div key={patientKey(p)} className={`bg-white rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap ${flag ? 'border-2 border-orange-400' : 'border border-slate-200'}`}>
               <div>
                 <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
-                  <span className="t-name">{p.name}</span> <span className="text-xs text-slate-400">{p.id}</span>
+                  <span className="t-name">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span>
                   {flag && !p.fuMissing && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
                   {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}

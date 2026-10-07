@@ -100,6 +100,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
       lateGraceMin: Math.max(0, Math.round(Number(draft.lateGraceMin) || 0)),
       treatStaleMin: Math.max(0, Math.round(Number(draft.treatStaleMin ?? 20) || 0)),
       consultFrontCount: Math.max(0, Math.round(Number(draft.consultFrontCount ?? 5) || 0)),
+      pilotSkipVision: draft.pilotSkipVision === true,
       hxFields: hxFieldsOf(draft).map(x => ({ ...x, label: String(x.label || '').trim(), short: String(x.short || '').trim() })).filter(x => x.label),
     };
     setDraft(toDraft(cleaned));
@@ -494,6 +495,15 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
 
       {tab === 'etc' && (
         <div className="space-y-4">
+          {/* 시범 운영 (10-07 사용자 결정): 프로그램에서만 시력방을 뺌. 끄면 원래대로 */}
+          <div className={`bg-white border rounded-xl p-5 ${draft.pilotSkipVision ? 'border-amber-400 ring-2 ring-amber-100' : 'border-slate-200'}`}>
+            <div className="font-medium text-slate-900 mb-1">시범 운영: 시력방 건너뛰기</div>
+            <p className="text-sm text-slate-500 mb-3">켜 두면 접수(QR·직원 [접수])하는 모든 환자가 프로그램에서 시력방을 건너뛰고 바로 검사실로 갑니다 (초진은 처치실 검사 지정, 오늘 검사가 없으면 진료 대기). 시력방에서 하던 일(시력·안압 입력, ARK, History 설문지, 첫 점안)은 프로그램에서 빠지고, 점안은 검사실·처치실·진료실 카드에서 누를 수 있습니다. QR 접수 화면은 처음 찍을 때도 갈 곳을 안내합니다. 이미 접수한 환자는 그대로이고, 끄면 원래대로 돌아갑니다.</p>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={draft.pilotSkipVision === true} onChange={e => updateDraft(d => ({ ...d, pilotSkipVision: e.target.checked }))} className="w-4 h-4" />
+              시력방 건너뛰기 켜기
+            </label>
+          </div>
           <AccessPasswordCard />
           <SettingsPasswordCard />
           <div className="bg-white border border-slate-200 rounded-xl p-5">
