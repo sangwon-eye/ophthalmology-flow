@@ -233,7 +233,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
     const pk = patientKey(p);
     // 다른 PC(QR 접수 등)가 방금 접수했으면 그대로 둠 (접수 시각·순서를 덮어쓰지 않음)
     const skip = pilotSkipVision(settings);
-    mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin ? applyCheckin(x, { skipVisionRoom: skip }) : x)));
+    mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin ? applyCheckin(x, { skipVisionRoom: skip, list: prev }) : x)));
     // 되돌리기: [접수 취소]와 같은 조건(시력 측정 전)일 때만, 접수 전에 고른 지각 표시·시력방 검사 지정은 원래대로
     showToast(`${p.name} 접수${p.skipVision ? ' (시력검사 없이 바로 진료)' : skip ? ' (시범 운영: 시력방 건너뜀)' : ''}`, () => mutatePatients(prev => prev.map(x => {
       if (patientKey(x) !== pk) return x;

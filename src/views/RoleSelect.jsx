@@ -185,7 +185,7 @@ function useKioskScan({ patients, settings, doctorPrefs, mutatePatients, paused 
     const skip = pilotSkipVision(s);
     try {
       const saved = await mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin
-        ? applyCheckin(x, { autoLate: true, graceMin: s.lateGraceMin, skipVisionRoom: skip }) : x)));
+        ? applyCheckin(x, { autoLate: true, graceMin: s.lateGraceMin, skipVisionRoom: skip, list: prev }) : x)));
       const note = kioskNoteFor(p, s);
       // 시범 운영 '시력방 건너뛰기'가 켜져 있으면 처음 찍을 때도 다시 찍었을 때와 같은 '갈 곳' 안내 (직원이 적은 접수 안내가 있으면 그것)
       // (다시 찍기와 같은 명단: 저장된 최신 명단 중 그날 환자, 2차 진료 대기 기록 제외)

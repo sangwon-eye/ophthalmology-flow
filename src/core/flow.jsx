@@ -87,7 +87,7 @@ export function timeToMin(t) {
   if (!m) return 0;
   return Number(m[1]) * 60 + Number(m[2]);
 }
-// 예약시간(시:분)이 적혀 있는지. 없으면(명단에 없던 환자 등) 접수 전에는 맨 뒤, 접수하면 지각으로 맨 뒤
+// 예약시간(시:분)이 적혀 있는지. 없으면(명단에 없던 환자 등) 접수 전에는 맨 뒤, 접수하면 지각 (자리는 lateKeys)
 export function hasReservation(p) {
   return /\d{1,2}:\d{2}/.test(String(p?.reservation || ''));
 }
@@ -514,9 +514,9 @@ export function consultWaiting(p, settings, prefs) {
     && !resultChecksPending(p, settings)
     && !dropsPending(p, prefs, settings?.dilationWaitMin);
 }
-// 진료 대기 순서 (10-05 사용자 결정): 시력·검사·진료 모두 같은 기준(queueKey: 예약시간 → 접수시각, 지각은 뒤).
+// 진료 대기 순서 (10-05 사용자 결정): 시력·검사·진료 모두 같은 기준(queueKey: 예약시간 → 접수시각, 지각은 lateKeys — 진료는 같은 교수님 기준 lateConsultKey).
 // 진료 대기에서만 consultKey(새 칸)가 있으면 그것을 씀 — 아래 placeConsultArrivals 가 정함
-export function consultOrderKey(p) { return typeof p.consultKey === 'number' ? p.consultKey : p.queueKey; }
+export function consultOrderKey(p) { return typeof p.consultKey === 'number' ? p.consultKey : consultBaseKey(p); }
 export function byConsultQueue(a, b) { return consultOrderKey(a) - consultOrderKey(b); }
 // 그 교수님 진료 대기 순서 (진료실 화면·환자용 화면·QR 접수가 같은 순서를 씀)
 export function consultQueue(patients, doctor, settings, prefs) {
@@ -526,7 +526,7 @@ export function consultQueue(patients, doctor, settings, prefs) {
 //  - 앞 N명 보호 (10-07 사용자, 예전 '1번 보호'를 넓힘): N = 설정 '진료 순서 보호 인원'(기본 1, 0이면 보호 없음 —
 //    '진료실 앞으로 안내할 인원'과는 따로, 10-07 사용자). 앞 N명은 절대 뒤로 밀리지 않음 → 예약 순서로 그 안에 들어가게 되면
 //    N번째 바로 뒤로 (새 환자의 consultKey)
-//  - 예약시간이 같으면 진료 대기에 먼저 들어온(검사가 먼저 끝난) 사람이 앞 (10-07 사용자, 접수 순서 아님. 지각은 예전대로)
+//  - 예약시간이 같으면 진료 대기에 먼저 들어온(검사가 먼저 끝난) 사람이 앞 (10-07 사용자, 접수 순서 아님. 지각은 빼고 lateConsultKey 자리)
 //  - 그 밖에는 예약 순서 자리 그대로. 추가 검사에서 돌아온 환자·CR·산동 후 다시 진료도 같은 규칙 (예외 없음)
 //  - 되돌리기는 새로 들어온 것이 아님: [호출 취소](진료 중에서)·[진료 완료 취소](설명 대기에서)는 그대로,
 //    [보내기]의 [되돌리기]는 restoredAt(새 칸)이 바뀐 저장이라 그대로, [다시 진료 취소](진료 중에 보낸 것)는 예전처럼 맨 앞
@@ -560,20 +560,21 @@ export function placeConsultArrivals(prev, next, settings, prefs) {
     if (others.length) {
       const keys = others.map(([p]) => consultOrderKey(p));
       // k 바로 뒤 자리 (아주 작은 틈 안에서 예약 순서를 지킴 — 그 뒤 예약의 환자보다 앞, 같은 자리로 밀린 환자끼리는 예약 순서)
-      const after = (k) => k + 1e-5 * (0.1 + 0.8 * Math.min(1, Math.max(0, a.queueKey / 200000)));
+      const ak = consultBaseKey(a); // 지각 환자는 같은 교수님 기준 자리(lateConsultKey), 아니면 queueKey
+      const after = (k) => k + 1e-5 * (0.1 + 0.8 * Math.min(1, Math.max(0, ak / 200000)));
       if (cancelRedo) a.consultKey = keys[0] - 0.001;
-      else if (typeof a.queueKey === 'number') {
+      else if (typeof ak === 'number') {
         let must = -Infinity;
         // 앞 N명(진료 순서 보호 인원)은 밀지 않음 (0명이면 보호 없이 예약 순서)
         const guard = Math.min(consultProtectCount(settings), keys.length);
-        if (guard > 0 && a.queueKey < keys[guard - 1]) must = keys[guard - 1];
+        if (guard > 0 && ak < keys[guard - 1]) must = keys[guard - 1];
         // 같은 예약시간(지각 제외)이면 먼저 들어와 기다리는 사람 뒤 = 검사가 끝난 순서 (10-07 사용자)
         if (!a.late) {
           const base = Math.floor(a.queueKey);
           const same = others.filter(([p]) => !p.late && typeof p.queueKey === 'number' && Math.floor(p.queueKey) === base).map(([p]) => consultOrderKey(p));
           if (same.length) must = Math.max(must, ...same);
         }
-        if (a.queueKey <= must) a.consultKey = after(must);
+        if (ak <= must) a.consultKey = after(must);
       }
     }
     out[i] = a;
@@ -1165,21 +1166,53 @@ export function needsTestCheck(p, prefs) {
 // 지각: 직원 [접수]는 자동으로 정하지 않고 카드의 [지각]으로 표시합니다 (접수 전에 고른 값 유지).
 // 바코드 접수(autoLate)만 찍은 시각이 예약 + 유예시간보다 늦으면 자동으로 지각입니다.
 // 예약시간이 없는 환자는 어느 접수든 지각 (나중에 예약시간을 넣어도 순서는 그대로 — 필요하면 직원이 끌어서 옮김).
-// 지각 환자는 제시간 환자들 뒤로 갑니다. 예약시간이 없으면 접수 시각을 예약시간처럼 씁니다 ([지각]을 풀면 접수 시각 순서로).
-export function lateQueueKey(p, late) {
-  return (late ? 100000 : 0) + timeToMin(hasReservation(p) ? p.reservation : p.checkin) + timeToMin(p.checkin) / 10000;
+// 예약시간이 없으면 접수 시각을 예약시간처럼 씁니다 ([지각]을 풀면 접수 시각 순서로).
+// 지각 환자 자리 (10-08 사용자 결정): '자기보다 먼저 접수한 환자' 중 가장 뒤 순서 바로 뒤 (자기 예약 자리보다 앞으로는 안 감).
+// 그 뒤에 접수한 환자와는 예약시간으로 비교 — 예: L(9:00 예약·9:10 접수, 지각), A(9:30·9:05), C(9:20·9:15), D(10:00·9:12) → C, A, L, D.
+// 검사실·시력방 순서(queueKey)는 모든 환자 기준, 진료 순서(lateConsultKey 새 칸)는 같은 교수님 환자 기준.
+// 예전(10-07까지)에는 지각이면 모두 맨 뒤 묶음(100000+) — 명단(list)을 모르는 곳에서만 예전 방식으로 계산
+const LATE_GAP = 1e-5;
+function ownQueueKey(p) {
+  return timeToMin(hasReservation(p) ? p.reservation : p.checkin) + timeToMin(p.checkin) / 10000;
+}
+export function consultBaseKey(p) {
+  return typeof p?.lateConsultKey === 'number' ? p.lateConsultKey : p?.queueKey;
+}
+function lateAfterEarlier(p, list, sameDoctor) {
+  const own = ownQueueKey(p);
+  const mine = timeToMin(p.checkin);
+  const pk = patientKey(p);
+  let max = -Infinity;
+  (list || []).forEach(x => {
+    if (!x || patientKey(x) === pk || !x.checkin || x.consultDone || x.date !== p.date || x.linkWaiting) return;
+    if (sameDoctor && x.doctor !== p.doctor) return;
+    if (timeToMin(x.checkin) > mine) return; // 먼저(같은 분 포함) 접수한 환자만
+    const k = sameDoctor ? consultOrderKey(x) : x.queueKey;
+    if (typeof k === 'number' && Number.isFinite(k) && k > max) max = k;
+  });
+  return max >= own ? max + LATE_GAP : own;
+}
+// { queueKey, lateConsultKey } — 지각이 아니면 예약시간 → 접수시각 (lateConsultKey 없음)
+export function lateKeys(p, late, list) {
+  if (!late) return { queueKey: ownQueueKey(p), lateConsultKey: undefined };
+  if (!Array.isArray(list)) return { queueKey: 100000 + ownQueueKey(p), lateConsultKey: undefined };
+  return { queueKey: lateAfterEarlier(p, list, false), lateConsultKey: lateAfterEarlier(p, list, true) };
+}
+export function lateQueueKey(p, late, list) {
+  return lateKeys(p, late, list).queueKey;
 }
 // 시범 운영 '시력방 건너뛰기'(설정 > 기타, 10-07 사용자 결정): 켜 두면 접수(QR·직원)하는 모든 환자가
 // 시력방을 건너뜀 — 프로그램에서만 시력방을 빼는 것(실제 시력검사는 프로그램 밖). 끄면 원래대로, 이미 접수한 환자는 그대로.
 export function pilotSkipVision(settings) {
   return settings?.pilotSkipVision === true;
 }
-export function applyCheckin(p, { autoLate = false, graceMin = 0, skipVisionRoom = false } = {}) {
+// list: 그날 명단 (지각 자리를 '먼저 접수한 환자' 기준으로 정함 — 없으면 예전처럼 맨 뒤 묶음)
+export function applyCheckin(p, { autoLate = false, graceMin = 0, skipVisionRoom = false, list } = {}) {
   const checkin = nowHHMM();
   const late = !hasReservation(p) || (autoLate
     ? !!p.late || timeToMin(checkin) > timeToMin(p.reservation) + (Number(graceMin) || 0)
     : !!p.late);
-  let next = { ...p, checkin, late, queueKey: lateQueueKey({ ...p, checkin }, late) };
+  let next = { ...p, checkin, late, ...lateKeys({ ...p, checkin }, late, list) };
   // 명단 관리에서 '시력검사 없이 바로 진료'로 정한 환자(또는 시범 운영 '시력방 건너뛰기')는 접수하자마자 시력/안압을 건너뜁니다.
   if ((p.skipVision || skipVisionRoom) && !p.done?.[VISION_KEY]) {
     next = {
@@ -1192,13 +1225,13 @@ export function applyCheckin(p, { autoLate = false, graceMin = 0, skipVisionRoom
   }
   return next;
 }
-export function setLate(p, late) {
-  return p.checkin ? { ...p, late, queueKey: lateQueueKey(p, late) } : { ...p, late };
+export function setLate(p, late, list) {
+  return p.checkin ? { ...p, late, ...lateKeys(p, late, list) } : { ...p, late };
 }
 export function undoCheckin(p) {
   if (!p.checkin || p.consultDone || activeVf(p)) return p;
   if (p.done?.[VISION_KEY] && !p.visionSkipped) return p;
-  const undone = { ...p, checkin: '', late: false, queueKey: reservationQueueKey(p.reservation) };
+  const undone = { ...p, checkin: '', late: false, queueKey: reservationQueueKey(p.reservation), lateConsultKey: undefined };
   if (!p.visionSkipped) return undone;
   return { ...undone, done: { ...p.done, [VISION_KEY]: false }, doneAt: { ...(p.doneAt || {}), [VISION_KEY]: null }, visionSkipped: false };
 }

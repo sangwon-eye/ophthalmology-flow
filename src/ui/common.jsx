@@ -1175,7 +1175,7 @@ export function PreProcEditor({ p, procedures, inline = false }) {
   );
 }
 
-// 지각 표시: 모든 직원 화면의 카드에서 눌러서 켜고 끔 (지각이면 대기 순서 뒤로)
+// 지각 표시: 모든 직원 화면의 카드에서 눌러서 켜고 끔 (지각이면 먼저 접수한 환자들 뒤로 — lateKeys)
 export function LateChip({ p }) {
   const mutatePatients = useContext(PatientMemoContext);
   if (!mutatePatients) return p.late ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">지각</span> : null;
@@ -1184,8 +1184,8 @@ export function LateChip({ p }) {
     <button
       type="button"
       aria-pressed={!!p.late}
-      onClick={() => patchPatient(mutatePatients, pk, x => setLate(x, !p.late))}
-      title={p.late ? '누르면 지각 취소' : '누르면 지각 표시 (지각은 대기 순서 뒤로)'}
+      onClick={() => mutatePatients(prev => prev.map(x => (patientKey(x) === pk ? setLate(x, !p.late, prev) : x)))}
+      title={p.late ? '누르면 지각 취소' : '누르면 지각 표시 (먼저 접수한 환자들 뒤로)'}
       className={`text-xs px-2 py-0.5 rounded-full border ${p.late ? 'bg-red-50 border-red-300 text-red-600 font-semibold' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'}`}
     >
       지각
