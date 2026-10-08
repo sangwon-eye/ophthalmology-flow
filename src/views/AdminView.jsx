@@ -882,19 +882,21 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
             </div>
           )}
           {checkCount > 0 && (
-            <div className="bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 mb-4 text-sm text-orange-900">
-              <span className="font-semibold">확인 필요 {checkCount}명</span> · 검사 미지정 또는 지난 진료 FU 미지정
+            <div className="bg-red-50 border border-red-300 rounded-xl px-4 py-3 mb-4 text-sm text-red-900">
+              <span className="font-semibold">확인 필요 {checkCount}명</span> · 검사 미지정 또는 지난 진료 FU 미지정 (빨간 테두리) · 초진은 하늘색 테두리
             </div>
           )}
           {byDate.length === 0 ? <EmptyState text={readOnly && archived.error ? '명단은 서버에 그대로 있습니다. 연결을 확인한 뒤 날짜를 다시 골라 주세요.' : readOnly && archived.loading ? '불러오는 중…' : mq ? `'${mq}'에 맞는 환자가 없습니다` : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
             const flag = !readOnly && needsTestCheck(p, doctorPrefs);
+            // 테두리 (10-08 사용자): 확인 필요(검사 미지정·지난 진료 FU 미지정) = 빨강, 초진 = 하늘색(초진 표시와 같은 색), 둘 다면 빨강
+            const edge = flag ? 'border-2 border-red-400' : !readOnly && p.firstVisit && !p.consultDone ? 'border-2 border-sky-400' : 'border border-slate-200';
             return (
-            <div key={patientKey(p)} className={`bg-white rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap ${flag ? 'border-2 border-orange-400' : 'border border-slate-200'}`}>
+            <div key={patientKey(p)} data-edge={flag ? 'check' : edge.includes('sky') ? 'first' : ''} className={`bg-white rounded-xl p-4 mb-3 flex items-center justify-between gap-3 flex-wrap ${edge}`}>
               <div>
                 <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                   <span className="t-name">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span>
-                  {flag && !p.fuMissing && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold">검사 미지정 · 확인 필요</span>}
-                  {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
+                  {flag && !p.fuMissing && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold">검사 미지정 · 확인 필요</span>}
+                  {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold border border-red-300">지난 진료 FU 미지정</span>}
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
                   {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}

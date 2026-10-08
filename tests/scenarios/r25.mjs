@@ -12,7 +12,8 @@ await pick('시력');
 let c = cardOf('최민지');
 ok(await c.getByText('초진', { exact: true }).count() === 1, '초진 표시는 한 번만');
 ok(await c.getByText(/이전 값 없음/).count() === 0, '이전 값 없음 줄 숨김');
-ok(await c.getByText('오늘 검사', { exact: true }).count() === 0, "'오늘 검사' 줄은 접혀 있음");
+// 10-07: 오늘 검사는 이름만 작게 보이고, 바꾸기 칸은 [변경]을 눌러야 펼쳐짐
+ok(await c.getByRole('button', { name: '오늘 검사 변경' }).count() === 1 && await c.getByRole('button', { name: /WFP/ }).count() === 0, "'오늘 검사' 바꾸기 칸은 접혀 있음 (이름만 작게)");
 const mb = await c.getByRole('button', { name: '시력', exact: true }).boundingBox();
 const nb = await c.getByRole('button', { name: 'NCT', exact: true }).boundingBox();
 const cb = await c.getByRole('button', { name: '접수 취소' }).boundingBox();
