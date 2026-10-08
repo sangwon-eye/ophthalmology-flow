@@ -58,7 +58,8 @@ ok(/임수빈/.test(txt) && /IDRA/.test(txt) && !/조현우/.test(txt) && !/OCT/
 await editKey('daily-patients', list => list.map((p, i) => (i < 8 ? { ...p, checkin: `08:1${i}`, done: {}, calledRoom: null, seen: false } : p)));
 await page.setViewportSize({ width: 1920, height: 1080 });
 await openBoard(/\+ 검사실/);
-const sizes = await page.locator('.board-scroll span.font-extrabold.whitespace-nowrap').evaluateAll(es => es.map(e => parseFloat(getComputedStyle(e).fontSize)));
+// 시력방 칸(오른쪽 열)의 이름만 (10-08: 검사실 칸 이름도 같은 굵은 글씨라 열을 나눠서 셈)
+const sizes = await page.locator('[data-board-column="시력검사실"]').locator('span.font-extrabold.whitespace-nowrap').evaluateAll(es => es.map(e => parseFloat(getComputedStyle(e).fontSize)));
 ok(sizes.filter(s => s >= 28).length === 5 && new Set(sizes).size === 1, `시력방 앞 5명 같은 크기 (${sizes.join(', ')})`);
 ok(await page.getByText('그다음 순서').count() === 1, '6번째부터는 그다음 순서 (작게)');
 await page.screenshot({ path: `${SP}/r59-vision.png` });

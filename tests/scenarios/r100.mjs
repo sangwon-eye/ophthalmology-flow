@@ -21,7 +21,7 @@ for (const [name, label, file] of [[/^검사실 대기 명단/, '검사실 대�
   const body = await page.locator('body').innerText();
   ok(/시야 검사 중/.test(body) && !/검사 검사/.test(body), `${label}: '시야 검사 중' (겹친 '검사 검사' 없음)`);
   ok(/OCT 검사 중/.test(body), `${label}: 이름에 '검사'가 없으면 'OCT 검사 중'`);
-  ok(await card('조현우').locator('.text-3xl.font-extrabold').count() === 1, `${label}: 이름 굵은 큰 글씨 (시력방 + 검사실과 같은 모양)`);
+  ok(await card('조현우').locator('.text-3xl span.font-extrabold').count() === 1, `${label}: 이름 굵은 큰 글씨 (시력방 + 검사실과 같은 모양)`);
   ok(await page.locator('div.bg-slate-800 span.rounded-xl').count() === 0, `${label}: 칩 없이 줄 모양`);
   ok(!/시야 검사,/.test(await card('조현우').innerText()), `${label}: 검사 중이면 '검사 중' 줄만 (남은 검사 목록 겹치지 않음)`);
   await page.screenshot({ path: `${SP}/r100-${file}.png` });

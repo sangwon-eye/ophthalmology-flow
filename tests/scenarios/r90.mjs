@@ -43,13 +43,14 @@ ok(await order(['서준호', '신종희', '조현우', '임수빈', '정대현',
 await page.screenshot({ path: `${SP}/r90-consult.png` });
 await back();
 
-// 3) 환자용 진료실 명단: 이름 옆 '9:00 예약', 지각은 시간 없음
+// 3) 환자용 진료실 명단: 이름 앞 예약시간 '9:00' (10-08: 줄마다 '예약' 글자는 빼고 명단 아래 한 줄로 안내), 지각은 시간 없음
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
 await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)\s*교수님별/ }).click(); await W(1500);
 const row = (masked) => page.getByText(new RegExp(`^${masked.replace('*', '\\*')} \\(\\d{4}\\)$`)).first().locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
-ok(/9:00 예약/.test(await row('서준호').innerText()), '복도 끝 모니터: 서준호 9:00 예약');
-ok(/10:30 예약/.test(await row('장민호').innerText()), '복도 끝 모니터: 장민호 10:30 예약');
-ok(!/예약/.test(await row('최민지').innerText()), '지각 환자는 예약시간 표시 안 함');
+ok(/(^|\s)9:00(\s|$)/.test(await row('서준호').innerText()) && !/예약/.test(await row('서준호').innerText()), '복도 끝 모니터: 서준호 9:00 (줄마다 "예약" 글자 없음)');
+ok(/(^|\s)10:30(\s|$)/.test(await row('장민호').innerText()), '복도 끝 모니터: 장민호 10:30');
+ok(!/\d:\d\d/.test(await row('최민지').innerText()), '지각 환자는 예약시간 표시 안 함');
+ok(await page.getByText(/이름 앞 시각은 예약 시간입니다/).count() >= 1, '명단 아래 한 줄: 이름 앞 시각은 예약 시간입니다');
 ok(/재진료/.test(await row('신종희').innerText()) && !/재진료/.test(await row('서준호').innerText()), '진료 중 보냈다 돌아온 환자만 "재진료"');
 const t1 = await row('서준호').innerText();
 ok(t1.indexOf('9:00') < t1.indexOf('서준호') && t1.indexOf('서준호') < t1.indexOf('(0444)'), `한 줄 배열: 예약시간 · 이름 · 번호 뒷 4자리 (${t1.replace(/\n/g, ' ')})`);
@@ -60,7 +61,7 @@ await page.setViewportSize({ width: 1366, height: 900 });
 await page.goto(`${BASE}/`); await W();
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
 await page.getByRole('button', { name: /^김선웅 진료실/ }).click(); await W(1500);
-ok(await page.getByText('9:00 예약', { exact: true }).count() >= 1, '진료실 앞 모니터에도 예약시간');
+ok(await page.locator('[data-resv]').filter({ hasText: /^9:00$/ }).count() >= 1 && await page.getByText(/이름 앞 시각은 예약 시간입니다/).count() === 1, '진료실 앞 모니터에도 예약시간 + 안내 한 줄');
 await page.screenshot({ path: `${SP}/r90-board-doctor.png` });
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

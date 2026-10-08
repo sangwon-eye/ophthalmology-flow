@@ -139,12 +139,14 @@ export function patientBoardName(p) {
 }
 
 // 순번 칸 (시력방·진료실). 1번은 연한 색 바탕 + 모서리에 '다음 순서' 배지 (칸 높이는 다른 칸과 같게)
-export function BoardNumberRow({ n, name, color, compact, note }) {
+// p: 환자 (이름은 크게, 번호 뒷 4자리는 작고 연하게 — 10-08, 진료실 명단과 같게). 없으면 name 글자 그대로
+export function BoardNumberRow({ n, name, p = null, color, compact, note }) {
   const c = DARK[color] || DARK.blue;
   return (
     <div className={`relative flex items-center gap-3 border ${note ? c.next : 'bg-slate-800 border-slate-700'} rounded-lg px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       <div className={`${compact ? 'w-7 h-7 text-base' : 'w-9 h-9 text-xl'} rounded-full ${c.num} flex items-center justify-center font-bold shrink-0`}>{n}</div>
-      <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-bold text-white`}>{name}</div>
+      {p ? <NameTail p={p} box="min-w-0 leading-snug" nameCls={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`} tailCls={`${compact ? 'text-sm' : 'text-lg'} font-semibold text-slate-400`} />
+        : <div className={`${compact ? 'text-lg' : 'text-2xl'} min-w-0 font-bold text-white`}>{name}</div>}
       {note && <span className={`absolute ${compact ? '-top-2.5 text-xs' : '-top-3 text-sm'} right-3 whitespace-nowrap rounded-full ${c.badge} px-2.5 py-0.5 font-bold`}>{note}</span>}
     </div>
   );
@@ -156,35 +158,47 @@ export function boardNameParts(p) {
   const tail = String(p?.id ?? '').trim().slice(-4);
   return { name: String(p?.name ?? '').trim(), tail };
 }
-function ResvTime({ p, cls, unit, style }) {
+// 10-08 사용자: 줄마다 붙던 작은 '예약' 글자는 뺌 (명단 아래 한 줄 '이름 앞 시각은 예약 시간입니다'로 한 번만 안내)
+function ResvTime({ p, cls, style }) {
   const t = boardReservation(p);
-  return <span data-resv style={style} className={`${cls} shrink-0 whitespace-nowrap text-right font-extrabold tabular-nums text-amber-200 leading-snug`}>{t ? <>{t} <span className={`${unit} font-semibold text-amber-200/80`}>예약</span></> : null}</span>;
+  return <span data-resv style={style} className={`${cls} shrink-0 whitespace-nowrap text-right font-extrabold tabular-nums text-amber-200 leading-snug`}>{t || null}</span>;
 }
-// 이름 + 번호 뒷 4자리: 이름·번호는 각각 줄이 바뀌지 않고, 칸이 모자라면 둘 사이에서만 다음 줄로 (화면 글자는 '서*호 (0444)' 그대로)
-function NameTail({ p, nameCls, tailCls, nameStyle }) {
+// 이름 + 번호 뒷 4자리: 이름·번호는 각각 줄이 바뀌지 않고, 칸이 모자라면 둘 사이에서만 다음 줄로.
+// flex-1 basis-0 + 최소 폭(이름 길이): 이름은 예약시간 옆 같은 줄에 남고 번호 뒷 4자리만 이름 아래로 (10-08 — 이름이 예약시간 아래로 떨어지던 것)
+// box: 바깥 칸 클래스 (진료실 명단 줄 안에서는 flex-1 basis-0, 다른 명단에서는 글자 줄 그대로)
+function NameTail({ p, nameCls, tailCls, nameStyle, box = 'flex-1 basis-0 leading-snug' }) {
   const { name, tail } = boardNameParts(p);
   return (
-    <span className="min-w-0 leading-snug">
+    <span className={box}>
       <span className={`${nameCls} whitespace-nowrap`} style={nameStyle}>{name}</span>
       {tail && <> <span className={`${tailCls} whitespace-nowrap tabular-nums`}>({tail})</span></>}
     </span>
   );
 }
-function ReconsultTag({ p, cls }) {
-  return isReconsult(p) ? <span data-reconsult className={`${cls} shrink-0 whitespace-nowrap rounded-full bg-sky-300 text-slate-950 font-extrabold leading-snug`}>재진료</span> : null;
+// 칸 위 테두리 오른쪽 모서리 표: '재진료'(하늘색) · '다음 순서'(노랑) (10-08 사용자: 전체 이름이 길어 '재진료'가 아래 줄로 내려가던 것 —
+// 줄 안의 자리를 차지하지 않아 칸 높이가 늘 같음, 복도 끝 '다음 순서' 모서리 표와 같은 방식). 칸 사이 간격은 표가 위 칸에 닿지 않게 넉넉히
+function CornerTags({ p, note, noteCls, cls, pos }) {
+  const re = !!p && isReconsult(p);
+  if (!re && !note) return null;
+  return (
+    <span className={`absolute ${pos} flex items-center gap-1.5 leading-snug`}>
+      {re && <span data-reconsult className={`${cls} whitespace-nowrap rounded-full bg-sky-300 text-slate-950 font-extrabold shadow`}>재진료</span>}
+      {note && <span className={`${cls} whitespace-nowrap rounded-full ${noteCls} font-bold shadow`}>{note}</span>}
+    </span>
+  );
 }
 export function ConsultRow({ p, n, compact, note }) {
   const c = DARK.amber;
   return (
     <div data-consult-row className={`relative flex items-center gap-3 border ${note ? c.next : 'bg-slate-800 border-slate-700'} rounded-lg px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       <div className={`${compact ? 'w-7 h-7 text-base' : 'w-9 h-9 text-xl'} rounded-full ${c.num} flex items-center justify-center font-bold shrink-0`}>{n}</div>
-      {/* 칸이 좁으면 '재진료'만 아래 줄로 (예약시간 · 이름 · 번호는 한 줄 그대로) */}
-      <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <ResvTime p={p} cls={compact ? 'min-w-[5.2rem] text-lg' : 'min-w-[7rem] text-2xl'} unit={compact ? 'text-xs' : 'text-sm'} />
+      {/* 예약시간 칸은 폭을 같게 해 줄마다 세로로 맞춤 ('10:00'이 들어가는 폭), 이름은 늘 그 옆 */}
+      {/* 예약시간·이름·번호 뒷 4자리는 같은 글자 바닥선(baseline)에 — 글씨 크기가 달라도 높이가 맞게 (10-08 사용자) */}
+      <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <ResvTime p={p} cls={compact ? 'min-w-[3.4rem] text-lg' : 'min-w-[4.5rem] text-2xl'} />
         <NameTail p={p} nameCls={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`} tailCls={`${compact ? 'text-sm' : 'text-lg'} font-semibold text-slate-400`} />
-        <ReconsultTag p={p} cls={`ml-auto ${compact ? 'text-xs px-2 py-0.5' : 'text-sm px-2.5 py-0.5'}`} />
       </div>
-      {note && <span className={`absolute ${compact ? '-top-2.5 text-xs' : '-top-3 text-sm'} right-3 whitespace-nowrap rounded-full ${c.badge} px-2.5 py-0.5 font-bold`}>{note}</span>}
+      <CornerTags p={p} note={note} noteCls={c.badge} cls={compact ? 'text-xs px-2 py-0.5' : 'text-sm px-2.5 py-0.5'} pos={compact ? '-top-2 right-3' : '-top-3 right-3'} />
     </div>
   );
 }
@@ -221,34 +235,38 @@ export function WaitNotice({ patients, kind, compact, inline }) {
 
 // 앞 순서 큰 칸 (진료실 앞 모니터·시력방 TV)
 // 글자 위아래 여백: 맑은 고딕은 글자가 아래로 처져 보여서 줄 높이를 넉넉히(leading-snug) 주고 위아래 여백을 같게
-function BigRow({ label, name, size, tone = 'amber', n, muted = false, p = null }) {
+// who: 이름만 쓰는 칸(시력방·진료 중)의 환자 — 번호 뒷 4자리를 작고 연하게 (10-08, 진료실 명단과 같게)
+function BigRow({ label, name, size, tone = 'amber', n, muted = false, p = null, who = null }) {
   const c = DARK[tone] || DARK.amber;
   const S = {
-    xxl: { fit: { name: 'min(4.5rem, 11vw)', time: 'min(3rem, 7.5vw)' }, time: 'text-5xl', unit: 'text-2xl', tail: 'text-4xl', re: 'text-3xl px-4 py-1', box: 'px-6 py-4 gap-5', name: 'text-7xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
-    xl: { time: 'text-5xl', unit: 'text-2xl', tail: 'text-3xl', re: 'text-2xl px-4 py-1', box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
-    lg: { time: 'text-4xl', unit: 'text-xl', tail: 'text-3xl', re: 'text-xl px-3 py-1', box: 'px-5 py-3 gap-4', name: 'text-5xl', tag: 'text-xl px-3 py-1', num: 'w-14 h-14 text-3xl' },
-    md: { time: 'text-3xl', unit: 'text-base', tail: 'text-2xl', re: 'text-lg px-3 py-0.5', box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-1', num: 'w-12 h-12 text-2xl' },
-    sm: { time: 'text-2xl', unit: 'text-sm', tail: 'text-xl', re: 'text-base px-2.5 py-0.5', box: 'px-3 py-2 gap-3', name: 'text-3xl', tag: 'text-base px-2.5 py-0.5', num: 'w-10 h-10 text-xl' },
+    // corner: 모서리 '재진료' 표 크기·자리 (진료실 명단 큰 칸 — 다음 순서 xxl, 2·3번 md)
+    xxl: { fit: { name: 'min(4.5rem, 11vw)', time: 'min(3rem, 7.5vw)' }, time: 'text-5xl', tail: 'text-4xl', corner: { cls: 'text-xl px-4 py-0.5', pos: '-top-4 right-6' }, box: 'px-6 py-4 gap-5', name: 'text-7xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
+    xl: { time: 'text-5xl', tail: 'text-3xl', box: 'px-6 py-4 gap-5', name: 'text-6xl', tag: 'text-2xl px-4 py-1.5', num: 'w-16 h-16 text-4xl' },
+    lg: { time: 'text-4xl', tail: 'text-3xl', box: 'px-5 py-3 gap-4', name: 'text-5xl', tag: 'text-xl px-3 py-1', num: 'w-14 h-14 text-3xl' },
+    md: { time: 'text-3xl', tail: 'text-2xl', corner: { cls: 'text-base px-3 py-0.5', pos: '-top-3.5 right-5' }, box: 'px-4 py-2.5 gap-3', name: 'text-4xl', tag: 'text-lg px-3 py-1', num: 'w-12 h-12 text-2xl' },
+    sm: { time: 'text-2xl', tail: 'text-xl', box: 'px-3 py-2 gap-3', name: 'text-3xl', tag: 'text-base px-2.5 py-0.5', num: 'w-10 h-10 text-xl' },
   }[size];
   // muted: 진료 중 (이미 진료실 안에 있어 덜 눈에 띄게, 회색 칸)
   const box = muted ? 'bg-slate-800/60 border-slate-700' : label ? c.next : 'bg-slate-800 border-slate-600';
   const tag = muted ? 'bg-slate-600 text-slate-100' : c.badge;
   return (
-    <div className={`flex items-center ${S.box} rounded-2xl border-2 ${box}`}>
+    <div className={`relative flex items-center ${S.box} rounded-2xl border-2 ${box}`}>
       {label ? <span className={`shrink-0 whitespace-nowrap rounded-full ${tag} ${S.tag} leading-snug font-bold`}>{label}</span>
         : <span className={`${S.num} shrink-0 rounded-full ${c.num} flex items-center justify-center font-bold`}>{n}</span>}
-      {/* p가 있으면 진료실 명단: 예약시간 · 이름 · (번호 뒷 4자리) · 재진료.
-          작은 화면에서 글씨를 키워도 겹치거나 잘리지 않게, 넘치면 다음 줄로 (번호 → 이름 순서로 내려감) */}
+      {/* p가 있으면 진료실 명단: 예약시간 · 이름 · (번호 뒷 4자리), '재진료'는 칸 위 모서리 표.
+          작은 화면에서 글씨를 키워도 겹치거나 잘리지 않게, 넘치면 번호 뒷 4자리부터 다음 줄로 */}
       {p ? (
-        <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1">
+        <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          {/* 예약시간·이름·번호 뒷 4자리는 같은 글자 바닥선에 (글씨 크기가 달라도 높이가 맞게, 10-08 사용자) */}
           {/* fit: 가장 큰 칸(다음 순서)은 아주 좁은 화면에서 글씨를 키워도 화면 폭을 넘지 않게 상한 (보통 화면에서는 그대로) */}
-          <ResvTime p={p} cls={S.time} unit={S.unit} style={S.fit ? { fontSize: S.fit.time } : undefined} />
+          <ResvTime p={p} cls={S.time} style={S.fit ? { fontSize: S.fit.time } : undefined} />
           <NameTail p={p} nameCls={`${S.name} font-bold text-white`} tailCls={`${S.tail} font-semibold text-slate-400`} nameStyle={S.fit ? { fontSize: S.fit.name } : undefined} />
-          <ReconsultTag p={p} cls={`ml-auto ${S.re}`} />
         </div>
       ) : (
-        <span className={`${S.name} leading-snug min-w-0 ${size === 'sm' ? 'font-extrabold' : 'font-bold'} ${muted ? 'text-slate-200' : 'text-white'} whitespace-nowrap`}>{name}</span>
+        who ? <NameTail p={who} box="min-w-0 leading-snug" nameCls={`${S.name} ${size === 'sm' ? 'font-extrabold' : 'font-bold'} ${muted ? 'text-slate-200' : 'text-white'}`} tailCls={`${S.tail} font-semibold ${muted ? 'text-slate-500' : 'text-slate-400'}`} />
+          : <span className={`${S.name} leading-snug min-w-0 ${size === 'sm' ? 'font-extrabold' : 'font-bold'} ${muted ? 'text-slate-200' : 'text-white'} whitespace-nowrap`}>{name}</span>
       )}
+      {p && S.corner && <CornerTags p={p} cls={S.corner.cls} pos={S.corner.pos} />}
     </div>
   );
 }
@@ -257,9 +275,9 @@ function SmallRest({ list, start, color, withTime = false }) {
   return (
     <div className="mt-4">
       <div className="text-lg text-slate-400 mb-2">그다음 순서</div>
-      <div className="grid gap-2" style={boardGrid(withTime ? 20.5 : 15)}>
+      <div className={`grid ${withTime ? 'gap-x-2 gap-y-3' : 'gap-2'}`} style={boardGrid(withTime ? 17 : 15)}>
         {list.map((p, i) => (withTime ? <ConsultRow key={patientKey(p)} p={p} n={start + i} compact />
-          : <BoardNumberRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} color={color} compact />))}
+          : <BoardNumberRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} p={p} color={color} compact />))}
       </div>
     </div>
   );
@@ -278,16 +296,16 @@ export function VisionBoardList({ patients, compact, big, five }) {
       {!list.length ? <BoardEmpty /> : five ? (
         <div>
           <div className="grid gap-2.5" style={boardGrid(17)}>
-            {list.slice(0, 5).map((p, i) => <BigRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} size="sm" tone="blue" />)}
+            {list.slice(0, 5).map((p, i) => <BigRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} who={p} size="sm" tone="blue" />)}
           </div>
           <SmallRest list={list.slice(5)} start={6} color="blue" />
         </div>
       ) : big ? (
         <div>
-          <BigRow label="다음 순서" name={patientBoardName(list[0])} size="xl" tone="blue" />
+          <BigRow label="다음 순서" name={patientBoardName(list[0])} who={list[0]} size="xl" tone="blue" />
           {list.length > 1 && (
             <div className="grid gap-3 mt-3" style={boardGrid(24)}>
-              {list.slice(1, 5).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} size="lg" tone="blue" />)}
+              {list.slice(1, 5).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} who={p} size="lg" tone="blue" />)}
             </div>
           )}
           <SmallRest list={list.slice(5)} start={6} color="blue" />
@@ -295,7 +313,7 @@ export function VisionBoardList({ patients, compact, big, five }) {
       ) : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>
           {list.map((p, i) => (
-            <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} color="blue" compact={compact} note={i === 0 ? '다음 순서' : ''} />
+            <BoardNumberRow key={patientKey(p)} n={i + 1} name={patientBoardName(p)} p={p} color="blue" compact={compact} note={i === 0 ? '다음 순서' : ''} />
           ))}
         </div>
       )}
@@ -321,7 +339,7 @@ function testInProgressLabel(t) {
 function ExamLineCard({ p, lines }) {
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
-      <div className="text-3xl leading-snug font-extrabold text-white">{patientBoardName(p)}</div>
+      <div className="text-3xl leading-snug"><NameTail p={p} box="" nameCls="font-extrabold text-white" tailCls="text-xl font-semibold text-slate-400" /></div>
       {lines.map(l => (
         <div key={l.k} className="text-xl leading-snug mt-0.5">
           {l.room && <span className={`font-extrabold ${darkText(l.tone)}`}>{l.room} </span>}
@@ -361,7 +379,7 @@ export function ExamBoardList({ patients, settings, compact, wide }) {
         <div className="grid gap-2.5" style={boardGrid(15)}>
           {list.map(p => (
             <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
-              <div className={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`}>{patientBoardName(p)}</div>
+              <div className="text-lg leading-snug"><NameTail p={p} box="" nameCls="font-bold text-white" tailCls="text-sm font-semibold text-slate-400" /></div>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {!activeVf(p) && prepHolding(p, settings) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{testInProgressLabel(prepHolding(p, settings))}</span>}
                 {activeVf(p) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{testInProgressLabel(settings.tests.find(t => t.id === activeVf(p)))}</span>}
@@ -445,39 +463,44 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
   const testing = mine.filter(p => !p.seen && (!allDone(p, settings) || dropsPending(p, prefs, settings.dilationWaitMin))).length;
   const testingLabel = mine.some(p => !p.seen && dropsPending(p, prefs, settings.dilationWaitMin)) ? '검사·점안 진행 중' : '검사 진행 중';
   const notice = useNotice(`doctor:${doctor}`);
+  // 명단 아래 한 줄: 검사 진행 중 인원 · 시각 안내 (10-08 사용자: 줄마다 '예약' 글자 대신 한 번만)
+  const foot = [testing > 0 ? `${testingLabel} ${testing}명` : '', waiting.some(p => boardReservation(p)) ? '이름 앞 시각은 예약 시간입니다' : ''].filter(Boolean).join(' · ');
   // 진료실 앞 모니터(교수님 한 분): 진료 중·다음 순서는 가장 크게, 2·3번은 크게, 그다음은 작게
+  // (칸 사이는 모서리 '재진료' 표가 위 칸에 닿지 않게 넉넉히)
   if (plain) {
     return (
       <div>
         <BoardNotice text={notice} />
-        <div className="space-y-3">
-          {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} size="md" muted />}
+        <div className="space-y-5">
+          {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} who={inRoom} size="md" muted />}
           {waiting[0] && <BigRow label="다음 순서" p={waiting[0]} size="xxl" />}
           {waiting.length > 1 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-5">
               {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} p={p} size="md" />)}
             </div>
           )}
         </div>
         {!waiting.length && <div className="text-2xl text-slate-500 py-4">진료 대기 환자가 없습니다</div>}
         <SmallRest list={waiting.slice(3)} start={4} color="amber" withTime />
-        {testing > 0 && <div className="text-lg text-slate-400 mt-4">{testingLabel} {testing}명</div>}
+        {foot && <div data-board-foot className="text-lg text-slate-400 mt-4">{foot}</div>}
       </div>
     );
   }
   return (
     <div className={plain ? '' : 'bg-slate-800/50 border border-slate-700 rounded-2xl p-4'}>
       {!plain && (
-        <div className={`${compact ? 'text-lg' : 'text-xl'} font-bold text-white mb-3 flex items-center justify-between gap-2 flex-wrap break-keep`}>
-          {doctor}
-          {roomLabel && <span className={`${compact ? 'text-base' : 'text-lg'} whitespace-nowrap rounded-lg bg-amber-400 px-2.5 py-0.5 font-bold text-slate-950`}>{roomLabel}</span>}
+        // 교수님 이름을 크게 (10-08 — 환자가 자기 교수님 칸을 먼저 찾게, 진료실 앞 모니터 제목과 같은 'OOO 교수님')
+        <div className={`${compact ? 'text-xl' : 'text-3xl'} leading-snug font-extrabold text-white mb-3 flex items-center justify-between gap-x-3 gap-y-1 flex-wrap break-keep`}>
+          <span>{doctor} 교수님</span>
+          {roomLabel && <span className={`${compact ? 'text-base' : 'text-xl'} whitespace-nowrap rounded-lg bg-amber-400 px-2.5 py-0.5 font-bold text-slate-950`}>{roomLabel}</span>}
         </div>
       )}
       <BoardNotice text={notice} compact={compact} />
       {inRoom && (
-        <div className="flex items-center gap-3 bg-amber-400/10 border border-amber-400/50 rounded-xl px-4 py-2.5 mb-3">
-          <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-400 px-3 py-0.5 text-sm font-bold text-slate-950">진료 중</span>
-          <span className={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`}>{patientBoardName(inRoom)}</span>
+        // 진료 중(이미 진료실 안)은 회색으로 덜 눈에 띄게 — 진료실 앞 모니터와 같은 규칙 (10-08, 노란 '다음 순서'와 헷갈리지 않게)
+        <div data-in-room className="flex items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5 mb-3">
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-600 px-3 py-0.5 text-sm font-bold text-slate-100">진료 중</span>
+          <NameTail p={inRoom} box="min-w-0 leading-snug" nameCls={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-slate-200`} tailCls={`${compact ? 'text-sm' : 'text-lg'} font-semibold text-slate-500`} />
         </div>
       )}
       {waiting.length === 0 ? (
@@ -485,8 +508,8 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
       ) : front > 0 ? (
         <>
           <div data-front className="rounded-2xl border-4 border-yellow-300 bg-yellow-300/10 p-3">
-            <div className="text-2xl font-extrabold text-yellow-200 mb-2.5 break-keep">진료실 앞으로 이동해 주세요</div>
-            <div className="grid gap-2.5" style={boardGrid(21)}>
+            <div className="text-2xl font-extrabold text-yellow-200 mb-3.5 break-keep">진료실 앞으로 이동해 주세요</div>
+            <div className="grid gap-x-2.5 gap-y-4" style={boardGrid(20)}>
               {waiting.slice(0, front).map((p, i) => (
                 <ConsultRow key={patientKey(p)} p={p} n={i + 1} note={i === 0 ? '다음 순서' : ''} />
               ))}
@@ -495,20 +518,20 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
           {waiting.length > front && (
             <div data-rest className="mt-4">
               <div className="text-lg font-bold text-slate-300 mb-2 break-keep">큰 복도에서 기다려 주세요</div>
-              <div className="grid gap-2" style={boardGrid(16.5)}>
+              <div className="grid gap-x-2 gap-y-3" style={boardGrid(16)}>
                 {waiting.slice(front).map((p, i) => <ConsultRow key={patientKey(p)} p={p} n={front + i + 1} compact />)}
               </div>
             </div>
           )}
         </>
       ) : (
-        <div className="grid gap-2.5" style={boardGrid(compact ? 16.5 : 21)}>
+        <div className={`grid gap-x-2.5 ${compact ? 'gap-y-3' : 'gap-y-4'}`} style={boardGrid(compact ? 16 : 20)}>
           {waiting.map((p, i) => (
             <ConsultRow key={patientKey(p)} p={p} n={i + 1} compact={compact} note={i === 0 ? '다음 순서' : ''} />
           ))}
         </div>
       )}
-      {testing > 0 && <div className="text-sm text-slate-400 mt-3">{testingLabel} {testing}명</div>}
+      {foot && <div data-board-foot className="text-sm text-slate-400 mt-3">{foot}</div>}
     </div>
   );
 }
@@ -516,7 +539,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
 // aside: 제목 옆에 붙는 안내(노란 띠) — 줄을 하나 아껴 명단 자리를 넓게
 export function BoardColumn({ title, aside, children }) {
   return (
-    <div>
+    <div data-board-column={title}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3 pb-2 border-b-2 border-slate-700">
         <div className={`${aside !== undefined ? 'text-3xl font-extrabold text-white' : 'text-xl font-bold text-slate-100'} shrink-0 break-keep`}>{title}</div>
         {aside && <div className="flex-1 min-w-0 flex flex-col gap-2 empty:hidden">{aside}</div>}
