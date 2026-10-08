@@ -2,9 +2,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw, ArrowDown } from 'lucide-react';
-import { ageYears, laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
+import { fuMissingNow, ageYears, laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
-import { ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
+import { FuMissingBadge, ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
 import { NOTICE_PRESETS, consultRoomLabel } from './BoardView.jsx';
 import { WAIT_TEXT, WAIT_WINDOW_MIN, estimateWait, shownWait } from '../core/flow.jsx';
@@ -623,7 +623,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
     });
     setMessage('삭제를 되돌렸습니다.');
   };
-  const checkCount = readOnly ? 0 : byDate.filter(p => needsTestCheck(p, doctorPrefs)).length;
+  const checkCount = readOnly ? 0 : byDate.filter(p => needsTestCheck(p, doctorPrefs, fuMap[p.id])).length;
   const updateOne = (pk, fn) => mutatePatients(prev => prev.map(p => (patientKey(p) === pk ? fn(p) : p)));
   const removeOne = (pk) => mutatePatients(prev => removeVisit(prev, pk));
   const reassignDoctor = (p, doctor) => {
@@ -888,7 +888,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
             </div>
           )}
           {byDate.length === 0 ? <EmptyState text={readOnly && archived.error ? '명단은 서버에 그대로 있습니다. 연결을 확인한 뒤 날짜를 다시 골라 주세요.' : readOnly && archived.loading ? '불러오는 중…' : mq ? `'${mq}'에 맞는 환자가 없습니다` : '이 날짜에 올라간 환자가 없습니다'} /> : byDate.map(p => {
-            const flag = !readOnly && needsTestCheck(p, doctorPrefs);
+            const flag = !readOnly && needsTestCheck(p, doctorPrefs, fuMap[p.id]);
             // 테두리 (10-08 사용자): 확인 필요(검사 미지정·지난 진료 FU 미지정) = 빨강, 초진 = 하늘색(초진 표시와 같은 색), 둘 다면 빨강
             const edge = flag ? 'border-2 border-red-400' : !readOnly && p.firstVisit && !p.consultDone ? 'border-2 border-sky-400' : 'border border-slate-200';
             return (
@@ -896,8 +896,8 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
               <div>
                 <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                   <span className="t-name">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span>
-                  {flag && !p.fuMissing && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold">검사 미지정 · 확인 필요</span>}
-                  {p.fuMissing && !p.consultDone && !p.noTests && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold border border-red-300">지난 진료 FU 미지정</span>}
+                  {flag && !fuMissingNow(p, fuMap[p.id]) && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold">검사 미지정 · 확인 필요</span>}
+                  {!p.noTests && <FuMissingBadge p={p} tone="red" />}
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
                   {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}

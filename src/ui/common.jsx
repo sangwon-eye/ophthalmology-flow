@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -948,6 +948,13 @@ export function KioskNoteEditor({ p, inline = false }) {
 // 히스토리 (시력방에서 입력): 초진·FU loss·중간 내원 환자의 병력.
 // 환자 기록 p.hx = { htn, dm, dmYears, pmh, surgery, cc, at }. 초진 때만 쓰므로 그날 기록에만 저장 (다음 내원 때 불러오지 않음).
 export const HxContext = createContext({ fuMap: {}, measure: {}, fields: null });
+// '지난 진료 FU 미지정' 표시 — FU 기록에 'FU 나중에'가 지금도 남아 있을 때만 (fuMissingNow)
+export function FuMissingBadge({ p, tone = 'orange' }) {
+  const ctx = useContext(HxContext);
+  if (!p || p.consultDone || !fuMissingNow(p, ctx?.fuMap?.[p.id])) return null;
+  const cls = tone === 'red' ? 'bg-red-100 text-red-800 border-red-300' : 'bg-orange-100 text-orange-800 border-orange-300';
+  return <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${cls}`}>지난 진료 FU 미지정</span>;
+}
 export const HX_TYPES = [['yn', '있음/없음'], ['ynYears', '있음/없음 + 기간(년)'], ['text', '한 줄 글'], ['long', '여러 줄 글']];
 export function hxSummary(hx, fields = DEFAULT_HX_FIELDS) {
   if (!hx) return '';
@@ -1279,7 +1286,7 @@ export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirs
           <LateChip p={p} />
           <StaleChip min={stale} />
           {prepPositiveNames(p).length > 0 && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold border border-red-300">{prepPositiveNames(p).join(', ')} 검사 취소</span>}
-          {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
+          <FuMissingBadge p={p} />
           {p.consultHold && !p.consultDone && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 flex items-center gap-1">
               <AlertTriangle size={11} /> 진료 후 추가검사

@@ -1152,12 +1152,19 @@ export function mergePatientList(prev, news, prefs, settings) {
 export function hasFollowupApplied(p) {
   return Object.entries(p.assigned || {}).some(([k, v]) => v && k !== VISION_KEY) || typeof p.dilateOverride === 'boolean' || !!p.cr;
 }
+// '지난 진료 FU 미지정' (10-08 사용자: 지난 진료가 완료돼야 진료를 본 것) — 명단 기록의 표시(fuMissing)만 믿지 않고
+// FU 기록에 그 교수님의 'FU 나중에'(설명 완료 때만 생김)가 지금도 남아 있을 때만. [설명 완료]를 되돌리거나
+// FU를 지정·삭제해 '나중에' 표시가 없어지면 다음 명단의 표시도 저절로 사라짐 (예전에 남은 표시도 같음)
+export function fuMissingNow(p, fuRec) {
+  return !!p?.fuMissing && laterEntries(fuRec).some(e => (!e.doctor || e.doctor === p.doctor) && String(e.date || '') < String(p.date || ''));
+}
 // 재진인데 오늘 할 검사(CR 포함)가 하나도 없는 환자 → 프로그램 도입 전 환자일 가능성이 높아 확인 필요
-export function needsTestCheck(p, prefs) {
+// fuRec: 그 환자의 FU 기록 (fuMap[p.id]) — 'FU 미지정'을 지금 FU 기록으로 확인
+export function needsTestCheck(p, prefs, fuRec) {
   if (p.consultDone) return false;
   // 관리자 명단 관리 [검사 없음] (10-08 사용자): 차트리뷰에서 정말 검사가 없는 환자 — 검사 미지정·지난 진료 FU 미지정 표시를 끔
   if (p.noTests) return false;
-  if (p.fuMissing) return true; // 지난 진료에서 FU 를 나중에 정하기로 하고 아직 안 정함
+  if (fuMissingNow(p, fuRec)) return true; // 지난 진료(설명 완료)에서 FU 를 나중에 정하기로 하고 아직 안 정함
   if (p.firstVisit || p.linkType === 'added') return false;
   if (Object.entries(p.assigned || {}).some(([k, v]) => v && k !== VISION_KEY)) return false;
   return !crActive(p, prefs);

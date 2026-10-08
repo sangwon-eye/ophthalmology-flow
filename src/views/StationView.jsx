@@ -4,7 +4,7 @@ import { Check, Search, RotateCcw } from 'lucide-react';
 import { inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { findKioskPatient } from './RoleSelect.jsx';
-import { TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { FuMissingBadge, TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 
@@ -591,7 +591,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 <div>
                   <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                     <span className="t-name">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span>
-                    {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
+                    <FuMissingBadge p={p} />
                     <DoctorChip p={p} />
                     <PatientMemo p={p} />
                   </div>

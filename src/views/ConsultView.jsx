@@ -4,7 +4,7 @@ import { Check, RotateCcw } from 'lucide-react';
 import { resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
-import { ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -62,7 +62,7 @@ export function SimpleCard({ p, tone = 'slate', badges, stale = 0, children }) {
         <DoctorChip p={p} />
         {p.firstVisit && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">초진</span>}
         {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후</span>}
-        {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-semibold border border-orange-300">지난 진료 FU 미지정</span>}
+        <FuMissingBadge p={p} />
         <PatientMemo p={p} />
         <VisitTimes p={p} />
       </div>
