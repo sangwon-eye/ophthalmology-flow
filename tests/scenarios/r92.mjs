@@ -54,7 +54,7 @@ await back();
 
 // 4) 복도 끝 모니터는 안내 인원(0명)만 따름 → 노란 상자 없음
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
-await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)/ }).click(); await W(1500);
+await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)\s*교수님별/ }).click(); await W(1500);
 ok(await page.locator('[data-front]').count() === 0, '안내 인원 0명: 모니터 노란 상자 없음 (보호 인원과 따로)');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

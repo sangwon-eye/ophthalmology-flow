@@ -1,6 +1,6 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { Megaphone } from 'lucide-react';
+import { Megaphone, QrCode } from 'lucide-react';
 import { boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
@@ -31,7 +31,8 @@ const darkText = (color) => DARK_TEXT[color] || DARK_TEXT.sky;
 // 직원용 버튼(자동 스크롤·글씨·종·메인 화면): 환자·보호자에게는 안 보이게 평소엔 숨기고,
 // 마우스를 움직이거나 화면을 누르면 잠깐(5초) 나타남. '글씨' 크기와 상관없이 늘 같은 작은 크기
 const STAFF_HIDE_MS = 5000;
-function useStaffControls() {
+// keyWake=false: QR 리더기가 보내는 키 입력으로는 나타나지 않게 (진료실 대기 명단 + QR 접수)
+function useStaffControls(keyWake = true) {
   const [show, setShow] = useState(false);
   const hold = useRef(false); // 버튼 위에 마우스가 있거나 고르는 중이면 숨기지 않음
   useEffect(() => {
@@ -44,16 +45,17 @@ function useStaffControls() {
       }, STAFF_HIDE_MS);
     };
     const wake = () => { setShow(true); hideLater(); };
-    const evs = ['mousemove', 'pointerdown', 'keydown', 'touchstart'];
+    const evs = ['mousemove', 'pointerdown', ...(keyWake ? ['keydown'] : []), 'touchstart'];
     evs.forEach(e => window.addEventListener(e, wake, true));
     return () => { clearTimeout(timer); evs.forEach(e => window.removeEventListener(e, wake, true)); };
-  }, []);
+  }, [keyWake]);
   return [show, hold];
 }
 
-export function BoardShell({ title, badge, onBack, extra, big, chime = false, children }) {
+// footer: 명단 아래 고정 줄 (QR 접수 안내), keyWake: 키 입력으로 직원 버튼을 띄울지
+export function BoardShell({ title, badge, onBack, extra, big, chime = false, footer = null, keyWake = true, children }) {
   const [now, setNow] = useState(new Date());
-  const [staffShow, staffHold] = useStaffControls();
+  const [staffShow, staffHold] = useStaffControls(keyWake);
   const [textSize] = useTextSize();
   const soundBlocked = useSoundBlocked();
   const [autoScroll, setAutoScroll] = useState(true);
@@ -99,6 +101,7 @@ export function BoardShell({ title, badge, onBack, extra, big, chime = false, ch
       <div ref={scrollRef} tabIndex={0} aria-label="환자 대기 명단" className="board-scroll min-h-0 flex-1 overflow-y-auto" onWheel={() => setAutoScroll(false)} onTouchStart={() => setAutoScroll(false)}>
         <div className={`${BOARD_WIDTH} py-4`}>{children}</div>
       </div>
+      {footer}
       {/* 직원용 버튼: 오른쪽 아래 구석, 평소엔 숨김 (마우스를 움직이면 나타남). zoom 으로 '글씨' 크기와 상관없이 같은 크기 */}
       <div
         data-staff-controls
@@ -520,6 +523,18 @@ export function BoardColumn({ title, aside, children }) {
   );
 }
 
+// 명단 아래 QR 안내 줄 (어두운 화면에서 눈에 띄게 흰 바탕)
+function QrBand() {
+  return (
+    <div data-qr-band className="shrink-0 bg-white text-slate-900">
+      <div className={`${BOARD_WIDTH} py-3 flex items-center justify-center gap-4 break-keep`}>
+        <QrCode size={44} className="shrink-0" />
+        <span className="text-3xl font-bold leading-snug">진료카드 QR 코드를 찍으면 바로 접수됩니다</span>
+      </div>
+    </div>
+  );
+}
+
 export function BoardSelect({ doctors, settings, onSelect, onBack }) {
   const vName = visionNames(settings).patientName;
   const options = [
@@ -528,6 +543,7 @@ export function BoardSelect({ doctors, settings, onSelect, onBack }) {
     ...settings.rooms.filter(r => !r.builtin).map(r => ({ key: `room:${r.id}`, label: `${r.patientName || r.name} 대기 명단`, sub: `${r.name} 검사실 앞 모니터용 (이 검사실 검사만)` })),
     { key: 'vision-exam', label: `${vName} + 검사실`, sub: '두 명단을 한 화면에' },
     { key: 'consult-all', label: '진료실 대기 명단 (전체)', sub: '교수님별 구역으로 나눠 표시' },
+    { key: 'consult-all-qr', label: '진료실 대기 명단 (전체) + QR 접수', sub: 'QR 리더기를 연결한 모니터용 · 찍으면 접수 결과가 잠깐 크게 뜸' },
     ...doctors.map(d => ({ key: `consult:${d}`, label: `${d} 진료실`, sub: '진료실 앞 모니터용' })),
     { key: 'combined', label: '통합 화면', sub: '세 명단을 한 화면에' },
   ];
@@ -609,7 +625,8 @@ function ConsultPicker({ doctors, hidden, onChange }) {
   );
 }
 
-export function BoardView({ kind, patients, settings, doctors, doctorPrefs, ready = true, onBack }) {
+// qr: 진료실 대기 명단 (전체) + QR 접수 화면 (맨 아래 QR 안내 줄, 리더기 키 입력으로 직원 버튼이 뜨지 않게 — 접수 처리는 RoleSelect QrConsultBoard)
+export function BoardView({ kind, patients, settings, doctors, doctorPrefs, ready = true, onBack, qr = false }) {
   const [layout, setLayout] = useState('horizontal');
   const allDoctors = Array.from(new Set([...doctors, ...patients.map(p => p.doctor).filter(Boolean)]));
   const activeDoctors = allDoctors.filter(d => patients.some(p => p.doctor === d && !p.consultDone));
@@ -654,7 +671,7 @@ export function BoardView({ kind, patients, settings, doctors, doctorPrefs, read
     const shown = activeDoctors.filter(d => !hiddenDoctors.includes(d));
     return (
       <>
-        <BoardShell title="진료 대기 순서" onBack={onBack} chime extra={<ConsultPicker doctors={allDoctors} hidden={hiddenDoctors} onChange={saveHiddenDoctors} />}>
+        <BoardShell title="진료 대기 순서" onBack={onBack} chime keyWake={!qr} footer={qr ? <QrBand /> : null} extra={<ConsultPicker doctors={allDoctors} hidden={hiddenDoctors} onChange={saveHiddenDoctors} />}>
           {shown.length === 0 ? <BoardEmpty /> : (
             <div className={`grid gap-4 ${shown.length === 1 ? 'grid-cols-1' : shown.length === 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'}`}>
               {shown.map(d => <ConsultBoardSection key={d} doctor={d} patients={patients} settings={settings} prefs={doctorPrefs} roomLabel={consultRoomLabel(doctorPrefs, d)} front={consultFrontCount(settings)} />)}

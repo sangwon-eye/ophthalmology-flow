@@ -57,7 +57,7 @@ ok(!(await rec('황도윤')).seen, '다시 재진료');
 await back();
 // 환자용 진료실 명단: '재진료'
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
-await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)/ }).click(); await W(1500);
+await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)\s*교수님별/ }).click(); await W(1500);
 const row = page.getByText(/^황\*윤 \(\d{4}\)$/).first().locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
 ok(/재진료/.test(await row.innerText()), '환자용 진료실 명단: 황*윤 "재진료"');
 await page.goto(`${BASE}/`); await W();

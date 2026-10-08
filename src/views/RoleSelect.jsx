@@ -4,7 +4,7 @@ import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syr
 import { resultChecksPending, COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
 import { shiftISO, visionNames } from '../core/storage.jsx';
 import { APP_VERSION, TextSizeControl } from '../ui/common.jsx';
-import { consultRoomLabel, patientBoardName } from './BoardView.jsx';
+import { BoardView, consultRoomLabel, patientBoardName } from './BoardView.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 역할 선택                                                           */
@@ -148,9 +148,10 @@ export function kioskGuide(p, patients, settings, prefs) {
   if (n && consultQueue(patients, p.doctor, settings, prefs).slice(0, n).some(x => patientKey(x) === patientKey(p))) return toRoomFront;
   return { title: `${room}에서 진료 예정입니다`, note: '복도 끝 모니터를 확인해 주세요' };
 }
-export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onExit }) {
+// QR 접수: 리더기가 키보드처럼 숫자 + Enter 를 보냄 → 찾아서 접수하고 결과(result)를 5초(노란 안내가 있으면 8초) 보여 줌.
+// QR 접수 화면(KioskView)과 '진료실 대기 명단 (전체) + QR 접수'(QrConsultBoard)가 같이 씀 (접수 처리는 한 곳)
+function useKioskScan({ patients, settings, doctorPrefs, mutatePatients, paused }) {
   const [result, setResult] = useState(null);
-  const [askPassword, setAskPassword] = useState(false);
   const buffer = useRef('');
   const lastKey = useRef(0);
   const clearTimer = useRef(null);
@@ -199,7 +200,9 @@ export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onE
 
   useEffect(() => {
     const onKey = (e) => {
-      if (askPassword) return;
+      if (paused) return;
+      // 직원 버튼(글씨 크기 고르기 등)에 커서가 남아 있어도 리더기 숫자가 그 값을 바꾸지 않게
+      if (e.target?.tagName === 'SELECT' && (e.key.length === 1 || e.key === 'Enter')) e.preventDefault();
       const now = Date.now();
       if (now - lastKey.current > 1000) buffer.current = '';
       lastKey.current = now;
@@ -216,8 +219,12 @@ export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onE
     return () => { document.removeEventListener('keydown', onKey); clearTimeout(clearTimer.current); };
     // handle 은 명단·설정을 latest(ref)에서 매번 새로 읽으므로 다시 등록할 필요가 없습니다 (일부러 뺌)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askPassword]);
-
+  }, [paused]);
+  return result;
+}
+// 나가기: 접속 비밀번호가 있으면 물어봄 (환자가 화면을 바꾸지 못하게)
+function useKioskExit(onExit) {
+  const [askPassword, setAskPassword] = useState(false);
   const exit = async () => {
     try {
       const r = await lockApi('');
@@ -225,7 +232,30 @@ export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onE
     } catch { /* 서버가 꺼져 있으면 그냥 나감 */ }
     onExit();
   };
+  const modal = askPassword && <PasswordModal onOk={() => { setAskPassword(false); onExit(); }} onCancel={() => setAskPassword(false)} />;
+  return { exit, modal, asking: askPassword };
+}
+// 결과 글 (저시력 환자도 읽을 수 있게 화면 너비에 맞춘 아주 큰 글씨)
+function KioskResultText({ result }) {
+  return (
+    <div role="status" className="w-full max-w-6xl">
+      {result.who && <p className="font-semibold text-slate-700 mb-4" style={{ fontSize: 'clamp(1.5rem, 3vw, 2.75rem)' }}>{result.who}</p>}
+      <h1 className={`font-bold leading-tight mb-8 ${result.ok ? 'text-slate-900' : 'text-red-800'}`} style={{ fontSize: 'clamp(2.5rem, 6.5vw, 6rem)' }}>
+        {result.ok && <span className="text-emerald-700">✓ </span>}{result.title}
+      </h1>
+      {result.note && (
+        <p className="font-extrabold leading-snug text-black bg-yellow-300 border-8 border-black rounded-3xl px-8 py-8 mb-6" style={{ fontSize: 'clamp(2.75rem, 7vw, 6.5rem)' }}>
+          {result.note}
+        </p>
+      )}
+      {result.sub && <p className="font-semibold text-slate-800" style={{ fontSize: 'clamp(2rem, 4.5vw, 4rem)' }}>{result.sub}</p>}
+    </div>
+  );
+}
 
+export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onExit }) {
+  const { exit, modal, asking } = useKioskExit(onExit);
+  const result = useKioskScan({ patients, settings, doctorPrefs, mutatePatients, paused: asking });
   return (
     // 저시력 환자도 읽을 수 있게: 화면 너비에 맞춰 아주 큰 글씨, 진한 글자·밝은 바탕의 높은 대비
     <div className={`min-h-screen flex flex-col items-center justify-center px-6 py-8 text-center break-keep ${result ? (result.ok ? 'bg-white' : 'bg-red-50') : 'bg-white'}`}>
@@ -235,23 +265,31 @@ export function KioskView({ patients, settings, doctorPrefs, mutatePatients, onE
           <p className="font-semibold text-slate-700" style={{ fontSize: 'clamp(1.75rem, 3.5vw, 3rem)' }}>찍으면 바로 접수됩니다</p>
         </>
       ) : (
-        <div role="status" className="w-full max-w-6xl">
-          {result.who && <p className="font-semibold text-slate-700 mb-4" style={{ fontSize: 'clamp(1.5rem, 3vw, 2.75rem)' }}>{result.who}</p>}
-          <h1 className={`font-bold leading-tight mb-8 ${result.ok ? 'text-slate-900' : 'text-red-800'}`} style={{ fontSize: 'clamp(2.5rem, 6.5vw, 6rem)' }}>
-            {result.ok && <span className="text-emerald-700">✓ </span>}{result.title}
-          </h1>
-          {result.note && (
-            <p className="font-extrabold leading-snug text-black bg-yellow-300 border-8 border-black rounded-3xl px-8 py-8 mb-6" style={{ fontSize: 'clamp(2.75rem, 7vw, 6.5rem)' }}>
-              {result.note}
-            </p>
-          )}
-          {result.sub && <p className="font-semibold text-slate-800" style={{ fontSize: 'clamp(2rem, 4.5vw, 4rem)' }}>{result.sub}</p>}
-        </div>
+        <KioskResultText result={result} />
       )}
       <button type="button" onClick={exit} className="fixed bottom-3 right-4 text-xs text-slate-300 hover:text-slate-500">관리</button>
-      {askPassword && <PasswordModal onOk={() => { setAskPassword(false); onExit(); }} onCancel={() => setAskPassword(false)} />}
+      {modal}
     </div>
   );
+}
+
+// 진료실 대기 명단 (전체) + QR 접수 (10-08 사용자): 평소엔 복도 끝 모니터 명단 + 맨 아래 QR 안내 한 줄,
+// QR을 찍으면 가운데 큰 흰 창으로 QR 접수와 같은 결과를 5초(노란 안내 8초) 보여 주고 다시 명단으로.
+// 명단은 접수한 환자만, 접수는 오늘 명단 전체(patients)에서 찾음. 나가기는 QR 접수처럼 접속 비밀번호
+export function QrConsultBoard({ patients, settings, doctors, doctorPrefs, mutatePatients, ready, onExit }) {
+  const { exit, modal, asking } = useKioskExit(onExit);
+  const result = useKioskScan({ patients, settings, doctorPrefs, mutatePatients, paused: asking });
+  return <>
+    <BoardView kind="consult-all" qr patients={patients.filter(p => p.checkin)} settings={settings} doctors={doctors} doctorPrefs={doctorPrefs} ready={ready} onBack={exit} />
+    {result && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6">
+        <div className={`w-[92vw] max-w-6xl max-h-[96vh] overflow-y-auto rounded-[2rem] px-8 py-12 text-center break-keep shadow-2xl ${result.ok ? 'bg-white' : 'bg-red-50'}`}>
+          <KioskResultText result={result} />
+        </div>
+      </div>
+    )}
+    {modal}
+  </>;
 }
 
 // 메인 화면 칸의 검사 목록: 많으면 앞의 5개 + '외 N개' (글자가 중간에 잘리지 않게)

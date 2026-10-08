@@ -45,7 +45,7 @@ await back();
 
 // 3) 환자용 진료실 명단: 이름 옆 '9:00 예약', 지각은 시간 없음
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
-await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)/ }).click(); await W(1500);
+await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)\s*교수님별/ }).click(); await W(1500);
 const row = (masked) => page.getByText(new RegExp(`^${masked.replace('*', '\\*')} \\(\\d{4}\\)$`)).first().locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
 ok(/9:00 예약/.test(await row('서*호').innerText()), '복도 끝 모니터: 서*호 9:00 예약');
 ok(/10:30 예약/.test(await row('장*호').innerText()), '복도 끝 모니터: 장*호 10:30 예약');

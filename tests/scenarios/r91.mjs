@@ -16,7 +16,7 @@ await editKey('daily-patients', list => list.map(p => {
 const browser = await chromium.launch();
 const { ok } = tester(await browser.newPage());
 const sizes = [[1920, 1080, '1920 100%'], [1280, 720, '1920 150%'], [1093, 614, '1366 125%'], [911, 512, '1366 150%'], [683, 384, '1366 200%']];
-for (const screen of [/^김선웅 진료실/, /^진료실 대기 명단 \(전체\)/]) {
+for (const screen of [/^김선웅 진료실/, /^진료실 대기 명단 \(전체\)\s*교수님별/]) { // 10-08: '+ QR 접수' 화면과 구분
   for (const [w, h, label] of sizes) {
     for (const ts of ['auto', '1.5']) {
       const page = await browser.newPage({ viewport: { width: w, height: h } });

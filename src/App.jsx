@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { placeConsultArrivals, historyChanges, setHistoryDay, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorChip, SexAge, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
-import { KioskView, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
+import { KioskView, QrConsultBoard, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
 import { StationView } from './views/StationView.jsx';
 import { ConsultView } from './views/ConsultView.jsx';
 import { ProcedureRoomView } from './views/TreatView.jsx';
@@ -367,6 +367,10 @@ export default function App() {
   }
   if (role === 'board') {
     return <BoardSelect doctors={doctors} settings={settings} onSelect={k => setRole(`board:${k}`)} onBack={onBack} />;
+  }
+  // 진료실 대기 명단 (전체) + QR 접수: 접수는 오늘 명단 전체에서 찾음 (명단 표시는 접수한 환자만)
+  if (role === 'board:consult-all-qr') {
+    return <QrConsultBoard patients={patientsToday} settings={settings} doctors={doctors} doctorPrefs={doctorPrefs} mutatePatients={mutatePatients} ready={!!lastSync} onExit={() => setRole('board')} />;
   }
   if (role.startsWith('board:')) {
     return (
