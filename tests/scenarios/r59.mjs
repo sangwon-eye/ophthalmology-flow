@@ -18,9 +18,9 @@ ok(await page.getByRole('heading', { name: /나상훈 교수님/ }).count() === 
 const title = await page.getByRole('heading', { name: /나상훈 교수님/ }).evaluate(e => parseFloat(getComputedStyle(e).fontSize));
 ok(title >= 44, `교수님 이름 크게 (${title}px)`);
 const inRoom = page.locator('div.rounded-2xl').filter({ hasText: '진료 중' }).first();
-ok(/신\*희/.test(await inRoom.innerText()), '진료 중 환자 크게');
+ok(/신종희/.test(await inRoom.innerText()), '진료 중 환자 크게');
 const roomSize = await inRoom.locator('span.font-bold').last().evaluate(e => parseFloat(getComputedStyle(e).fontSize));
-const nextRow = page.locator('div.rounded-2xl').filter({ hasText: '다음 순서' }).filter({ hasText: '권*은' });
+const nextRow = page.locator('div.rounded-2xl').filter({ hasText: '다음 순서' }).filter({ hasText: '권나은' });
 ok(await nextRow.count() === 1, '다음 순서 칸');
 const nextSize = await nextRow.locator('span.font-bold').last().evaluate(e => parseFloat(getComputedStyle(e).fontSize));
 ok(nextSize >= 64 && roomSize >= 30 && roomSize < nextSize, `다음 순서가 가장 크게 (${nextSize}px), 진료 중은 조금 작게 (${roomSize}px)`);
@@ -49,11 +49,11 @@ await page.getByRole('button', { name: '띵동 소리 켜기' }).click(); await 
 await openBoard(/^정밀검사실 대기 명단/);
 ok(await page.getByRole('heading', { name: /정밀검사실 대기 명단/ }).count() === 1 && /31번방/.test(await page.getByRole('heading').first().innerText()), '정밀검사실 화면 (31번방 배지)');
 let txt = await page.locator('.board-scroll').innerText();
-ok(/조\*우/.test(txt) && /임\*빈/.test(txt) && !/IDRA/.test(txt), '31번방 검사만 (6번방 IDRA는 안 보임)');
+ok(/조현우/.test(txt) && /임수빈/.test(txt) && !/IDRA/.test(txt), '31번방 검사만 (6번방 IDRA는 안 보임)');
 await page.screenshot({ path: `${SP}/r59-room.png` });
 await openBoard(/^안구건조증 검사실 대기 명단/);
 txt = await page.locator('.board-scroll').innerText();
-ok(/임\*빈/.test(txt) && /IDRA/.test(txt) && !/조\*우/.test(txt) && !/OCT/.test(txt), '6번방 화면: 6번방 검사 환자만');
+ok(/임수빈/.test(txt) && /IDRA/.test(txt) && !/조현우/.test(txt) && !/OCT/.test(txt), '6번방 화면: 6번방 검사 환자만');
 // 시력방 + 검사실: 시력방 앞 5명 같은 크기·굵게 (10-04: 1번만 강조하지 않음)
 await editKey('daily-patients', list => list.map((p, i) => (i < 8 ? { ...p, checkin: `08:1${i}`, done: {}, calledRoom: null, seen: false } : p)));
 await page.setViewportSize({ width: 1920, height: 1080 });

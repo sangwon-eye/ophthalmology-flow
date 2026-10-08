@@ -56,7 +56,7 @@ const roles = [['시력', null], ['시력', null], ['31번방', null], ['6번방
 const errors = []; const saveFails = []; let clicks = 0;
 const SAFE = /^([^·]+ \d\d:\d\d · (확인 대기|\d+분 지남 · 확인)$|접수|시력|NCT|완료|▶|종료|검사 지정|History 설문지|History 입력|예진 완료|처치 완료|진료 전 처치 완료|진료 호출|진료 완료|설명 완료|귀가|점안|CR \d회|\d회 점안|산동|확인|끝|시작|지정|처방 전|보내기|추가 검사|처치|오늘 검사|Schirmer|OCT|VF|WFP|IDRA|GAT|ARK|FAG|FP|AS-OCT|Specular|B-scan|연구)/;
 const AVOID = /삭제|접수 취소|처치 취소|되돌리기|취소|메인 화면|설정|글씨|자동|가나다|예약시간순|오전|오후|전체|띵동|교수|소리|접기|보기|감사|누르면|한 번 더/;
-const MODAL_OK = /^(확인|저장|설명 완료|검사 지정|처치 지정|보내기|추가 검사 등록|설명 완료 · FU 나중에|적용|지정 완료)$/;
+const MODAL_OK = /^(확인|확인 \(Enter\)|저장|설명 완료|검사 지정|처치 지정|보내기|추가 검사 등록|설명 완료 · FU 나중에|적용|지정 완료)$/;
 async function drive(page, ms) {
   const end = Date.now() + ms;
   while (Date.now() < end) {

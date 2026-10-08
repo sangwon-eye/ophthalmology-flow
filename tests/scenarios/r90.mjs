@@ -47,12 +47,12 @@ await back();
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
 await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)\s*교수님별/ }).click(); await W(1500);
 const row = (masked) => page.getByText(new RegExp(`^${masked.replace('*', '\\*')} \\(\\d{4}\\)$`)).first().locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
-ok(/9:00 예약/.test(await row('서*호').innerText()), '복도 끝 모니터: 서*호 9:00 예약');
-ok(/10:30 예약/.test(await row('장*호').innerText()), '복도 끝 모니터: 장*호 10:30 예약');
-ok(!/예약/.test(await row('최*지').innerText()), '지각 환자는 예약시간 표시 안 함');
-ok(/재진료/.test(await row('신*희').innerText()) && !/재진료/.test(await row('서*호').innerText()), '진료 중 보냈다 돌아온 환자만 "재진료"');
-const t1 = await row('서*호').innerText();
-ok(t1.indexOf('9:00') < t1.indexOf('서*호') && t1.indexOf('서*호') < t1.indexOf('(0444)'), `한 줄 배열: 예약시간 · 이름 · 번호 뒷 4자리 (${t1.replace(/\n/g, ' ')})`);
+ok(/9:00 예약/.test(await row('서준호').innerText()), '복도 끝 모니터: 서준호 9:00 예약');
+ok(/10:30 예약/.test(await row('장민호').innerText()), '복도 끝 모니터: 장민호 10:30 예약');
+ok(!/예약/.test(await row('최민지').innerText()), '지각 환자는 예약시간 표시 안 함');
+ok(/재진료/.test(await row('신종희').innerText()) && !/재진료/.test(await row('서준호').innerText()), '진료 중 보냈다 돌아온 환자만 "재진료"');
+const t1 = await row('서준호').innerText();
+ok(t1.indexOf('9:00') < t1.indexOf('서준호') && t1.indexOf('서준호') < t1.indexOf('(0444)'), `한 줄 배열: 예약시간 · 이름 · 번호 뒷 4자리 (${t1.replace(/\n/g, ' ')})`);
 await page.screenshot({ path: `${SP}/r90-board-all.png` });
 await page.setViewportSize({ width: 1536, height: 864 }); await W(400);
 await page.screenshot({ path: `${SP}/r90-board-all-1536.png` }); // 병원 큰 TV(1920, 125%)

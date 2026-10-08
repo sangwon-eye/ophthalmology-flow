@@ -53,16 +53,13 @@ export async function dischargeVia(page, name) {
   await page.goto(`${BASE}/`); await page.waitForTimeout(800);
 }
 
-// 시력방 측정: [시력] → (첫 칸 값) [확인], [NCT] 버튼이 있으면 → [확인] (NCT 빈칸 경고는 한 번 더 [확인])
-export async function measureVision(page, card, va = '') {
-  const confirm = async () => {
-    await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click(); await page.waitForTimeout(300);
-    if (await page.locator('.fixed.inset-0').count()) await page.locator('.fixed.inset-0').last().getByRole('button', { name: '확인', exact: true }).click();
-    await page.waitForTimeout(400);
-  };
-  await card.getByRole('button', { name: '시력', exact: true }).click(); await page.waitForTimeout(300);
-  if (va) await page.locator('.fixed.inset-0').last().locator('input').first().fill(va);
-  await confirm();
-  const nct = card.getByRole('button', { name: 'NCT', exact: true });
-  if (await nct.count()) { await nct.click(); await page.waitForTimeout(300); await confirm(); }
+// 시력방 측정 (10-08: 시력·안압 한 창): [시력] → 나안 OD에 값(기본 0.8), NCT 칸이 있으면 NCT OD에 값 → Enter (저장·확인)
+export async function measureVision(page, card, va = '', nct = '15') {
+  await card.getByRole('button', { name: /^(시력|시력 재야함|✓ 시력)$/ }).first().click(); await page.waitForTimeout(300);
+  const m = page.locator('[data-measure-modal]');
+  await m.getByLabel('나안 OD').fill(va || '0.8');
+  const nctIn = m.getByLabel('NCT OD');
+  if (await nctIn.count()) await nctIn.fill(nct);
+  await m.getByLabel('나안 OD').press('Enter');
+  await page.waitForTimeout(400);
 }

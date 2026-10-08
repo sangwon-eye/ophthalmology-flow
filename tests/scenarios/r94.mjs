@@ -58,8 +58,8 @@ await back();
 // 환자용 진료실 명단: '재진료'
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
 await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\)\s*교수님별/ }).click(); await W(1500);
-const row = page.getByText(/^황\*윤 \(\d{4}\)$/).first().locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
-ok(/재진료/.test(await row.innerText()), '환자용 진료실 명단: 황*윤 "재진료"');
+const row = page.getByText(/^황도윤 \(\d{4}\)$/).first().locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
+ok(/재진료/.test(await row.innerText()), '환자용 진료실 명단: 황도윤 "재진료"');
 await page.goto(`${BASE}/`); await W();
 
 // 2) 처치실 '검사 · 재진료' → WFP + [재진료] → 검사 끝난 뒤 진료 대기로

@@ -1154,6 +1154,8 @@ export function hasFollowupApplied(p) {
 // 재진인데 오늘 할 검사(CR 포함)가 하나도 없는 환자 → 프로그램 도입 전 환자일 가능성이 높아 확인 필요
 export function needsTestCheck(p, prefs) {
   if (p.consultDone) return false;
+  // 관리자 명단 관리 [검사 없음] (10-08 사용자): 차트리뷰에서 정말 검사가 없는 환자 — 검사 미지정·지난 진료 FU 미지정 표시를 끔
+  if (p.noTests) return false;
   if (p.fuMissing) return true; // 지난 진료에서 FU 를 나중에 정하기로 하고 아직 안 정함
   if (p.firstVisit || p.linkType === 'added') return false;
   if (Object.entries(p.assigned || {}).some(([k, v]) => v && k !== VISION_KEY)) return false;

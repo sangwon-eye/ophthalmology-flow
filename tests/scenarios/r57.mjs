@@ -22,24 +22,24 @@ await pick('시력');
 ok(await cardOf('최민지').getByRole('button', { name: '시력', exact: true }).count() === 1 && await cardOf('최민지').getByRole('button', { name: 'NCT', exact: true }).count() === 1, '보통 환자: [시력]·[NCT] 따로');
 ok(await cardOf('정대현').getByRole('button', { name: 'NCT 안 함 · 검사실 GAT' }).count() === 1, 'GAT 환자: NCT 대신 노란 표시');
 ok(await cardOf('강서윤').getByRole('button', { name: '안압 안 잼' }).count() === 1, '안압 안 잼 환자: 노란 표시');
-// 최민지: 시력만 → ✓ 시력, 아직 측정 미완료 → NCT → 완료
+// 최민지: 시력만 적고 Enter → ✓ 시력 + '안압 재야함' → 누르면 같은 창(NCT 칸에 커서) → 완료 (10-08: 시력·안압 한 창)
 await cardOf('최민지').getByRole('button', { name: '시력', exact: true }).click(); await W(300);
-ok(await modal().getByText('NCT', { exact: true }).count() === 0, '[시력] 창에는 NCT 칸 없음');
-await modal().locator('input').first().fill('0.8');
-await modal().getByRole('button', { name: '확인', exact: true }).click(); await W(800);
+ok(await modal().getByLabel('나안 OD').count() === 1 && await modal().getByLabel('NCT OD').count() === 1, '[시력]을 눌러도 시력·안압 한 창');
+await modal().getByLabel('나안 OD').fill('0.8');
+await modal().getByLabel('나안 OD').press('Enter'); await W(800);
 let p = await pt('최민지');
-ok(p.vaOk && !p.measureOk && p.measure.ucva.od === '0.8', '시력만 저장: 아직 측정 완료 아님');
-ok(await cardOf('최민지').getByRole('button', { name: '✓ 시력' }).count() === 1, '✓ 시력 표시');
-await cardOf('최민지').getByRole('button', { name: 'NCT', exact: true }).click(); await W(300);
-await modal().locator('input').first().fill('15');
-await modal().locator('input[inputmode=decimal]').nth(1).fill('16');
-await modal().getByRole('button', { name: '확인', exact: true }).click(); await W(1500);
+ok(p.vaOk && !p.nctOk && !p.measureOk && p.measure.ucva.od === '0.8', '시력만 적고 Enter: 시력만 확인, 아직 측정 완료 아님 (경고 없이)');
+ok(await cardOf('최민지').getByRole('button', { name: '✓ 시력' }).count() === 1 && await cardOf('최민지').getByRole('button', { name: '안압 재야함' }).count() === 1, "카드: ✓ 시력 + 주황 '안압 재야함'");
+await cardOf('최민지').getByRole('button', { name: '안압 재야함' }).click(); await W(300);
+ok(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')) === 'NCT OD', "'안압 재야함' → NCT 칸에 커서");
+await page.keyboard.type('15'); await page.keyboard.press('Tab'); await page.keyboard.type('16'); await page.keyboard.press('Enter'); await W(1500);
 p = await pt('최민지');
-ok(p.nctOk && p.measureOk && p.measure.nct.od === '15' && p.measure.ucva.od === '0.8', 'NCT 저장 → 측정 완료 (시력 값 그대로)');
+ok(p.nctOk && p.measureOk && p.measure.nct.od === '15' && p.measure.nct.os === '16' && p.measure.ucva.od === '0.8', 'Tab으로 옮겨 적고 Enter → 측정 완료 (시력 값 그대로)');
 // 안압 안 잼 환자: 시력만으로 측정 완료, 입력 창에 NCT 칸 없음
 await cardOf('강서윤').getByRole('button', { name: '시력', exact: true }).click(); await W(300);
-await modal().locator('input').first().fill('0.4');
-await modal().getByRole('button', { name: '확인', exact: true }).click(); await W(800);
+ok(await modal().getByLabel('NCT OD').count() === 0, '안압 안 잼 환자: NCT 칸 없음');
+await modal().getByLabel('나안 OD').fill('0.4');
+await modal().getByLabel('나안 OD').press('Enter'); await W(800);
 ok((await pt('강서윤')).measureOk, '안압 안 잼: 시력만으로 측정 완료');
 await back();
 // 오늘 검사에 NCT (최민지 진료 대기로 보내서 진료실에서 확인)

@@ -166,11 +166,12 @@ export function roleGuideSheets(settings) {
   return [
     { key: 'vision', title: vision, steps: [
       '[접수] (QR로 찍은 환자는 저절로 접수). 늦게 온 환자는 [지각]',
-      '[시력] · [NCT]를 눌러 값 입력 → 둘 다 ✓',
+      '환자 QR을 찍거나(접수도 됨) [시력] · [NCT]를 누르면 시력·안압 창 → Tab 이동, Enter 저장',
       '초진이면 [History 설문지 드리기]',
       '산동 예정이면 [산동]으로 점안 시각 기록 (CR은 진료실에서 점안)',
       '할 일이 모두 끝나면 저절로 다음 방으로 넘어갑니다',
     ], tips: [
+      '한쪽만 적었으면: 주황 "시력 재야함" · "안압 재야함"을 눌러 채우기',
       '검사를 넣거나 뺄 때: 오늘 검사 옆 작은 글씨 [변경]을 눌러 그 자리에서',
       '접수를 잘못 눌렀으면: [접수 취소]를 두 번',
       '잘못 넘어갔으면: 아래 알림의 [되돌리기]',
@@ -214,7 +215,7 @@ export function roleGuideSheets(settings) {
     ] },
     { key: 'admin', title: '관리자', steps: [
       '전날 · 아침: [명단 업로드]에 엑셀 (제목: 환자명 · 환자번호 · 예약 · 초재진 · 진료의)',
-      '[명단 관리]: 주황 "확인 필요" 환자의 오늘 검사 지정',
+      '[명단 관리]: 빨간 "확인 필요" 환자의 오늘 검사 지정 (정말 검사가 없으면 [검사 없음])',
       '[FU 지정 관리]: "FU 나중에" 환자의 다음 내원 검사 지정',
       '[대기 화면 안내]: 환자용 화면 노란 안내 문구',
     ], tips: [
@@ -896,7 +897,7 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                 <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                   <span className="t-name">{p.name}</span> <SexAge p={p} /> <span className="text-xs text-slate-400">{p.id}</span>
                   {flag && !p.fuMissing && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold">검사 미지정 · 확인 필요</span>}
-                  {p.fuMissing && !p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold border border-red-300">지난 진료 FU 미지정</span>}
+                  {p.fuMissing && !p.consultDone && !p.noTests && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold border border-red-300">지난 진료 FU 미지정</span>}
                   {p.primaryKey && <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">2차 진료 · {p.primaryDoctor} 후{p.linkType === 'added' ? ' (진료 중 추가)' : ''}</span>}
                   {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
@@ -917,6 +918,11 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                 </select>
                 <button type="button" onClick={() => toggleFirst(patientKey(p), !p.firstVisit)} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
+                </button>
+                {/* 차트리뷰: 정말 검사가 없는 환자 → 빨간 '확인 필요' 표시를 끔 (다시 누르면 취소, 10-08). 화면에 보이던 값대로 저장 */}
+                <button type="button" onClick={() => patchPatient(mutatePatients, patientKey(p), () => ({ noTests: !p.noTests || undefined }))} title="누르면 검사 없음 ↔ 취소"
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${p.noTests ? 'bg-slate-600 border-slate-600 text-white font-semibold' : 'border-slate-300 text-slate-500'}`}>
+                  {p.noTests ? '검사 없음 ✓' : '검사 없음'}
                 </button>
                 {/* 소아 등 안압을 아예 재지 않는 환자: 시력방에 '안압 안 잼', NCT 칸 없음 */}
                 <button type="button" onClick={() => patchPatient(mutatePatients, patientKey(p), () => ({ noIop: !p.noIop }))} title="누르면 안압 잼 ↔ 안 잼"

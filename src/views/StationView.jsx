@@ -1,9 +1,10 @@
 // 시력방·검사실 화면
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
-import { TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { findKioskPatient } from './RoleSelect.jsx';
+import { TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 
@@ -50,6 +51,9 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const [resultFor, setResultFor] = useState(null); // 결과 입력 검사(MR 등): { key, testId }
   const [detailFor, setDetailFor] = useState(null);
   const [toastNode, showToast] = useUndoToast();
+  // 시력방에서 QR을 찍으면 (10-08 사용자): 접수 전이면 직원 [접수]와 같게 접수하고, 시력·안압 창을 바로 엶 (처리 함수는 아래 scanRef)
+  const scanRef = useRef(null);
+  useScanner((code, from) => scanRef.current?.(code, from), { enabled: mode === 'vision', onBlocked: () => scanRef.current?.(null) });
   // 시간 재는 칸(예: Schirmer)이 정한 시간이 되면 초록으로 바뀌도록 가끔 다시 그림
   const [, setTick] = useState(0);
   useEffect(() => { const i = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(i); }, []);
@@ -126,6 +130,8 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const changeVf = (p, t, action) => {
     const at = Date.now();
     const pk = patientKey(p);
+    // 결과 입력 검사(MR 등)에 [진행 중 호출 금지]를 켠 경우: [종료]를 누르면 결과 창부터 (저장할 때 검사 종료 + 완료 — 10-08)
+    if (action === 'finish' && resultFieldsOf(t).length) { setResultFor({ key: pk, testId: t.id, finishVf: true }); return; }
     // updateVf 가 서버의 최신 기록으로 다시 확인 (다른 장비에서 방금 다른 검사를 시작했으면 시작하지 않음) → 안 됐으면 알림
     patchPatient(mutatePatients, pk, x => updateVf(x, t.id, action, at)).then(next => {
       if (action !== 'start' || !Array.isArray(next)) return;
@@ -166,11 +172,17 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
     const { key: pk, testId } = resultFor;
     const p = patients.find(x => patientKey(x) === pk);
     setResultFor(null);
-    if (!p || activeVf(p)) return;
+    // 다른 검사가 진행 중이면 저장하지 않음. 이 검사가 진행 중([종료]로 연 창)이면 저장하면서 진행 중도 끝냄
+    if (!p || (activeVf(p) && activeVf(p) !== testId)) return;
     const at = Date.now();
-    mutatePatients(prev => prev.map(x => (patientKey(x) !== pk || activeVf(x) ? x : {
-      ...x, results: { ...(x.results || {}), [testId]: r }, done: { ...x.done, [testId]: true }, doneAt: { ...(x.doneAt || {}), [testId]: at },
-    })));
+    mutatePatients(prev => prev.map(x => {
+      const busy = activeVf(x);
+      if (patientKey(x) !== pk || (busy && busy !== testId)) return x;
+      return {
+        ...x, ...(busy === testId ? { vfInProgress: null, vfStartedAt: null } : {}),
+        results: { ...(x.results || {}), [testId]: r }, done: { ...x.done, [testId]: true }, doneAt: { ...(x.doneAt || {}), [testId]: at },
+      };
+    }));
     showToast(`${p.name} ${testLabel(testId)} 완료`, () => writeDone(pk, testId, false, null));
   };
 
@@ -232,6 +244,17 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
       return { ...u, late: !!p.late, assigned };
     })));
   };
+  scanRef.current = (code, from) => {
+    if (code === null) { showToast('열린 창을 닫은 뒤 QR을 다시 찍어 주세요'); return; }
+    // 찾기 칸에 커서가 있었으면 찍힌 번호를 지움
+    if (from?.el?.dataset?.scanRevert === 'query') setQuery(from.value || '');
+    const found = findKioskPatient(patients, code);
+    const active = found.filter(x => !x.consultDone && !x.linkWaiting);
+    const p = active.find(x => !x.checkin) || active[0];
+    if (!p) { showToast(found.length ? `${found[0].name} 환자는 오늘 진료가 끝났습니다` : `오늘 명단에서 찾지 못했습니다 (${code})`); return; }
+    if (!p.checkin) checkIn(p);
+    setMeasureFor({ key: patientKey(p), mode: 'vision', part: 'auto' });
+  };
 
   const handleMeasureSave = ({ measure, complete, gat, date, part = 'all', noIop }) => {
     const { key: pk, mode: mmode } = measureFor;
@@ -245,6 +268,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
       return;
     }
 
+    // 시력방은 시력·안압 한 창 (10-08): 늘 모든 칸을 저장 (예전 [시력]·[NCT] 따로 창은 part 로 그 칸만)
     const patch = mmode === 'gat'
       ? { gat: measure.gat }
       : {
@@ -261,11 +285,12 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
         nx = { ...nx, assigned: { ...nx.assigned, [GAT_ID]: gat } };
         if (!gat) nx = { ...nx, done: { ...nx.done, [GAT_ID]: false } };
       }
-      // 시력방 [확인]은 측정 완료만 표시 (시력방 할 일이 다 끝나면 위의 자동 완료로 넘어감)
-      // [시력]·[NCT]를 따로 저장: 둘 다 끝나면(NCT를 안 재는 환자는 시력만) 측정 완료
+      // 시력방 [확인](Enter)은 측정 완료만 표시 (시력방 할 일이 다 끝나면 위의 자동 완료로 넘어감)
+      // 적힌 쪽만 확인 (10-08): 시력 값이 있으면 vaOk, NCT 값이 있으면 nctOk — 빈 쪽은 카드에 '시력 재야함'·'안압 재야함'.
+      // 둘 다 끝나면(NCT를 안 재는 환자는 시력만) 측정 완료
       if (complete && mmode === 'vision') {
-        if (part !== 'nct') nx = { ...nx, vaOk: nx.vaOk || at };
-        if (part !== 'va') nx = { ...nx, nctOk: nx.nctOk || at };
+        const hasNct = !!(String(nx.measure.nct?.od ?? '').trim() || String(nx.measure.nct?.os ?? '').trim());
+        nx = { ...nx, vaOk: hasVisionValue(nx.measure) ? (nx.vaOk || at) : null, nctOk: hasNct ? (nx.nctOk || at) : null };
         if (!nx.measureOk && nx.vaOk && (nx.nctOk || !nctNeeded(nx))) nx = { ...nx, measureOk: at };
       }
       else if (complete) {
@@ -439,16 +464,21 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                     </span>
                   );
                 })()}
-                {/* 시력과 NCT를 따로: 각각 누르면 그 칸만 입력, 끝나면 초록 ✓. NCT를 안 재는 환자는 노란 표시(누르면 바꿀 수 있음) */}
+                {/* 시력·NCT 버튼: 누르면 시력·안압 한 창(그 칸에 커서), 끝나면 초록 ✓. 한쪽만 적었으면 빈 쪽은 주황 '재야함'(10-08).
+                    NCT를 안 재는 환자는 노란 표시(누르면 바꿀 수 있음) */}
                 {isVision && !p.measureOk && <>
                   {p.vaOk
                     ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'va' })} className="text-sm px-3 py-1.5 rounded-lg border border-green-300 bg-green-50 text-green-800 font-medium">✓ 시력</button>
-                    : <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'va' })} className="text-sm px-4 py-1.5 rounded-lg bg-blue-600 text-white font-medium">시력</button>}
+                    : p.nctOk
+                      ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'va' })} className="text-sm px-3 py-1.5 rounded-lg bg-amber-500 text-white font-semibold">시력 재야함</button>
+                      : <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'va' })} className="text-sm px-4 py-1.5 rounded-lg bg-blue-600 text-white font-medium">시력</button>}
                   {!nctNeeded(p)
                     ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} title="누르면 바꿀 수 있어요" className="text-sm px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 font-semibold">{p.noIop ? '안압 안 잼' : 'NCT 안 함 · 검사실 GAT'}</button>
                     : p.nctOk
                       ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} className="text-sm px-3 py-1.5 rounded-lg border border-green-300 bg-green-50 text-green-800 font-medium">✓ NCT</button>
-                      : <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} className="text-sm px-4 py-1.5 rounded-lg bg-teal-600 text-white font-medium">NCT</button>}
+                      : p.vaOk
+                        ? <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} className="text-sm px-3 py-1.5 rounded-lg bg-amber-500 text-white font-semibold">안압 재야함</button>
+                        : <button type="button" onClick={() => setMeasureFor({ key: pk, mode: 'vision', part: 'nct' })} className="text-sm px-4 py-1.5 rounded-lg bg-teal-600 text-white font-medium">NCT</button>}
                 </>}
                 {/* 초진: History 설문지를 드렸는지 (입력은 처치실에서) */}
                 {isVision && hxNeeded(p) && !p.hx && (p.hxSheetAt
@@ -550,7 +580,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
             <SegmentedToggle value={session} onChange={setSession} options={SESSION_OPTIONS} />
             <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5">
               <Search size={14} className="text-slate-400" />
-              <input placeholder="이름·환자번호 찾기" value={query} onChange={e => setQuery(e.target.value)} className="outline-none text-sm w-36" />
+              <input placeholder="이름·환자번호 찾기" data-scan-revert="query" value={query} onChange={e => setQuery(e.target.value)} className="outline-none text-sm w-36" />
             </div>
           </div>
           {notCheckedIn.length === 0 ? (

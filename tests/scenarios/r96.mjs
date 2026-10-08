@@ -10,13 +10,13 @@ await page.goto(`${BASE}/`); await W();
 await page.getByRole('button', { name: /^환자용 화면/ }).click(); await W(300);
 await page.getByRole('button', { name: /^진료실 대기 명단 \(전체\) \+ QR 접수/ }).click(); await W(1500);
 ok(await page.locator('[data-qr-band]').getByText('진료카드 QR 코드를 찍으면 바로 접수됩니다').count() === 1, '맨 아래 QR 안내 한 줄');
-ok(await page.getByText('진료 대기 순서', { exact: true }).count() === 1 && await page.getByText(/^서\*호 \(\d{4}\)$/).count() >= 1, '평소엔 진료실 대기 명단');
+ok(await page.getByText('진료 대기 순서', { exact: true }).count() === 1 && await page.getByText(/^서준호 \(\d{4}\)$/).count() >= 1, '평소엔 진료실 대기 명단');
 await page.screenshot({ path: `${SP}/r96-board.png` });
 const scan = async (code) => { await page.keyboard.type(code, { delay: 5 }); await page.keyboard.press('Enter'); await W(900); };
 const popup = () => page.locator('[role=status]');
 // 1) 접수 전 환자 → 접수 + 큰 흰 창
 await scan('6100000');
-ok(/원\*옥 \(0000\)님 접수되었습니다/.test(await popup().innerText().catch(() => '')), 'QR 찍으면 가운데 큰 창: 접수되었습니다');
+ok(/원성옥 \(0000\)님 접수되었습니다/.test(await popup().innerText().catch(() => '')), 'QR 찍으면 가운데 큰 창: 접수되었습니다');
 ok(!!(await getKey('daily-patients')).value.find(p => p.name === '원성옥').checkin, '실제로 접수됨');
 ok(await page.locator('[data-staff-controls]').evaluate(el => el.className.includes('opacity-0')), '리더기 입력으로 직원용 버튼이 뜨지 않음');
 await page.screenshot({ path: `${SP}/r96-popup.png` });

@@ -31,7 +31,7 @@ const scan = async (code) => { await page.keyboard.type(code, { delay: 5 }); awa
 // 결과 칸(제목 앞에 ✓ 가 붙음) 전체 글에 문구가 모두 있는지
 const shows = async (...texts) => { const s = await page.locator('[role=status]').innerText().catch(() => ''); return texts.every(x => s.includes(x)); };
 await scan('6100111');
-ok(await shows('최*지 (0111)님은 이미 접수되었습니다', '시력검사 대기 중입니다', '큰 복도에서 기다려 주세요'), '시력검사 전 → 큰 복도');
+ok(await shows('최민지 (0111)님은 이미 접수되었습니다', '시력검사 대기 중입니다', '큰 복도에서 기다려 주세요'), '시력검사 전 → 큰 복도');
 await scan('6100333');
 ok(await shows('검사가 남았습니다', '큰 복도에서 기다려 주세요'), '검사 두 곳 이상(정밀·안구건조증) → 큰 복도');
 await scan('6100222');
@@ -47,7 +47,7 @@ ok(await shows('곧 진료 순서입니다', '7번 진료실 앞으로 이동해
 await scan('6100518');
 ok(await shows('진료가 끝났습니다', '간호사 안내를 받으시기 바랍니다'), '진료 후(설명 대기) → 간호사 안내');
 await scan('6100555');
-ok(await shows('송*린 (0555)님', '진료가 끝났습니다', '간호사 안내를 받으시기 바랍니다'), '귀가까지 끝난 환자 → 같은 안내 (빨간 화면 아님)');
+ok(await shows('송하린 (0555)님', '진료가 끝났습니다', '간호사 안내를 받으시기 바랍니다'), '귀가까지 끝난 환자 → 같은 안내 (빨간 화면 아님)');
 
 // 3) 진료만 남음: 김선웅 진료 대기 [조현우, 서준호], 앞 1명만 '진료실 앞으로'
 await editKey('daily-patients', list => list.map(p => (p.name === '조현우' ? { ...p, done: { ...p.done, oct: true, wfp: true } } : p)));
@@ -64,9 +64,9 @@ const b = tester(board);
 await board.goto(`${BASE}/`); await b.W();
 await board.getByRole('button', { name: /^환자용 화면/ }).click(); await b.W(300);
 await board.getByRole('button', { name: /^진료실 대기 명단/ }).first().click(); await b.W(1200);
-const front = board.locator('[data-front]').filter({ hasText: '조*우' });
-b.ok(await front.count() === 1 && await front.getByText('진료실 앞으로 이동해 주세요').count() === 1 && await front.getByText('서*호', { exact: false }).count() === 0, '복도 끝 모니터: 앞 1명(조*우)만 노란 상자');
-b.ok(await board.locator('[data-rest]').filter({ hasText: '서*호' }).getByText('큰 복도에서 기다려 주세요').count() === 1, '복도 끝 모니터: 나머지(서*호)는 큰 복도에서');
+const front = board.locator('[data-front]').filter({ hasText: '조현우' });
+b.ok(await front.count() === 1 && await front.getByText('진료실 앞으로 이동해 주세요').count() === 1 && await front.getByText('서준호', { exact: false }).count() === 0, '복도 끝 모니터: 앞 1명(조현우)만 노란 상자');
+b.ok(await board.locator('[data-rest]').filter({ hasText: '서준호' }).getByText('큰 복도에서 기다려 주세요').count() === 1, '복도 끝 모니터: 나머지(서준호)는 큰 복도에서');
 b.ok(await board.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '화면 밖으로 넘치지 않음');
 await board.screenshot({ path: `${SP}/r81-board-front.png` });
 // 0명이면 노란 상자 없음 (예전 모양)

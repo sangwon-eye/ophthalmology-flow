@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone, QrCode } from 'lucide-react';
-import { boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, maskName, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
 import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
@@ -132,9 +132,10 @@ export function BoardEmpty({ text = '대기 중인 환자가 없습니다' }) {
   return <div className="text-center py-10 text-slate-500">{text}</div>;
 }
 
+// 환자용 화면·QR 안내의 이름: 전체 이름 + 번호 뒷 4자리 (10-08 사용자: 가운데 * 가리기를 없앰 — 동명이인은 번호로 구분)
 export function patientBoardName(p) {
   const suffix = String(p.id ?? '').trim().slice(-4);
-  return `${maskName(p.name)}${suffix ? ` (${suffix})` : ''}`;
+  return `${String(p.name ?? '').trim()}${suffix ? ` (${suffix})` : ''}`;
 }
 
 // 순번 칸 (시력방·진료실). 1번은 연한 색 바탕 + 모서리에 '다음 순서' 배지 (칸 높이는 다른 칸과 같게)
@@ -153,7 +154,7 @@ export function BoardNumberRow({ n, name, color, compact, note }) {
 // '재진료'는 오른쪽 끝 하늘색 배지 (순번의 노랑과 구분). 지각·예약 없음은 시간 칸만 비움
 export function boardNameParts(p) {
   const tail = String(p?.id ?? '').trim().slice(-4);
-  return { name: maskName(p?.name), tail };
+  return { name: String(p?.name ?? '').trim(), tail };
 }
 function ResvTime({ p, cls, unit, style }) {
   const t = boardReservation(p);
@@ -549,7 +550,7 @@ export function BoardSelect({ doctors, settings, onSelect, onBack }) {
   ];
   return (
     <ScreenShell title="환자용 화면 선택" color="slate" onBack={onBack}>
-      <p className="text-sm text-slate-500 mb-4">이 모니터에 띄울 명단을 고르세요. 이름은 김*수처럼 가려서 표시됩니다.</p>
+      <p className="text-sm text-slate-500 mb-4">이 모니터에 띄울 명단을 고르세요. 이름은 전체 이름과 환자번호 뒷 4자리로 표시됩니다.</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {options.map(o => (
           <button key={o.key} type="button" onClick={() => onSelect(o.key)} className="text-left bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-400">

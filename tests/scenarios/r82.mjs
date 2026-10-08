@@ -23,7 +23,7 @@ const chimes0 = await board.evaluate(() => window.__ophChimes || 0);
 await s.cardOf('서준호').getByRole('button', { name: /^환자 찾기/ }).click(); await s.W(1500);
 s.ok(await staff.getByText(/서준호 환자 찾기 · 복도 끝 모니터에 띄웠습니다/).count() === 1, '진료실: 안내 알림');
 s.ok(await s.cardOf('서준호').getByRole('button', { name: /^환자 찾기 · \d\d:\d\d/ }).count() === 1, '진료실: 찾은 시각 표시');
-b.ok(await popup.count() === 1 && await popup.getByText('서*호 (0444)님', { exact: true }).count() === 1 && await popup.getByText('3번 진료실 앞으로 오세요', { exact: true }).count() === 1, '복도 끝 모니터: 이름 · 진료실 팝업');
+b.ok(await popup.count() === 1 && await popup.getByText('서준호 (0444)님', { exact: true }).count() === 1 && await popup.getByText('3번 진료실 앞으로 오세요', { exact: true }).count() === 1, '복도 끝 모니터: 이름 · 진료실 팝업');
 b.ok(await board.evaluate(() => window.__ophChimes || 0) > chimes0, '복도 끝 모니터: 띵동');
 await board.screenshot({ path: `${SP}/r82-find-popup.png` });
 await board.waitForTimeout(10500);

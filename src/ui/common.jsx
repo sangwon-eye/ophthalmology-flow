@@ -645,35 +645,101 @@ export function MeasureTable({ today, prev }) {
 }
 
 // part: 시력방에서 [시력]·[NCT]를 따로 누를 때 그 칸만 ('va' 시력 / 'nct' 안압 / 'all' 전부)
+// QR(바코드) 리더기: 키보드처럼 아주 빠르게(글자 사이 60ms 안) 번호를 보내고 Enter → 사람이 치는 것과 구분해 onScan(번호, 찍힌 칸)
+// (시력방 화면, 10-08). 창(.fixed.inset-0)이 열려 있으면 그 창이 처리 — 시력·안압 창은 스스로 되돌리고 안내, 다른 창은 onBlocked
+export function useScanner(onScan, { enabled = true, onBlocked } = {}) {
+  const ref = useRef({ onScan, onBlocked });
+  ref.current = { onScan, onBlocked };
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let buf = '';
+    let last = 0;
+    let start = null;
+    const onKey = (e) => {
+      const now = Date.now();
+      if (e.key === 'Enter') {
+        const code = buf.trim();
+        const from = start;
+        const fast = now - last < 150;
+        buf = '';
+        start = null;
+        if (code.length < 5 || !fast) return;
+        const modal = document.querySelector('.fixed.inset-0');
+        if (modal) { if (!modal.hasAttribute('data-measure-modal')) ref.current.onBlocked?.(); return; }
+        e.preventDefault();
+        ref.current.onScan(code, from);
+        return;
+      }
+      if (e.key.length !== 1) { if (e.key !== 'Shift') buf = ''; return; }
+      if (now - last > 60 || start?.el !== e.target) { buf = ''; start = { el: e.target, value: e.target?.value ?? '' }; }
+      buf += e.key;
+      last = now;
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [enabled]);
+}
+
+// 시력방(mode 'vision', 10-08 사용자): 시력·안압을 한 창에서 — Tab으로 나안 OD→OS→교정 OD→OS→NCT OD→OS(AutoV는 건너뜀),
+// Enter면 적힌 쪽만 저장·확인(빈 쪽은 카드에 '시력 재야함'·'안압 재야함'). part 는 처음 커서 위치만 정함('va'·'nct'·'auto'=빈 칸부터).
+// QR 리더기가 창 안 칸에 찍히면(아주 빠른 입력 + Enter) 저장하지 않고 그 칸을 되돌린 뒤 안내
 export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailable, gatAssigned, onSave, onCancel }) {
   const initial = mode === 'prev' ? previous : patient.measure;
   const [m, setM] = useState(() => normalizeMeasure(initial));
   const [date, setDate] = useState(mode === 'prev' ? (previous?.date || '') : '');
   const [gat, setGat] = useState(!!gatAssigned);
   const [noIopChk, setNoIopChk] = useState(!!patient.noIop);
-  const [warned, setWarned] = useState(false);
+  const [scanNote, setScanNote] = useState(false);
+  const burst = useRef({ count: 0, last: 0, start: null });
 
   const setEye = (key, eye, v) => setM(s => ({ ...s, [key]: { ...s[key], [eye]: v } }));
   // '안압 안 잼' 환자(소아 등)는 시력만
-  const skipIop = mode === 'vision' && noIopChk;
-  const showVa = mode !== 'vision' || part !== 'nct';
-  const showIop = mode === 'vision' && part !== 'va';
-  const fields = mode === 'gat' ? ['gat'] : mode === 'vision'
-    ? [...(showVa ? ['ucva', 'bcva'] : []), ...(showIop && !skipIop && !gat ? ['nct'] : [])]
+  const vision = mode === 'vision';
+  const skipIop = vision && noIopChk;
+  const fields = mode === 'gat' ? ['gat'] : vision
+    ? ['ucva', 'bcva', ...(!skipIop && !gat ? ['nct'] : [])]
     : ['ucva', 'bcva', 'nct', 'gat'];
-  const noIop = mode === 'vision' && showIop && !skipIop && !gat && !m.nct.od.trim() && !m.nct.os.trim();
   const prevCell = (k, e) => String(previous?.[k]?.[e] ?? '').trim();
-  const prevRows = mode === 'vision' ? [...(showVa ? ['ucva', 'bcva'] : []), ...(showIop ? ['nct'] : [])].filter(k => prevCell(k, 'od') || prevCell(k, 'os')) : [];
-  const title = mode === 'prev' ? '이전 시력·안압' : mode === 'gat' ? 'GAT 안압' : part === 'va' ? '오늘 시력' : part === 'nct' ? '오늘 안압 (NCT)' : '오늘 시력·안압';
-  const completeLabel = mode === 'gat' ? 'GAT 완료' : '확인';
+  const prevRows = vision ? ['ucva', 'bcva', 'nct'].filter(k => prevCell(k, 'od') || prevCell(k, 'os')) : [];
+  const title = mode === 'prev' ? '이전 시력·안압' : mode === 'gat' ? 'GAT 안압' : '오늘 시력·안압';
+  const completeLabel = mode === 'gat' ? 'GAT 완료' : vision ? '확인 (Enter)' : '확인';
+  // 처음 커서: [NCT]·'안압 재야함'은 NCT 칸, QR·'시력 재야함'은 빈 칸부터
+  const [focusKey] = useState(() => {
+    if (!vision) return fields[0];
+    const empty = (k) => !String(m[k]?.od ?? '').trim() && !String(m[k]?.os ?? '').trim();
+    if (part === 'nct' && fields.includes('nct')) return 'nct';
+    if (part === 'auto' && !(empty('ucva') && empty('bcva')) && fields.includes('nct') && empty('nct')) return 'nct';
+    return 'ucva';
+  });
 
   const submit = (complete) => {
-    if (complete && noIop && !warned) { setWarned(true); return; }
-    onSave({ measure: m, complete, gat, date, part, noIop: noIopChk });
+    onSave({ measure: m, complete, gat, date, part: 'all', noIop: noIopChk });
+  };
+  // 입력 칸 키: 리더기(글자 사이 60ms 안, 5글자 이상 + Enter)면 그 칸을 찍기 전 값으로 되돌리고 안내, 사람이 친 Enter면 저장·확인
+  const onFieldKey = (e, key, eye) => {
+    const now = Date.now();
+    const b = burst.current;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (b.count >= 5 && now - b.last < 150 && b.start) {
+        setEye(b.start.key, b.start.eye, b.start.value);
+        setScanNote(true);
+        b.count = 0;
+        return;
+      }
+      b.count = 0;
+      if (vision) submit(true);
+      return;
+    }
+    // Tab 등 다른 키는 리더기가 보내지 않음 → 이어 치기를 끊음. 다른 칸으로 옮겨 가도 끊음
+    if (e.key.length !== 1) { if (e.key !== 'Shift') b.count = 0; return; }
+    if (now - b.last > 60 || !b.start || b.start.key !== key || b.start.eye !== eye) { b.count = 0; b.start = { key, eye, value: m[key][eye] }; }
+    b.count += 1;
+    b.last = now;
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+    <div data-measure-modal className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-full overflow-y-auto">
         <h3 className="text-lg font-medium text-slate-900">{patient.name}님 {title}</h3>
         <div className="text-xs text-slate-400 mb-4">{patient.id}</div>
@@ -683,7 +749,7 @@ export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailab
             {mode === 'vision' ? (
               // 이전 값을 아래 입력 칸과 같은 세로줄(OD·OS)에 맞춰서
               <div data-prev-vision className="grid gap-x-2 gap-y-0.5 items-baseline" style={{ gridTemplateColumns: '4rem 1fr 1fr 4.5rem' }}>
-                <div className="col-span-4 text-xs font-semibold text-blue-700">{part === 'nct' ? '이전 안압' : '이전 시력'}{previous?.date ? ` ${previous.date}` : ''}{!prevRows.length && <span className="ml-2 font-normal text-slate-400">없음</span>}</div>
+                <div className="col-span-4 text-xs font-semibold text-blue-700">이전 시력·안압{previous?.date ? ` ${previous.date}` : ''}{!prevRows.length && <span className="ml-2 font-normal text-slate-400">없음</span>}</div>
                 {prevRows.map(k => {
                   const big = k === 'ucva' || k === 'bcva';
                   const cls = `text-center tabular-nums ${big ? 'text-2xl font-bold text-slate-900' : 'text-base font-semibold text-slate-600'}`;
@@ -707,19 +773,23 @@ export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailab
           <div className="text-xs text-slate-500 text-center">OD (우안)</div>
           <div className="text-xs text-slate-500 text-center">OS (좌안)</div>
           <div />
-          {fields.map((key, fi) => (
+          {fields.map(key => (
             <React.Fragment key={key}>
               <div className="text-sm text-slate-700">{MEASURE_FIELDS.find(f => f.key === key).label}</div>
               <input
-                autoFocus={fi === 0}
+                autoFocus={key === focusKey}
+                aria-label={`${MEASURE_FIELDS.find(f => f.key === key).label} OD`}
                 value={m[key].od}
                 onChange={e => setEye(key, 'od', e.target.value)}
+                onKeyDown={e => onFieldKey(e, key, 'od')}
                 inputMode="decimal"
                 className="border border-slate-300 rounded-lg px-2 py-2 text-center text-base w-full"
               />
               <input
+                aria-label={`${MEASURE_FIELDS.find(f => f.key === key).label} OS`}
                 value={m[key].os}
                 onChange={e => setEye(key, 'os', e.target.value)}
+                onKeyDown={e => onFieldKey(e, key, 'os')}
                 inputMode="decimal"
                 className="border border-slate-300 rounded-lg px-2 py-2 text-center text-base w-full"
               />
@@ -727,6 +797,7 @@ export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailab
                 {key === 'bcva' && (
                   <button
                     type="button"
+                    tabIndex={-1}
                     onClick={() => setM(s => ({ ...s, autoV: !s.autoV }))}
                     className={`text-xs px-2.5 py-2 rounded-lg border w-full ${m.autoV ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 text-slate-500'}`}
                   >
@@ -742,19 +813,24 @@ export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailab
         )}
 
         {fields.includes('ucva') && mode === 'vision' && (
-          <div className="text-xs text-slate-400 mt-2">시력은 0.1~1.5 같은 숫자나 FC, HM, LP, NLP처럼 적으면 됩니다. AutoV는 AR 값으로 trial lens를 넣고 잰 교정시력일 때 켜주세요.</div>
+          <div className="text-xs text-slate-400 mt-2">Tab으로 칸 이동 · Enter면 저장 (빈 쪽은 카드에 '재야함'). 시력은 0.1~1.5·FC·HM·LP·NLP, 못 재면 '불가'. AutoV = AR 값으로 trial lens를 넣고 잰 교정시력.</div>
         )}
-        {showIop && gatAvailable && !skipIop && (
+        {vision && gatAvailable && !skipIop && (
           <label className="flex items-center gap-2 mt-4 text-sm text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={gat} onChange={e => { setGat(e.target.checked); setWarned(false); }} className="w-4 h-4" />
+            <input type="checkbox" checked={gat} onChange={e => setGat(e.target.checked)} className="w-4 h-4" />
             안압은 GAT로 측정 (정밀검사실에서 입력)
           </label>
         )}
-        {showIop && (
+        {vision && (
           <label className="flex items-center gap-2 mt-2 text-sm text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={noIopChk} onChange={e => { setNoIopChk(e.target.checked); setWarned(false); }} className="w-4 h-4" />
+            <input type="checkbox" checked={noIopChk} onChange={e => setNoIopChk(e.target.checked)} className="w-4 h-4" />
             안압 안 잼 (소아 등)
           </label>
+        )}
+        {scanNote && (
+          <div role="alert" className="mt-4 text-sm bg-red-50 border border-red-300 text-red-800 rounded-lg p-3 font-medium">
+            다른 QR이 찍혔습니다 · 이 창을 먼저 [확인]이나 [취소]한 뒤 다시 찍어 주세요 (찍힌 번호는 지웠습니다)
+          </div>
         )}
 
         {mode === 'prev' && (
@@ -765,11 +841,6 @@ export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailab
           </div>
         )}
 
-        {warned && noIop && (
-          <div className="mt-4 text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-3">
-            NCT 값이 비어 있어요. GAT로 잴 환자라면 위에서 체크해주세요. 그래도 넘어가려면 [확인]을 한 번 더 누르세요.
-          </div>
-        )}
 
         <div className="flex gap-2 mt-6">
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
