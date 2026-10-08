@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone, QrCode } from 'lucide-react';
-import { boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { inProgressText, boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
 import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
@@ -313,6 +313,24 @@ export function ExamNotices({ patients, settings, compact, inline }) {
   const examsNotice = useNotice('exams');
   return <><WaitNotice patients={patients} kind="exams" compact={compact} inline={inline} /><BoardNotice text={examsNotice} compact={compact} inline={inline} /><RoomNotices settings={settings} compact={compact} inline={inline} /></>;
 }
+function testInProgressLabel(t) {
+  return inProgressText(t?.name || t?.short);
+}
+// 검사실 명단 칸 하나 (10-04 '시력방 + 검사실' 큰 TV 모양 — 10-08 사용자: 검사실 대기 명단·검사실별 화면도 같게):
+// 이름(굵게) 윗줄, 아랫줄마다 '검사실 이름(방 색깔·굵게) 할 검사(흰 굵은 글씨)', 검사 중은 노란 글씨 한 줄
+function ExamLineCard({ p, lines }) {
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
+      <div className="text-3xl leading-snug font-extrabold text-white">{patientBoardName(p)}</div>
+      {lines.map(l => (
+        <div key={l.k} className="text-xl leading-snug mt-0.5">
+          {l.room && <span className={`font-extrabold ${darkText(l.tone)}`}>{l.room} </span>}
+          <span className={l.room || l.plain ? 'font-semibold text-white' : `font-bold ${darkText(l.tone)}`}>{l.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 export function ExamBoardList({ patients, settings, compact, wide }) {
   // 처치실에서 먼저 할 일(진료 전 처치, 검사 준비)도 함께 안내
   const treat = treatRoomOf(settings);
@@ -325,38 +343,28 @@ export function ExamBoardList({ patients, settings, compact, wide }) {
   return (
     <div>
       {!wide && <ExamNotices patients={patients} settings={settings} compact={compact} />}
-      {list.length === 0 ? <BoardEmpty /> : wide ? (
-        // 큰 TV: 칩 대신 줄로 — 검사실 이름(방 색깔, 굵게) + 할 검사(흰 글씨), 멀리서도 읽히게
+      {list.length === 0 ? <BoardEmpty /> : !compact ? (
+        // 큰 TV('시력방 + 검사실')·검사실 대기 명단: 칩 대신 줄로 — 검사실 이름(방 색깔, 굵게) + 할 검사(흰 글씨), 멀리서도 읽히게
         <div className="grid gap-2.5" style={boardGrid(24)}>
           {list.map(p => {
             const lines = [];
-            if (activeVf(p)) lines.push({ k: 'vf', tone: 'amber', room: '', text: `${settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중` });
-            else if (prepHolding(p, settings)) lines.push({ k: 'hold', tone: 'amber', room: '', text: `${prepHolding(p, settings).name || prepHolding(p, settings).short} 중` });
+            if (activeVf(p)) lines.push({ k: 'vf', tone: 'amber', room: '', text: testInProgressLabel(settings.tests.find(t => t.id === activeVf(p))) });
+            else if (prepHolding(p, settings)) lines.push({ k: 'hold', tone: 'amber', room: '', text: testInProgressLabel(prepHolding(p, settings)) });
             else {
               if (treatTodo(p).length) lines.push({ k: 'treat', tone: 'rose', room: treat.patientName || treat.name, text: treatTodo(p).join(', ') });
               pendingRooms(p, settings).forEach(r => lines.push({ k: r.id, tone: roomColor(settings, r.id), room: r.patientName || r.name, text: pendingTests(p, settings, r.id).map(t => t.name || t.short).join(', ') }));
             }
-            return (
-              <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
-                <div className="text-3xl leading-snug font-extrabold text-white">{patientBoardName(p)}</div>
-                {lines.map(l => (
-                  <div key={l.k} className="text-xl leading-snug mt-0.5">
-                    {l.room && <span className={`font-extrabold ${darkText(l.tone)}`}>{l.room} </span>}
-                    <span className={l.room ? 'font-semibold text-white' : `font-bold ${darkText(l.tone)}`}>{l.text}</span>
-                  </div>
-                ))}
-              </div>
-            );
+            return <ExamLineCard key={patientKey(p)} p={p} lines={lines} />;
           })}
         </div>
       ) : (
-        <div className="grid gap-2.5" style={boardGrid(compact ? 15 : 20)}>
+        <div className="grid gap-2.5" style={boardGrid(15)}>
           {list.map(p => (
             <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
               <div className={`${compact ? 'text-lg' : 'text-2xl'} font-bold text-white`}>{patientBoardName(p)}</div>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {!activeVf(p) && prepHolding(p, settings) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{prepHolding(p, settings).name || prepHolding(p, settings).short} 중</span>}
-                {activeVf(p) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{settings.tests.find(t => t.id === activeVf(p))?.name || '시야검사'} 검사 중</span>}
+                {!activeVf(p) && prepHolding(p, settings) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{testInProgressLabel(prepHolding(p, settings))}</span>}
+                {activeVf(p) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{testInProgressLabel(settings.tests.find(t => t.id === activeVf(p)))}</span>}
                 {!activeVf(p) && treatTodo(p).length > 0 && (
                   <span className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border font-medium ${darkChip('rose')}`}>
                     {treat.patientName || treat.name}: {treatTodo(p).join(', ')}
@@ -388,21 +396,15 @@ export function RoomBoardList({ room, patients, settings }) {
     <div>
       <BoardNotice text={notice} />
       {list.length === 0 ? <BoardEmpty /> : (
-        <div className="grid gap-2.5" style={boardGrid(20)}>
+        // 검사실 이름은 제목에 있으므로 할 검사만 (흰 굵은 글씨), 검사 중이면 노란 글씨 한 줄만
+        <div className="grid gap-2.5" style={boardGrid(24)}>
           {list.map(p => {
-            const vf = activeVf(p);
-            const vfTest = vf && settings.tests.find(t => t.id === vf);
-            return (
-              <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
-                <div className="text-2xl font-bold text-white">{patientBoardName(p)}</div>
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {vfTest && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{vfTest.name || '시야검사'} 검사 중</span>}
-                  <span className={`text-sm px-3 py-1 rounded-xl border font-medium ${darkChip(roomColor(settings, room.id))}`}>
-                    {pendingTests(p, settings, room.id).map(t => t.name || t.short).join(', ')}
-                  </span>
-                </div>
-              </div>
-            );
+            const vfTest = activeVf(p) && settings.tests.find(t => t.id === activeVf(p));
+            // 검사 중이면 그 줄만 (검사실 대기 명단·시력방 + 검사실과 같은 규칙)
+            const lines = vfTest
+              ? [{ k: 'vf', tone: 'amber', room: '', text: testInProgressLabel(vfTest) }]
+              : [{ k: 'tests', tone: '', room: '', text: pendingTests(p, settings, room.id).map(t => t.name || t.short).join(', '), plain: true }];
+            return <ExamLineCard key={patientKey(p)} p={p} lines={lines} />;
           })}
         </div>
       )}

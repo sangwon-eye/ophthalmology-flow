@@ -37,7 +37,7 @@ for (const [w, h] of [[1024, 768], [1920, 1080]]) {
   await openBoard(page, W, '검사실 대기 명단');
   const card = page.locator('div.break-keep').filter({ hasText: '정밀검사실' }).first();
   const name = await card.locator('div').first().boundingBox();
-  const chip = await card.getByText(/^정밀검사실:/).first().boundingBox();
+  const chip = await card.getByText(/^정밀검사실\s*$/).first().boundingBox(); // 10-08: 칩 대신 '정밀검사실 OCT' 줄 (r100)
   ok(chip.y >= name.y + name.height - 1, `${w}px: 검사실 명단은 이름 아래에 검사`);
   if (w === 1920) await page.screenshot({ path: `${SP}/r55-exam-${w}.png` });
   allErrors.push(...errors);

@@ -1435,6 +1435,12 @@ export function orderedOptions(t, d) {
   const known = (t?.options || []).filter(o => chosen.includes(o));
   return [...known, ...chosen.filter(o => !known.includes(o))];
 }
+// '○○ 검사 중' (10-08 사용자: '굴절 검사 검사 중'처럼 겹치지 않게) — 이름에 '검사'가 있으면 '중'만 붙임.
+// 환자용 화면·직원 검사실 카드 모두 이 규칙 하나
+export function inProgressText(label) {
+  const name = String(label || '').trim() || '시야검사';
+  return name.includes('검사') ? `${name} 중` : `${name} 검사 중`;
+}
 export function testLabelWithOptions(t, d) {
   const opts = orderedOptions(t, d);
   const detail = cleanDetail(d);
