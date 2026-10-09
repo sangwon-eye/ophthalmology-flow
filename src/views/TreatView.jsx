@@ -425,7 +425,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
         </div>
       )}
       <div id="treat-triage" className={`${triage.length ? 'mb-8' : 'mb-4'} scroll-mt-36`}>
-        <SectionTitle hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
+        <SectionTitle muted={triage.length === 0} hint="초진은 오늘 할 검사와 예진 여부를, 2차 진료는 다음 교수님 진료 전에 추가할 검사를 지정하세요.">
           검사 지정 대기 (초진 · History · 2차 진료) · {triage.length}명
         </SectionTitle>
         {triage.map(p => {
@@ -450,7 +450,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       </div>
 
       <div id="treat-procs" className="scroll-mt-36">
-        <SectionTitle hint="검사를 마친 초진 환자의 예진과 전공의 처치를 진행합니다.">처치 대기 · {procs.length}명</SectionTitle>
+        <SectionTitle muted={procs.length === 0} hint="검사를 마친 초진 환자의 예진과 전공의 처치를 진행합니다.">처치 대기 · {procs.length}명</SectionTitle>
         {procs.map(p => (
           <SimpleCard key={patientKey(p)} p={p} tone="indigo" stale={staleOf(p)}
             badges={p.explainedEarly && inResidentProcedure(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료 · 처치 후 귀가</span>}>

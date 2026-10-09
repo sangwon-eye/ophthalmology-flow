@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw, ArrowDown } from 'lucide-react';
 import { fuMissingNow, ageYears, laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
-import { FuMissingBadge, ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
+import { DoctorDot, FuMissingBadge, ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
 import { NOTICE_PRESETS, consultRoomLabel } from './BoardView.jsx';
 import { WAIT_TEXT, WAIT_WINDOW_MIN, estimateWait, shownWait } from '../core/flow.jsx';
@@ -913,10 +913,13 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                   <button type="button" onClick={() => swapOrder(p)} className="text-xs px-3 py-1.5 rounded-lg border border-fuchsia-300 text-fuchsia-700">진료 순서 바꾸기</button>
                 )}
                 <button type="button" onClick={() => setInfoEdit(p)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600">정보 수정</button>
-                <select value={p.doctor} onChange={e => reassignDoctor(p, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
-                  {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
-                  {doctors.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
+                <span className="inline-flex items-center gap-1.5">
+                  <DoctorDot name={p.doctor} />
+                  <select value={p.doctor} onChange={e => reassignDoctor(p, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+                    {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
+                    {doctors.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </span>
                 <button type="button" onClick={() => toggleFirst(patientKey(p), !p.firstVisit)} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
                 </button>

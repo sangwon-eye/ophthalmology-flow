@@ -5,15 +5,15 @@ import * as XLSX from 'xlsx';
 /* 색상                                                                */
 /* ------------------------------------------------------------------ */
 export const COLOR_MAP = {
-  blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', solid: 'bg-blue-600' },
-  teal: { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', solid: 'bg-teal-600' },
-  violet: { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', solid: 'bg-violet-600' },
-  rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', solid: 'bg-rose-600' },
-  sky: { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', solid: 'bg-sky-600' },
-  emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', solid: 'bg-emerald-600' },
-  indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', solid: 'bg-indigo-600' },
-  amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', solid: 'bg-amber-600' },
-  slate: { bg: 'bg-slate-100', border: 'border-slate-200', text: 'text-slate-700', solid: 'bg-slate-600' },
+  blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', solid: 'bg-blue-600', bar: 'border-blue-600' },
+  teal: { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', solid: 'bg-teal-600', bar: 'border-teal-600' },
+  violet: { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', solid: 'bg-violet-600', bar: 'border-violet-600' },
+  rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', solid: 'bg-rose-600', bar: 'border-rose-600' },
+  sky: { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', solid: 'bg-sky-600', bar: 'border-sky-600' },
+  emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', solid: 'bg-emerald-600', bar: 'border-emerald-600' },
+  indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', solid: 'bg-indigo-600', bar: 'border-indigo-600' },
+  amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', solid: 'bg-amber-600', bar: 'border-amber-600' },
+  slate: { bg: 'bg-slate-100', border: 'border-slate-200', text: 'text-slate-700', solid: 'bg-slate-600', bar: 'border-slate-600' },
 };
 export const ROOM_PALETTE = ['teal', 'violet', 'rose', 'sky', 'emerald', 'indigo'];
 export const INPUT = 'border border-slate-300 rounded-lg px-3 py-2 text-sm w-full bg-white';

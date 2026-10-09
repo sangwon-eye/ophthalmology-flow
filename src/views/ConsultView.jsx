@@ -4,7 +4,7 @@ import { Check, RotateCcw } from 'lucide-react';
 import { resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
-import { FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { DoctorDot, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -16,8 +16,8 @@ export function DoctorPicker({ doctors, value, onChange }) {
   return (
     <div className="flex gap-1 bg-white rounded-lg border border-slate-300 p-1 flex-wrap max-w-full">
       {doctors.map(name => (
-        <button key={name} type="button" onClick={() => onChange(name)} className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${value === name ? 'bg-amber-600 text-white' : 'text-slate-600'}`}>
-          {name}
+        <button key={name} type="button" onClick={() => onChange(name)} className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap inline-flex items-center gap-1.5 ${value === name ? 'bg-amber-600 text-white' : 'text-slate-600'}`}>
+          <DoctorDot name={name} />{name}
         </button>
       ))}
     </div>
@@ -40,10 +40,10 @@ function ConfirmLink({ label, confirmLabel, onConfirm, className = '' }) {
   );
 }
 
-export function SectionTitle({ children, hint }) {
+export function SectionTitle({ children, hint, muted = false }) {
   return (
     <div className="mb-3">
-      <div className="text-sm font-medium text-slate-600" title={hint || undefined}>{children}</div>
+      <SectionHead muted={muted} title={hint || undefined}>{children}</SectionHead>
     </div>
   );
 }
@@ -679,7 +679,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
           )}
 
           <div id="consult-waiting" className="scroll-mt-36" />
-          <SectionTitle>
+          <SectionTitle muted={waiting.length === 0}>
             진료 대기 · {waiting.length}명
             {testing > 0 ? ` (검사 진행 중 ${testing}명)` : ''}
             {residentCount > 0 ? ` (처치실 ${residentCount}명)` : ''}

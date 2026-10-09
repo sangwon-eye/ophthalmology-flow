@@ -64,19 +64,28 @@ export function TextSizeControl({ className = '', selectClassName = 'border-slat
 
 // 직원 화면 폭: 넓은 모니터에서 카드가 한 줄에 들어가도록 넓게 (좁은 화면·태블릿은 화면 폭에 맞춤)
 export const SHELL_WIDTH = 'max-w-6xl';
+// 넓은 모니터 2열 (10-09 사용자): 1920 모니터를 100~110%로 볼 때(화면 폭 1700px 이상)만 카드를 두 줄로.
+// 1280 모니터나 125% 이상 배율에서는 지금처럼 한 줄 (WIDE_LIST가 grid-cols-1)
+export const SHELL_WIDE = 'max-w-6xl min-[1700px]:max-w-[1840px]';
+export const WIDE_LIST = 'grid grid-cols-1 min-[1700px]:grid-cols-2 gap-x-4 items-start';
 // 화면 버전 (화면 파일을 만든 시각). 업데이트 뒤 각 PC가 새 화면인지 확인할 때 봅니다.
 export const APP_VERSION = `버전 ${typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : '-'}`;
-export function ScreenShell({ title, color, onBack, lastSync, count, extra, sub, children }) {
+// 화면 색 (구역 제목 왼쪽 막대 등): ScreenShell이 정함
+export const ShellColorContext = createContext('slate');
+export function ScreenShell({ title, color, onBack, lastSync, count, extra, sub, wide = false, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
+  const W = wide ? SHELL_WIDE : SHELL_WIDTH;
   return (
+    <ShellColorContext.Provider value={color || 'slate'}>
     <div className="min-h-screen bg-slate-50">
       <div className={`sticky top-0 z-10 ${c.bg} border-b ${c.border} print:hidden`}>
-        <div className={`${SHELL_WIDTH} mx-auto px-5 py-2 flex items-center justify-between gap-3 flex-wrap`}>
+        <div className={`${W} mx-auto px-5 py-2 flex items-center justify-between gap-3 flex-wrap`}>
           <div>
             <div className={`text-[11px] leading-none font-medium ${c.text} mb-1`}>Ophthalmology Flow{forcedToday && <span className="ml-2 px-1.5 rounded bg-amber-100 text-amber-800">날짜 {forcedToday} (직접 정함)</span>}</div>
             <h1 className="text-lg leading-tight font-semibold text-slate-900">
               {title}
-              {typeof count === 'number' && <span className="ml-2 text-base font-normal text-slate-500">대기 {count}명</span>}
+              {/* 10-09 사용자: 멀리서도 보이게 방 색깔 큰 알약 (0명은 메인 화면처럼 흐린 회색) */}
+              {typeof count === 'number' && <span data-wait-count className={`ml-2.5 inline-block align-middle ${count ? c.solid : 'bg-slate-300'} text-white text-lg font-bold leading-none px-3 py-1.5 rounded-full whitespace-nowrap`}>대기 {count}명</span>}
             </h1>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -87,14 +96,27 @@ export function ScreenShell({ title, color, onBack, lastSync, count, extra, sub,
             </button>
           </div>
         </div>
-        {sub && <div className={`${SHELL_WIDTH} mx-auto px-5 pb-2`}>{sub}</div>}
+        {sub && <div className={`${W} mx-auto px-5 pb-2`}>{sub}</div>}
       </div>
-      <div className={`${SHELL_WIDTH} mx-auto px-5 py-5`}>{children}</div>
+      <div className={`${W} mx-auto px-5 py-5`}>{children}</div>
       <div className="t-hint text-center text-xs text-slate-400 pb-6 print:hidden">
         {lastSync && <>마지막 업데이트 {lastSync.toLocaleTimeString('ko-KR')} · </>}{APP_VERSION}
       </div>
     </div>
+    </ShellColorContext.Provider>
   );
+}
+
+// 구역 제목 (예: '검사 대기 · 8명'): 굵게 + 왼쪽 방 색깔 막대, 0명인 구역은 흐리고 작게 (10-09 사용자)
+export function sectionHeadClass(color, muted) {
+  const c = COLOR_MAP[color] || COLOR_MAP.slate;
+  return muted
+    ? 'border-l-4 border-slate-200 pl-2.5 text-sm font-medium text-slate-400'
+    : `border-l-4 ${c.bar} pl-2.5 text-base font-bold text-slate-800`;
+}
+export function SectionHead({ muted = false, className = '', title, children }) {
+  const color = useContext(ShellColorContext);
+  return <div data-section-head className={`${sectionHeadClass(color, muted)} leading-snug ${className}`} title={title}>{children}</div>;
 }
 
 export function EmptyState({ text, compact = false }) {
@@ -1233,9 +1255,36 @@ export const SESSION_OPTIONS = [['all', '전체'], ['am', '오전'], ['pm', '오
 
 // 색 규칙: 회색=정보(교수 이름·번호), 파랑=기본 동작, 빨강=산동, 주황=확인 필요(처방 전·History 필요·FU 미지정),
 // 노랑=우선·진행 중, 초록=완료
+// 교수님 색 점 (10-09 사용자): 어느 교수님 환자인지 글을 읽지 않아도 보이게.
+// 설정 > 교수 관리에서 8색 중 고름(교수님별 설정의 새 칸 dotColor), 안 고르면 남은 색을 교수 순서대로 자동.
+// 산동(빨강)·확인 필요(주황)·완료(초록)·기본 동작(파랑)과 헷갈리지 않는 색만 씀
+export const DoctorOrderContext = createContext({ order: [], prefs: {} });
+export const DOCTOR_DOTS = ['#8b5cf6', '#ec4899', '#0891b2', '#a16207', '#4f46e5', '#0d9488', '#be123c', '#64748b'];
+export function doctorDotColor({ order = [], prefs = {} } = {}, name) {
+  const own = (d) => (DOCTOR_DOTS.includes(prefs?.[d]?.dotColor) ? prefs[d].dotColor : null);
+  if (own(name)) return own(name);
+  const taken = new Set(order.map(own).filter(Boolean));
+  const free = DOCTOR_DOTS.filter(c => !taken.has(c));
+  const pool = free.length ? free : DOCTOR_DOTS;
+  const i = order.filter(d => !own(d)).indexOf(name);
+  if (i >= 0) return pool[i % pool.length];
+  let h = 0;
+  for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) % 9973;
+  return pool[h % pool.length];
+}
+export function DoctorDot({ name, color }) {
+  const ctx = useContext(DoctorOrderContext);
+  if (!name && !color) return null;
+  return <span aria-hidden="true" data-doctor-dot className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: color || doctorDotColor(ctx, name) }} />;
+}
 export function DoctorChip({ p }) {
+  const ctx = useContext(DoctorOrderContext);
   if (!p.doctor) return null;
-  return <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{p.doctor}</span>;
+  return (
+    <span className="text-xs px-2 py-0.5 rounded-full bg-white text-slate-700 font-semibold border inline-flex items-center gap-1.5" style={{ borderColor: `${doctorDotColor(ctx, p.doctor)}66` }}>
+      <DoctorDot name={p.doctor} />{p.doctor}
+    </span>
+  );
 }
 // 넓은 화면에서는 이름 줄 오른쪽 끝에 (좁으면 다음 줄로)
 // 화면 위쪽 요약 줄 (처치실·진료실): 묶음마다 인원 칩, 누르면 그 묶음으로 이동, 0명은 흐리게
@@ -1308,7 +1357,8 @@ export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirs
 }
 
 // 손잡이(⋮⋮)를 잡고 끌어서 순서를 바꾸는 목록. 마우스·터치 모두 지원
-export function DraggableList({ items, getKey, onMove, renderItem, locked = false }) {
+// columns: 넓은 화면에서 2열 (WIDE_LIST). 2열일 때 끌기는 가로·세로 모두 보고 가장 가까운 자리로 (읽는 순서: 왼쪽 → 오른쪽, 다음 줄)
+export function DraggableList({ items, getKey, onMove, renderItem, locked = false, columns = false }) {
   const wrapRef = useRef(null);
   const dragRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -1321,10 +1371,12 @@ export function DraggableList({ items, getKey, onMove, renderItem, locked = fals
     if (!nodes[index]) return;
     const rects = nodes.map(n => {
       const r = n.getBoundingClientRect();
-      return { top: r.top, height: r.height };
+      return { top: r.top, height: r.height, left: r.left, width: r.width };
     });
+    // 실제로 두 줄 이상 놓였을 때만 2열 방식 (한 줄이면 예전 계산 그대로)
+    const grid = new Set(rects.map(r => Math.round(r.left))).size > 1;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
-    const d = { index, key: getKey(items[index]), startY: e.clientY, dy: 0, rects, target: index };
+    const d = { index, key: getKey(items[index]), startX: e.clientX, startY: e.clientY, dx: 0, dy: 0, rects, target: index, grid };
     dragRef.current = d;
     setDragActive(true);
     setDrag(d);
@@ -1335,13 +1387,24 @@ export function DraggableList({ items, getKey, onMove, renderItem, locked = fals
     const d = dragRef.current;
     if (!d) return;
     const dy = e.clientY - d.startY;
+    const dx = d.grid ? e.clientX - d.startX : 0;
     const r = d.rects[d.index];
-    const center = r.top + r.height / 2 + dy;
     let target = 0;
-    d.rects.forEach((rr, i) => {
-      if (i !== d.index && rr.top + rr.height / 2 < center) target += 1;
-    });
-    const next = { ...d, dy, target };
+    if (d.grid) {
+      // 2열: 끌고 있는 카드 가운데와 가장 가까운 자리
+      const cx = r.left + r.width / 2 + dx, cy = r.top + r.height / 2 + dy;
+      let best = Infinity;
+      d.rects.forEach((rr, i) => {
+        const dist = (rr.left + rr.width / 2 - cx) ** 2 + (rr.top + rr.height / 2 - cy) ** 2;
+        if (dist < best) { best = dist; target = i; }
+      });
+    } else {
+      const center = r.top + r.height / 2 + dy;
+      d.rects.forEach((rr, i) => {
+        if (i !== d.index && rr.top + rr.height / 2 < center) target += 1;
+      });
+    }
+    const next = { ...d, dx, dy, target };
     dragRef.current = next;
     setDrag(next);
   };
@@ -1355,10 +1418,25 @@ export function DraggableList({ items, getKey, onMove, renderItem, locked = fals
   };
 
   return (
-    <div ref={wrapRef}>
+    <div ref={wrapRef} className={columns ? WIDE_LIST : undefined}>
       {items.map((item, i) => {
         let style;
-        if (drag) {
+        if (drag && drag.grid) {
+          // 2열: 사이에 있는 카드는 한 칸 앞/뒤 자리로 미끄러짐
+          const slide = (j) => {
+            const a = drag.rects[i], b = drag.rects[j];
+            return { transform: `translate(${b.left - a.left}px, ${b.top - a.top}px)`, transition: 'transform 150ms ease' };
+          };
+          if (i === drag.index) {
+            style = { transform: `translate(${drag.dx}px, ${drag.dy}px)`, position: 'relative', zIndex: 30 };
+          } else if (drag.index < drag.target && i > drag.index && i <= drag.target) {
+            style = slide(i - 1);
+          } else if (drag.index > drag.target && i >= drag.target && i < drag.index) {
+            style = slide(i + 1);
+          } else {
+            style = { transition: 'transform 150ms ease' };
+          }
+        } else if (drag) {
           const h = drag.rects[drag.index]?.height || 0;
           if (i === drag.index) {
             style = { transform: `translateY(${drag.dy}px)`, position: 'relative', zIndex: 30 };

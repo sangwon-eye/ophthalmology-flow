@@ -4,7 +4,7 @@ import { Check, Search, RotateCcw } from 'lucide-react';
 import { inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { findKioskPatient } from './RoleSelect.jsx';
-import { FuMissingBadge, TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
+import { WIDE_LIST, SectionHead, FuMissingBadge, TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
 import { SectionTitle } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 
@@ -335,11 +335,11 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
       {/* 장비 필터(검사실)·검사 대기 인원(시력실)과 정렬을 한 줄에 */}
       <div className="flex items-start justify-between gap-2 mb-3">
         {isVision ? (
-          <div className="self-center text-sm font-medium text-slate-500">검사 대기 · {roomList.length}명</div>
+          <SectionHead muted={roomList.length === 0} className="self-center">검사 대기 · {roomList.length}명</SectionHead>
         ) : isExamRoom ? (
           <div className="flex-1 min-w-0 flex flex-col gap-2" data-testid="exam-top">
             <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-slate-500">검사 대기</span>
+            <SectionHead muted={roomList.length === 0}>검사 대기</SectionHead>
             {groups.length >= 2 ? <>
               <FilterChip active={!activeGroup} onClick={() => setFilter('all')} label={`전체 ${roomList.length}`} />
               {visibleGroups(groups, roomList).map(g => (
@@ -385,6 +385,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
         <EmptyState compact={isVision || embedded} text="대기 중인 환자가 없습니다" />
       ) : (
         <DraggableList
+          columns={!embedded}
           items={nameSort ? [...shown].sort(byName) : shown}
           locked={nameSort}
           getKey={patientKey}
@@ -576,7 +577,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
       {isVision && (
         <div className="mb-8">
           <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-            <div className="text-sm font-medium text-slate-500">접수 대기 · {notCheckedIn.length}명</div>
+            <SectionHead muted={notCheckedIn.length === 0}>접수 대기 · {notCheckedIn.length}명</SectionHead>
             <SegmentedToggle value={session} onChange={setSession} options={SESSION_OPTIONS} />
             <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5">
               <Search size={14} className="text-slate-400" />
@@ -585,7 +586,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
           </div>
           {notCheckedIn.length === 0 ? (
             <div className="text-sm text-slate-400 py-4">{q ? '찾는 환자가 없습니다' : '접수 대기 환자가 없습니다'}</div>
-          ) : notCheckedIn.map(p => (
+          ) : <div className={WIDE_LIST}>{notCheckedIn.map(p => (
             <div key={patientKey(p)} className="bg-white border border-slate-200 rounded-xl p-4 mb-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -610,7 +611,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 </div>
               )}
             </div>
-          ))}
+          ))}</div>}
         </div>
       )}
 
@@ -666,7 +667,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   );
   if (embedded) return <div className="mb-8">{content}</div>;
   return (
-    <ScreenShell title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length} extra={isVision || isExamRoom ? <ChimeControl /> : undefined}>
+    <ScreenShell wide title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length} extra={isVision || isExamRoom ? <ChimeControl /> : undefined}>
       {content}
     </ScreenShell>
   );

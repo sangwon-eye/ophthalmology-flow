@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { placeConsultArrivals, historyChanges, setHistoryDay, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
-import { DoctorChip, SexAge, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
+import { DoctorOrderContext, DoctorChip, SexAge, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, QrConsultBoard, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
 import { StationView } from './views/StationView.jsx';
 import { ConsultView } from './views/ConsultView.jsx';
@@ -387,7 +387,10 @@ export default function App() {
   }
   return main;
   };
+  // 교수님 색 점 순서: 설정의 교수 순서 → 명단에만 있는 교수
+  const doctorOrder = [...new Set([...doctors, ...patients.map(p => p.doctor).filter(Boolean)])];
   return <PatientMemoContext.Provider value={mutatePatients}>
+    <DoctorOrderContext.Provider value={{ order: doctorOrder, prefs: doctorPrefs || {} }}>
     <NoticeContext.Provider value={boardNotices || { notices: {} }}>
       <HxContext.Provider value={{ fuMap, measure: history, fields: hxFieldsOf(settings) }}>
         {/* 화면 오류: 흰 화면 대신 안내 (화면을 바꾸면 새로 시작) */}
@@ -396,6 +399,7 @@ export default function App() {
         </ErrorBoundary>
       </HxContext.Provider>
     </NoticeContext.Provider>
+    </DoctorOrderContext.Provider>
     {askPassword && <PasswordModal onOk={() => { setAskPassword(false); setRole('settings'); }} onCancel={() => setAskPassword(false)} />}
     {lockError && !role && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm rounded-xl px-4 py-2 z-50">{lockError}</div>}
   </PatientMemoContext.Provider>;

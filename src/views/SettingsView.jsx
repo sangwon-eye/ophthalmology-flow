@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Plus, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { RESULT_FIELDS, COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, renameTestOptions, sortedTests, toDraft, holdCallOf } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
-import { ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
+import { DOCTOR_DOTS, DoctorDot, doctorDotColor, ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';
 import { AccessPasswordCard } from './AccessGate.jsx';
 import { DoctorRoomInput } from './BoardView.jsx';
@@ -462,7 +462,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
           <div className="space-y-2">
             {docDraft.map(name => (
               <div key={name} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 flex-wrap">
-                  <span className="text-slate-700 flex-1">{name}</span>
+                  <span className="text-slate-700 flex-1 inline-flex items-center gap-2"><DoctorDot color={doctorDotColor({ order: docDraft, prefs: prefDraft }, name)} />{name}</span>
                   <DoctorRoomInput name={name} value={prefDraft?.[name]?.roomNo} onSave={v => setPref(name, 'roomNo', v)} />
                   <label className="flex items-center gap-1.5 text-xs text-slate-600">
                     초진 예진 기본값
@@ -483,6 +483,18 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                 <button type="button" aria-label="아래로" onClick={() => moveDoctor(name, 'down')} className="p-1 rounded border border-slate-200 text-slate-500 bg-white"><ChevronDown size={14} /></button>
                 <ConfirmButton label="삭제" onConfirm={() => removeDoctor(name)} />
                 <div className="w-full border-t border-slate-200 pt-2">
+                  {/* 교수님 색 (10-09 사용자): 직원 화면 이름 옆 점. 다른 교수님이 고른 색은 흐리게(골라도 됨), [자동]은 남은 색을 순서대로 */}
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2" data-dot-picker={name}>
+                    <span className="text-xs font-medium text-slate-500 mr-1">색</span>
+                    {DOCTOR_DOTS.map((c, i) => {
+                      const mine = prefDraft?.[name]?.dotColor === c;
+                      const other = !mine && docDraft.some(d => d !== name && prefDraft?.[d]?.dotColor === c);
+                      return <button key={c} type="button" aria-label={`${name} 색 ${i + 1}`} aria-pressed={mine} onClick={() => setPref(name, 'dotColor', c)}
+                        className={`w-6 h-6 rounded-full border-2 ${mine ? 'border-slate-900' : 'border-white'} shadow ${other ? 'opacity-30' : ''}`} style={{ background: c }} />;
+                    })}
+                    <button type="button" aria-pressed={!DOCTOR_DOTS.includes(prefDraft?.[name]?.dotColor)} onClick={() => setPref(name, 'dotColor', undefined)}
+                      className={`text-xs px-2 py-0.5 rounded-full border ${DOCTOR_DOTS.includes(prefDraft?.[name]?.dotColor) ? 'border-slate-300 text-slate-500 bg-white' : 'border-slate-800 bg-slate-800 text-white'}`}>자동</button>
+                  </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="text-xs font-medium text-slate-500">주요 검사</span>{sortedTests(settings).map(t => {
                     const selected = prefDraft?.[name]?.followupTests;
