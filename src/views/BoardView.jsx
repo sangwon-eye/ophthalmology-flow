@@ -307,22 +307,36 @@ function FrontRest({ list, start, foot }) {
       {list.length > 0 && (
         <div ref={gridRef} data-front-rest className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-5 mt-5">
           {shown.map((p, i) => <BigRow key={patientKey(p)} n={start + i} p={p} size="md" />)}
-          {over && <div data-front-more className="flex items-center justify-center rounded-2xl border-2 border-slate-700 text-3xl font-bold text-slate-300 leading-snug">외 {list.length - shown.length}명 대기</div>}
+          {/* 여기 안 보이는 환자는 큰 복도에서 복도 끝 모니터(진료실 대기 명단 전체 — 같은 번호)로 자기 순서를 봄 (10-09 사용자) */}
+          {over && (
+            // 두 줄이어도 옆 칸(2번부터 같은 크기)보다 높아지지 않게 글씨·줄 간격을 맞춤 (글씨 크기를 바꿔도 같은 비율)
+            <div data-front-more className="flex flex-col items-center justify-center rounded-2xl border-2 border-slate-700 px-3 py-0.5 text-center leading-tight break-keep">
+              <span className="text-2xl font-bold text-slate-300">외 {list.length - shown.length}명 대기</span>
+              <span className="text-base text-slate-400">순서는 복도 끝 모니터에서 확인</span>
+            </div>
+          )}
         </div>
       )}
       {foot && <div ref={footRef} data-board-foot className="text-lg text-slate-400 mt-4">{foot}</div>}
     </>
   );
 }
-function SmallRest({ list, start, color, withTime = false }) {
+// 시력방 TV 6번부터 (10-09 사용자: 1~5번과 글씨 차이가 너무 크지 않게, 시력방 대기는 20명을 넘지 않음)
+// big: 시력방 대기 명단 — 2~5번(48px)의 3/4쯤인 36px 칸(BigRow md) / 아니면 시력방 + 검사실 — 1~5번(30px)의 0.8배 24px
+function SmallRest({ list, start, color, big = false }) {
   if (!list.length) return null;
   return (
-    <div className="mt-4">
+    <div className="mt-4" data-small-rest>
       <div className="text-lg text-slate-400 mb-2">그다음 순서</div>
-      <div className={`grid ${withTime ? 'gap-x-2 gap-y-3' : 'gap-2'}`} style={boardGrid(withTime ? 17 : 15)}>
-        {list.map((p, i) => (withTime ? <ConsultRow key={patientKey(p)} p={p} n={start + i} compact />
-          : <BoardNumberRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} p={p} color={color} compact />))}
-      </div>
+      {big ? (
+        <div className="grid gap-3" style={boardGrid(21)}>
+          {list.map((p, i) => <BigRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} who={p} size="md" tone={color} />)}
+        </div>
+      ) : (
+        <div className="grid gap-2" style={boardGrid(15)}>
+          {list.map((p, i) => <BoardNumberRow key={patientKey(p)} n={start + i} name={patientBoardName(p)} p={p} color={color} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -352,7 +366,7 @@ export function VisionBoardList({ patients, compact, big, five }) {
               {list.slice(1, 5).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} name={patientBoardName(p)} who={p} size="lg" tone="blue" />)}
             </div>
           )}
-          <SmallRest list={list.slice(5)} start={6} color="blue" />
+          <SmallRest list={list.slice(5)} start={6} color="blue" big />
         </div>
       ) : (
         <div className="grid gap-2.5" style={boardGrid(compact ? 13 : 17)}>

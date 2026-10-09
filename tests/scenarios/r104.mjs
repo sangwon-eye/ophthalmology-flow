@@ -1,6 +1,6 @@
 import { chromium, SP, editKey, tester, BASE } from '../lib.mjs';
 // 진료실 앞 모니터 (10-09 사용자 B안, 이름은 모두 가상): 진료 중(회색) · 다음 순서(가장 크게) · 2번부터 모두 같은 크기 두 줄.
-// 화면에 다 안 들어가면 마지막 칸 '외 N명 대기' — 화면이 넘치지 않아 '다음 순서'가 자동 스크롤로 밖에 나가지 않음.
+// 화면에 다 안 들어가면 마지막 칸 '외 N명 대기' + '순서는 복도 끝 모니터에서 확인' — 화면이 넘치지 않아 '다음 순서'가 자동 스크롤로 밖에 나가지 않음.
 // 모니터 1280×1024·1920×1080, 크롬 배율 100·125·150%, 대기 화면 '글씨' 125·150%에서 확인
 const today = new Date().toLocaleDateString('sv-SE');
 const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -20,14 +20,16 @@ const check = (page) => page.evaluate(() => {
   const cells = grid ? [...grid.children] : [];
   const hs = cells.map(c => Math.round(c.getBoundingClientRect().height));
   const nums = cells.filter(c => !c.hasAttribute('data-front-more')).map(c => Number(c.querySelector('.rounded-full')?.textContent));
-  const more = grid?.querySelector('[data-front-more]')?.textContent || '';
+  const moreEl = grid?.querySelector('[data-front-more]');
+  const more = moreEl ? moreEl.firstElementChild.textContent : '';
+  const moreHint = moreEl ? /순서는 복도 끝 모니터에서 확인/.test(moreEl.textContent) : true;
   const next = [...document.querySelectorAll('.rounded-2xl')].find(e => /다음 순서/.test(e.textContent));
   const foot = document.querySelector('[data-board-foot]');
   return {
     fits: sc.scrollHeight <= sc.clientHeight + 1,
     cols: grid ? getComputedStyle(grid).gridTemplateColumns.split(' ').length : 0,
     same: hs.length ? Math.max(...hs) - Math.min(...hs) <= 1 : true,
-    nums, more,
+    nums, more, moreHint,
     nextBig: next ? parseFloat(getComputedStyle(next.querySelector('span.whitespace-nowrap:not(.rounded-full)') || next).fontSize) : 0,
     restName: cells[0] ? parseFloat(getComputedStyle(cells[0].querySelector('span.whitespace-nowrap:not(.rounded-full)') || cells[0]).fontSize) : 0,
     footVisible: !!foot && foot.getBoundingClientRect().bottom <= sc.getBoundingClientRect().bottom + 1,
@@ -60,6 +62,7 @@ for (const count of [13, 3]) {
       ok(r.nums.every((n, i) => n === i + 2) && (shown === 12 ? !r.more : r.more === `외 ${12 - shown}명 대기`), `${tag}: 번호 2~${shown + 1} + ${r.more || '모두 보임'}`);
       ok(r.nextBig > r.restName * 1.3, `${tag}: 다음 순서가 가장 큼 (${r.nextBig} > ${r.restName})`);
       ok(!r.wide, `${tag}: 글자가 칸 밖으로 넘치지 않음`);
+      ok(r.moreHint, `${tag}: '외 N명' 칸에 '순서는 복도 끝 모니터에서 확인'`);
       if (/^1280×1024( 배율125| 글씨150)?$|^1920×1080( 배율150)?$/.test(label)) await page.screenshot({ path: `${SP}/r104-${label.replace(/[×\s]/g, '-')}.png` });
     }
     ok(errors.length === 0, `${tag}: 페이지 오류 없음 ${errors.join(' / ')}`);
