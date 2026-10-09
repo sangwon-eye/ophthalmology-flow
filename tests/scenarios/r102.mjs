@@ -67,7 +67,8 @@ for (const [btn, label, sizes] of screens) {
     await page.getByRole('button', { name: btn }).first().click(); await page.waitForTimeout(1500);
     const r = await check(page, label);
     const tag = `${label} ${w}×${h} ${Math.round(s * 100)}%`;
-    ok(r.rows >= 5 && r.tags >= 1 && r.probs.length === 0, `${tag}: 줄바꿈·높이·모서리 표 (${r.rows}줄, 재진료 ${r.tags}) ${r.probs.slice(0, 3).join(' / ')}`);
+    // 진료실 앞 모니터는 작은 화면에서 넘치는 환자를 '외 N명 대기' 칸으로 묶음 (10-09 B안, r104)
+    ok(r.rows >= (label === '진료실 앞' ? 3 : 5) && r.tags >= 1 && r.probs.length === 0, `${tag}: 줄바꿈·높이·모서리 표 (${r.rows}줄, 재진료 ${r.tags}) ${r.probs.slice(0, 3).join(' / ')}`);
     ok(r.legend && r.over === 0, `${tag}: '이름 앞 시각은 예약 시간입니다' 한 줄, 넘침 없음`);
     if (label !== '진료실 앞') {
       ok(await page.getByText('김선웅 교수님', { exact: true }).count() >= 1, `${tag}: 교수님 이름 'OOO 교수님'`);

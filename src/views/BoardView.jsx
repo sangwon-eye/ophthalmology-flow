@@ -270,6 +270,50 @@ function BigRow({ label, name, size, tone = 'amber', n, muted = false, p = null,
     </div>
   );
 }
+// 진료실 앞 모니터 2번부터 (10-09 사용자 B안): 모두 같은 크기 칸(2·3번에 쓰던 크기), 두 줄(왼쪽 → 오른쪽).
+// 화면에 다 안 들어가면 마지막 칸을 '외 N명 대기'로 — '다음 순서'가 자동 스크롤로 화면 밖에 나가지 않게.
+// 칸 수는 화면에 그려진 칸 높이로 계산 (글씨 크기·화면 크기가 바뀌면 다시 계산)
+function FrontRest({ list, start, foot }) {
+  const gridRef = useRef(null);
+  const footRef = useRef(null);
+  const [fit, setFit] = useState(Infinity);
+  useEffect(() => {
+    const grid = gridRef.current;
+    const scroller = grid?.closest('.board-scroll');
+    if (!grid || !scroller) return undefined;
+    const calc = () => {
+      const cells = [...grid.children];
+      if (!cells.length) return;
+      const cols = Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length);
+      const rowGap = parseFloat(getComputedStyle(grid).rowGap) || 0;
+      const rowH = Math.max(...cells.map(c => c.getBoundingClientRect().height)) + rowGap;
+      const padBottom = parseFloat(getComputedStyle(grid.parentElement.parentElement).paddingBottom) || 0;
+      const footH = footRef.current ? footRef.current.getBoundingClientRect().height + (parseFloat(getComputedStyle(footRef.current).marginTop) || 0) : 0;
+      const avail = scroller.getBoundingClientRect().bottom - grid.getBoundingClientRect().top - footH - padBottom;
+      const rows = Math.max(1, Math.floor((avail + rowGap) / rowH));
+      setFit(rows * cols);
+    };
+    calc();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(calc) : null;
+    // 진료 중 줄·안내 문구가 생기거나 없어지면 명단 전체 높이가 바뀜 → 다시 계산
+    if (ro) { ro.observe(scroller); ro.observe(grid); ro.observe(grid.parentElement); }
+    window.addEventListener('resize', calc);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
+  }, [list.length]);
+  const over = list.length > fit;
+  const shown = over ? list.slice(0, Math.max(0, fit - 1)) : list;
+  return (
+    <>
+      {list.length > 0 && (
+        <div ref={gridRef} data-front-rest className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-5 mt-5">
+          {shown.map((p, i) => <BigRow key={patientKey(p)} n={start + i} p={p} size="md" />)}
+          {over && <div data-front-more className="flex items-center justify-center rounded-2xl border-2 border-slate-700 text-3xl font-bold text-slate-300 leading-snug">외 {list.length - shown.length}명 대기</div>}
+        </div>
+      )}
+      {foot && <div ref={footRef} data-board-foot className="text-lg text-slate-400 mt-4">{foot}</div>}
+    </>
+  );
+}
 function SmallRest({ list, start, color, withTime = false }) {
   if (!list.length) return null;
   return (
@@ -465,7 +509,7 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
   const notice = useNotice(`doctor:${doctor}`);
   // 명단 아래 한 줄: 검사 진행 중 인원 · 시각 안내 (10-08 사용자: 줄마다 '예약' 글자 대신 한 번만)
   const foot = [testing > 0 ? `${testingLabel} ${testing}명` : '', waiting.some(p => boardReservation(p)) ? '이름 앞 시각은 예약 시간입니다' : ''].filter(Boolean).join(' · ');
-  // 진료실 앞 모니터(교수님 한 분): 진료 중·다음 순서는 가장 크게, 2·3번은 크게, 그다음은 작게
+  // 진료실 앞 모니터(교수님 한 분, 10-09 사용자 B안): 진료 중(회색 작게) · 다음 순서(가장 크게) · 2번부터 모두 같은 크기 두 줄
   // (칸 사이는 모서리 '재진료' 표가 위 칸에 닿지 않게 넉넉히)
   if (plain) {
     return (
@@ -474,15 +518,9 @@ export function ConsultBoardSection({ doctor, patients, settings, prefs, compact
         <div className="space-y-5">
           {inRoom && <BigRow label="진료 중" name={patientBoardName(inRoom)} who={inRoom} size="md" muted />}
           {waiting[0] && <BigRow label="다음 순서" p={waiting[0]} size="xxl" />}
-          {waiting.length > 1 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-5">
-              {waiting.slice(1, 3).map((p, i) => <BigRow key={patientKey(p)} n={i + 2} p={p} size="md" />)}
-            </div>
-          )}
         </div>
         {!waiting.length && <div className="text-2xl text-slate-500 py-4">진료 대기 환자가 없습니다</div>}
-        <SmallRest list={waiting.slice(3)} start={4} color="amber" withTime />
-        {foot && <div data-board-foot className="text-lg text-slate-400 mt-4">{foot}</div>}
+        <FrontRest list={waiting.slice(1)} start={2} foot={foot} />
       </div>
     );
   }

@@ -64,10 +64,11 @@ export function TextSizeControl({ className = '', selectClassName = 'border-slat
 
 // 직원 화면 폭: 넓은 모니터에서 카드가 한 줄에 들어가도록 넓게 (좁은 화면·태블릿은 화면 폭에 맞춤)
 export const SHELL_WIDTH = 'max-w-6xl';
-// 넓은 모니터 2열 (10-09 사용자): 1920 모니터를 100~110%로 볼 때(화면 폭 1700px 이상)만 카드를 두 줄로.
-// 1280 모니터나 125% 이상 배율에서는 지금처럼 한 줄 (WIDE_LIST가 grid-cols-1)
+// 시력방 2열 (10-09 사용자): 1920 모니터를 100~110%로 볼 때(화면 폭 1700px 이상)만 두 줄, 화면 폭도 넓게.
+// 1280 모니터·125% 이상은 한 줄 (사용자: 1280 두 줄은 칸이 좁아 지저분함). 같은 줄 두 카드는 높이를 같게(items-stretch).
+// 검사실·명단 관리는 검사 칸이 길어 한 줄 그대로
 export const SHELL_WIDE = 'max-w-6xl min-[1700px]:max-w-[1840px]';
-export const WIDE_LIST = 'grid grid-cols-1 min-[1700px]:grid-cols-2 gap-x-4 items-start';
+export const WIDE_LIST = 'grid grid-cols-1 min-[1700px]:grid-cols-2 gap-x-4 items-stretch';
 // 화면 버전 (화면 파일을 만든 시각). 업데이트 뒤 각 PC가 새 화면인지 확인할 때 봅니다.
 export const APP_VERSION = `버전 ${typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : '-'}`;
 // 화면 색 (구역 제목 왼쪽 막대 등): ScreenShell이 정함
@@ -85,7 +86,7 @@ export function ScreenShell({ title, color, onBack, lastSync, count, extra, sub,
             <h1 className="text-lg leading-tight font-semibold text-slate-900">
               {title}
               {/* 10-09 사용자: 멀리서도 보이게 방 색깔 큰 알약 (0명은 메인 화면처럼 흐린 회색) */}
-              {typeof count === 'number' && <span data-wait-count className={`ml-2.5 inline-block align-middle ${count ? c.solid : 'bg-slate-300'} text-white text-lg font-bold leading-none px-3 py-1.5 rounded-full whitespace-nowrap`}>대기 {count}명</span>}
+              {typeof count === 'number' && <span data-wait-count className={`ml-2.5 inline-block align-middle ${count ? c.solid : 'bg-slate-300'} text-white text-lg font-bold leading-none px-3 py-1 -my-1 rounded-full whitespace-nowrap`}>대기 {count}명</span>}
             </h1>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -1308,13 +1309,14 @@ export function StaleChip({ min }) {
   if (!min) return null;
   return <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500 text-white font-semibold" title="마지막 진행 뒤 이만큼 지났어요">{min}분째 그대로</span>;
 }
-export function VisitTimes({ p }) {
-  return <span className="ml-auto pl-2 text-xs text-slate-400 whitespace-nowrap">예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</span>;
+export function VisitTimes({ p, className = '' }) {
+  return <span className={`ml-auto pl-2 text-xs text-slate-400 whitespace-nowrap ${className}`}>예약 {p.reservation || '-'} · 접수 {p.checkin || '-'}</span>;
 }
-export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirst, stale = 0, children }) {
+// wide: 시력방 2열 — 칸 높이를 채움 (같은 줄 두 카드 높이 같게)
+export function PatientRow({ p, index, color, handle, onUp, onDown, onToggleFirst, stale = 0, wide = false, children }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate;
   return (
-    <div className={`flex items-start gap-3 bg-white border ${stale ? 'border-orange-400 ring-2 ring-orange-200' : c.border} rounded-xl px-4 py-3`}>
+    <div className={`flex items-start gap-3 bg-white border ${stale ? 'border-orange-400 ring-2 ring-orange-200' : c.border} rounded-xl px-4 py-3 ${wide ? 'h-full' : ''}`}>
       {handle && <div className="pt-2 shrink-0">{handle}</div>}
       <div className={`t-num w-10 h-10 rounded-full ${c.solid} text-white flex items-center justify-center font-semibold shrink-0`}>{index + 1}</div>
       <div className="flex-1 min-w-0">
@@ -1465,7 +1467,7 @@ export function DraggableList({ items, getKey, onMove, renderItem, locked = fals
         const lifted = drag && i === drag.index;
         return (
           <div key={getKey(item)} className="pb-3" style={style}>
-            <div className={lifted ? 'shadow-xl rounded-xl' : ''}>{renderItem(item, i, locked ? null : handle)}</div>
+            <div className={`${lifted ? 'shadow-xl rounded-xl' : ''} ${columns ? 'h-full' : ''}`}>{renderItem(item, i, locked ? null : handle)}</div>
           </div>
         );
       })}

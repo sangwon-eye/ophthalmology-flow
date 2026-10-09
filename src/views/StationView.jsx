@@ -385,7 +385,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
         <EmptyState compact={isVision || embedded} text="대기 중인 환자가 없습니다" />
       ) : (
         <DraggableList
-          columns={!embedded}
+          columns={isVision && !embedded}
           items={nameSort ? [...shown].sort(byName) : shown}
           locked={nameSort}
           getKey={patientKey}
@@ -411,6 +411,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 onUp={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx - 1)}
                 onDown={nameSort ? undefined : () => moveInQueue(mutatePatients, shown, pk, idx + 1)}
                 onToggleFirst={isVision ? () => toggleFirstVisit(pk, !p.firstVisit) : undefined}
+                wide={isVision && !embedded}
                 stale={room?.builtin === 'treat' && !locked && !tests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t)) ? staleMinutes(p, settings) : 0}
               >
                 {/* 값이 있는 줄만 보여줌 (값 없음 줄은 생략) */}
@@ -667,7 +668,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   );
   if (embedded) return <div className="mb-8">{content}</div>;
   return (
-    <ScreenShell wide title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length} extra={isVision || isExamRoom ? <ChimeControl /> : undefined}>
+    <ScreenShell wide={isVision} title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length} extra={isVision || isExamRoom ? <ChimeControl /> : undefined}>
       {content}
     </ScreenShell>
   );
