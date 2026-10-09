@@ -902,8 +902,9 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                   {dayAll.filter(x => x.primaryKey === patientKey(p)).map(x => <span key={patientKey(x)} className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700">1차 진료 → {x.doctor}</span>)}
                   {p.consultDone && <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">진료 완료</span>}
                   <PatientMemo p={p} readOnly={readOnly} />
+                  {/* 10-09 사용자(공간): 예약·지금 상태를 이름 줄 끝에 (한 줄 아낌) */}
+                  <span className="text-xs font-normal text-slate-400">예약 {p.reservation || '-'} · {readOnly ? p.doctor : getStage(p, settings).label}</span>
                 </div>
-                <div className="text-xs text-slate-400 mt-0.5">예약 {p.reservation || '-'} · {readOnly ? p.doctor : getStage(p, settings).label}</div>
                 {!readOnly && p.linkWaiting && p.linkType === 'planned' && <div className="text-xs text-fuchsia-700 mt-0.5">검사는 1차 진료 전에 함께 합니다. 추가할 검사는 1차 진료 카드에 지정해주세요.</div>}
               </div>
               {!readOnly && <>
@@ -1061,7 +1062,6 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
         <TestCheckModal
           key={`fu-${fuEdit.id}`}
           title={`${fuEdit.name || nameOf(fuEdit.id) ? `${fuEdit.name || nameOf(fuEdit.id)}님 (${fuEdit.id})` : `환자 ${fuEdit.id}`} 다음 내원 검사`}
-          subtitle="다음 내원 때 필요한 검사를 체크하고 저장을 누르세요"
           followup={{ doctor: fuEdit.doctor || (fuAll[fuEdit.id] || fuMap[fuEdit.id])?.doctor || patients.find(p => p.id === fuEdit.id)?.doctor || '', doctors, prefs: doctorPrefs }}
           onDelete={(d) => deleteFuEdit(fuEdit, d)}
           tests={allTests}

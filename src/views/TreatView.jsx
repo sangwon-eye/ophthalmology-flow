@@ -502,7 +502,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           key={`req-${patientKey(reqFor)}`}
           mainIds={mainTestIds(doctorPrefs, reqFor.doctor)}
           title={`${reqFor.name}님 추가 검사`}
-          subtitle={`${reqFor.sendNote?.text ? `진료실 메모: ${reqFor.sendNote.text} · ` : ''}추가할 검사를 체크하세요. 검사 후 예진이 필요하면 아래에서 '예진 함'을 고르세요.`}
+          subtitle={reqFor.sendNote?.text ? `진료실 메모: ${reqFor.sendNote.text}` : ''}
           tests={allTests}
           settings={settings}
           initial={{}}
@@ -518,9 +518,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           key={`triage-${patientKey(triageFor)}`}
           mainIds={mainTestIds(doctorPrefs, triageFor.doctor)}
           title={assignAtTreat(triageFor) ? `${triageFor.name}님 검사 지정` : `${triageFor.name}님 2차 진료 추가 검사 (${triageFor.doctor})`}
-          subtitle={assignAtTreat(triageFor)
-            ? '오늘 할 검사와 검사 후 예진 여부를 선택하세요. 검사가 없으면 선택한 대기 명단으로 바로 이동합니다.'
-            : `${triageFor.primaryDoctor || '1차'} 진료를 마쳤습니다. ${triageFor.doctor} 진료 전에 할 검사를 체크하세요. 이미 한 검사는 다시 하지 않습니다. 없으면 바로 진료 대기로 이동합니다.${allTests.some(t => triageFor.done?.[t.id]) ? ` (오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')})` : ''}`}
+          subtitle={assignAtTreat(triageFor) ? '' : `${triageFor.primaryDoctor || '1차'} 진료 후${allTests.some(t => triageFor.done?.[t.id]) ? ` · 오늘 한 검사: ${allTests.filter(t => triageFor.done?.[t.id]).map(t => t.short || t.name).join(', ')}` : ''}`}
           info={<div className="space-y-2"><TodayTestsLine p={triageFor} tests={allTests} />{(triageFor.hx || hxPending(triageFor)) && <HistoryDetail p={triageFor} />}</div>}
           tests={allTests}
           settings={settings}

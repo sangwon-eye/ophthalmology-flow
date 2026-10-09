@@ -4,7 +4,7 @@ import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
 import { fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
-import { DEFAULT_HX_FIELDS, visionNames } from '../core/storage.jsx';
+import { DEFAULT_HX_FIELDS } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 공용 UI                                                             */
@@ -639,7 +639,6 @@ export function MeasureTable({ today, prev }) {
           ))}
         </tbody>
       </table>
-      <div className="text-xs text-slate-400 mt-1">왼쪽이 OD, 오른쪽이 OS</div>
     </div>
   );
 }
@@ -798,6 +797,7 @@ export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailab
                   <button
                     type="button"
                     tabIndex={-1}
+                    title="AR 값으로 trial lens를 넣고 잰 교정시력"
                     onClick={() => setM(s => ({ ...s, autoV: !s.autoV }))}
                     className={`text-xs px-2.5 py-2 rounded-lg border w-full ${m.autoV ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 text-slate-500'}`}
                   >
@@ -808,13 +808,8 @@ export function MeasureModal({ mode, part = 'all', patient, previous, gatAvailab
             </React.Fragment>
           ))}
         </div>
-        {fields.includes('ucva') && part !== 'va' && mode !== 'vision' && (
-          <div className="text-xs text-slate-400 mt-2">시력은 0.1~1.5 같은 숫자나 FC, HM, LP, NLP처럼 적으면 됩니다. AutoV는 AR 값으로 trial lens를 넣고 잰 교정시력일 때 켜주세요.</div>
-        )}
 
-        {fields.includes('ucva') && mode === 'vision' && (
-          <div className="text-xs text-slate-400 mt-2">Tab으로 칸 이동 · Enter면 저장 (빈 쪽은 카드에 '재야함'). 시력은 0.1~1.5·FC·HM·LP·NLP, 못 재면 '불가'. AutoV = AR 값으로 trial lens를 넣고 잰 교정시력.</div>
-        )}
+        {/* 10-08 사용자(공간): 입력 방법 안내 글은 뺌 (직원은 앎). AutoV 뜻은 버튼에 마우스를 올리면 */}
         {vision && gatAvailable && !skipIop && (
           <label className="flex items-center gap-2 mt-4 text-sm text-slate-700 cursor-pointer">
             <input type="checkbox" checked={gat} onChange={e => setGat(e.target.checked)} className="w-4 h-4" />
@@ -1747,13 +1742,13 @@ export function PostTestModal({ p, items, tests, settings, mainIds, reconsultOpt
   const eyes = [...new Set((items || []).map(i => i.eye).filter(e => e === 'OD' || e === 'OS'))];
   const initialDetail = eyes.length === 1 ? Object.fromEntries(tests.map(t => [t.id, { eye: eyes[0] }])) : {};
   const names = (items || []).map(procLabel).join(', ');
-  const eyeNote = eyes.length === 1 ? ` 검사는 처치한 눈(${eyes[0]})으로 맞춰 두었습니다 (바꾸려면 오른쪽 클릭).` : '';
+  const eyeNote = eyes.length === 1 ? ` · 검사 눈 ${eyes[0]} (처치한 눈)` : '';
   const common = { mainIds, tests, settings, initial: {}, initialDetail, openDetail: false, onCancel };
   if (!reconsultOption) {
     return (
       <TestCheckModal key={`post-${patientKey(p)}`} {...common}
         title={`${p.name}님 처치 후 검사`}
-        subtitle={`${names} 처치를 완료하고, 고른 검사를 오늘 검사에 넣습니다 (이미 한 검사는 다시). 검사가 끝나면 ${p.seen ? '설명 대기' : '진료 대기'}로 갑니다.${eyeNote}`}
+        subtitle={`${names}${eyeNote}`}
         confirmLabel="처치 완료 · 검사로"
         onConfirm={(sel, detail) => onConfirm(sel, detail, false)} />
     );
@@ -1761,7 +1756,7 @@ export function PostTestModal({ p, items, tests, settings, mainIds, reconsultOpt
   return (
     <TestCheckModal key={`post-${patientKey(p)}`} {...common}
       title={`${p.name}님 처치 완료 후`}
-      subtitle={`${names} 처치를 완료하고, 재진료와 검사 중 필요한 것을 고릅니다 (둘 다 고르면 검사가 끝난 뒤 재진료).${eyeNote}`}
+      subtitle={`${names}${eyeNote}`}
       info={<>
         <label className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer ${recon ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'}`}>
           <input type="checkbox" aria-label="재진료" checked={recon} onChange={e => setRecon(e.target.checked)} className="w-5 h-5" />
@@ -1804,7 +1799,6 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
     });
     return out;
   });
-  const roomName = (id) => id === 'vision' ? visionNames(settings).name : settings.rooms.find(r => r.id === id)?.name || '';
   const preferred = followup?.prefs?.[followupDoctor]?.followupTests;
   // 다음 내원 창은 담당 교수님 목록, 그 밖의 창은 mainIds(그 환자 교수님 목록). 이미 체크된 검사는 항상 보임
   const mainList = followup ? (Array.isArray(preferred) ? preferred : null) : mainIds;
@@ -1861,7 +1855,6 @@ export function TestCheckModal({ title, subtitle, info, tests: rawTests, setting
                         <span className="ml-1.5 text-xs text-slate-500">{cleanDetail(detail[t.id]).eye}만</span>
                       )}
                     </span>
-                    <span className="block text-xs text-slate-400 truncate">{roomName(t.roomId)}</span>
                   </span>
                 </label>
                 {checked && open && (

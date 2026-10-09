@@ -91,7 +91,6 @@ export function SendPatientModal({ patient, tests, settings, onConfirm, onCancel
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-full overflow-y-auto">
         <h3 className="text-lg font-medium text-slate-900 mb-1">{patient.name}님 보내기</h3>
-        <p className="text-sm text-slate-500 mb-4">확인이 끝나면 다시 이 진료실 진료 대기로 돌아옵니다.</p>
         <div className="space-y-2 mb-4">
           {SEND_DESTS.map(([k, label, desc]) => (
             <label key={k} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${dest === k ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200'}`}>
@@ -769,7 +768,6 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
           title={`${explainFor.name}님 다음 내원 검사`}
           followup={{ doctor: explainFor.doctor, doctors, prefs: doctorPrefs }}
           linkDoctors={doctors.filter(d => !allPatients.some(x => x.id === explainFor.id && x.date === explainFor.date && x.doctor === d))}
-          subtitle="다음 내원 때 필요한 검사를 체크하고 설명 완료를 누르세요"
           tests={allTests}
           settings={settings}
           initial={explainFor.assigned}
@@ -788,7 +786,6 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
           key={`extra-${patientKey(extraModalFor)}`}
           mainIds={mainTestIds(doctorPrefs, extraModalFor.doctor)}
           title={`${extraModalFor.name}님 추가 검사`}
-          subtitle="오늘 추가로 할 검사를 체크해주세요. 등록하면 진료 보류로 바뀌고, 검사실 대기열 앞쪽에 들어갑니다."
           tests={allTests}
           settings={settings}
           initial={{}}
