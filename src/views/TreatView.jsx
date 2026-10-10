@@ -385,7 +385,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const due = prepDue(st, t);
     return <>
       {st?.startedAt && <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`, sameRun(st))} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
-        className="text-xs text-red-600 underline">검사 취소</button>}
+        className="text-xs text-red-600 underline">반응 있음</button>}
       {st?.startedAt && !due && <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`, sameRun(st))} className="text-xs text-slate-400 hover:text-rose-600 underline">시작 취소</button>}
       {!st?.startedAt && <TestConsentChip p={p} t={t} mutatePatients={mutatePatients} />}
       {!st?.startedAt ? (
@@ -403,14 +403,15 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   const checkLines = (p) => {
     const at = Date.now();
     const lines = [];
-    const head = (due) => (due ? { tag: '결과 확인', tone: 'violet' } : { tag: '확인 대기', tone: 'slate' });
+    // 표는 상태만: 시간 전 '확인 대기', 시간이 되면 '시간 됨' (버튼 글자 '확인'과 겹치지 않게 — 10-10 사용자)
+    const head = (due) => (due ? { tag: '시간 됨', tone: 'violet' } : { tag: '확인 대기', tone: 'slate' });
     if (!p.consultDone) checkItems(p).forEach(c => {
       const due = procCheckDue(c.i, at);
       const mins = Math.floor((at - c.i.performedAt) / 60000);
       lines.push({ due, key: `pc-${c.i.uid}`, node: (
-        <TaskLine key={`pc-${c.i.uid}`} tag={due ? '처치 후 확인' : '확인 대기'} tone={due ? 'violet' : 'slate'} what={procLabel(c.i)}
-          small={`${c.i.performer === 'prof' ? '교수님 처치 · ' : ''}${fmtClock(c.i.performedAt)} 시행 · ${due ? `${mins}분 지남` : `확인까지 ${minsLeft(c.i.performedAt, Number(c.i.checkMin) || 0, at)}분`}`}>
-          <ProcCheckRow short p={p} mutatePatients={mutatePatients} filter={x => x.list === c.list && x.i.uid === c.i.uid} onReconsult={cc => checkAndReconsult(p, cc)} />
+        <TaskLine key={`pc-${c.i.uid}`} {...head(due)} what={procLabel(c.i)}
+          small={`${c.i.performer === 'prof' ? '교수님 · ' : ''}${fmtClock(c.i.performedAt)} 시행 · ${due ? `${mins}분 지남` : `${minsLeft(c.i.performedAt, Number(c.i.checkMin) || 0, at)}분 남음`}`}>
+          <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={x => x.list === c.list && x.i.uid === c.i.uid} onReconsult={cc => checkAndReconsult(p, cc)} onToast={showToast} />
         </TaskLine>
       ) });
     });
@@ -418,7 +419,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       const st = prepOf(p, t);
       const due = prepDue(st, t, at);
       lines.push({ due, key: `tm-${t.id}`, node: (
-        <TaskLine key={`tm-${t.id}`} {...head(due)} what={t.short || t.name} small={`${fmtClock(st.startedAt)} 시작 · ${due ? '시간 됨' : `${minsLeft(st.startedAt, prepWaitMin(t), at)}분 남음`}`}>
+        <TaskLine key={`tm-${t.id}`} {...head(due)} what={t.short || t.name} small={`${fmtClock(st.startedAt)} 시작${due ? '' : ` · ${minsLeft(st.startedAt, prepWaitMin(t), at)}분 남음`}`}>
           {due ? <button type="button" onClick={() => confirmTimed(p, t)} title="누르면 검사 완료" className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">끝 · 확인</button> : <>
             <button type="button" onClick={() => cancelTimed(p, t)} className="text-xs text-slate-400 hover:text-rose-600 underline">시작 취소</button>
             <button type="button" onClick={() => confirmTimed(p, t)} title="시간 전이지만 지금 완료로 처리" className="text-sm px-4 py-2 rounded-lg border border-green-400 bg-white text-green-700 font-medium">지금 확인</button>
@@ -430,14 +431,14 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       const st = prepOf(p, t);
       const due = prepDue(st, t, at);
       lines.push({ due, key: `pr-${t.id}`, node: (
-        <TaskLine key={`pr-${t.id}`} {...head(due)} what={prepWhat(t)} small={`${fmtClock(st.startedAt)} 시작 · ${due ? '시간 됨' : `${minsLeft(st.startedAt, prepWaitMin(t), at)}분 남음`}`}>{prepButtons(p, t)}</TaskLine>
+        <TaskLine key={`pr-${t.id}`} {...head(due)} what={prepWhat(t)} small={`${fmtClock(st.startedAt)} 시작${due ? '' : ` · ${minsLeft(st.startedAt, prepWaitMin(t), at)}분 남음`}`}>{prepButtons(p, t)}</TaskLine>
       ) });
     });
     prepChecks(p, settings).forEach(t => {
       const st = prepOf(p, t);
       const due = prepDue(st, t, at);
       lines.push({ due, key: `go-${t.id}`, node: (
-        <TaskLine key={`go-${t.id}`} {...head(due)} what={t.short || t.name} small={`${fmtClock(st.startedAt)} 시작 · ${due ? '시간 됨' : `${minsLeft(st.startedAt, prepWaitMin(t), at)}분 남음`}`}>
+        <TaskLine key={`go-${t.id}`} {...head(due)} what={t.short || t.name} small={`${fmtClock(st.startedAt)} 시작${due ? '' : ` · ${minsLeft(st.startedAt, prepWaitMin(t), at)}분 남음`}`}>
           {due ? <button type="button" onClick={() => checkGo(p, t)} className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">확인</button> : <>
             <button type="button" onClick={() => cancelGo(p, t)} className="text-xs text-slate-400 hover:text-rose-600 underline">시작 취소</button>
             <button type="button" onClick={() => checkGo(p, t)} title="시간 전이지만 지금 확인" className="text-sm px-4 py-2 rounded-lg border border-green-400 bg-white text-green-700 font-medium">지금 확인</button>

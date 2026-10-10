@@ -69,7 +69,7 @@ await chkOf('조현우').screenshot({ path: `${SP}/r32-skin-started.png` });
 await backdate('조현우', 'fag', 21);
 // 한지훈 시작 → 반응 있음(검사 취소)
 await prepOf('한지훈').getByRole('button', { name: '시작', exact: true }).click(); await W();
-await chkOf('한지훈').getByRole('button', { name: '검사 취소' }).click(); await W();
+await chkOf('한지훈').getByRole('button', { name: '반응 있음' }).click(); await W(); // 10-10: 작은 글씨 '반응 있음' (예전 '검사 취소')
 await page.waitForTimeout(15000);
 await chkOf('조현우').screenshot({ path: `${SP}/r32-skin-done.png` });
 await chkOf('조현우').getByRole('button', { name: '끝 · 확인', exact: true }).click(); await W();

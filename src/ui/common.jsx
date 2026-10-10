@@ -1567,39 +1567,43 @@ export function TestConsentChip({ p, t, mutatePatients }) {
   return <button type="button" data-consent={t.id} onClick={() => patchPatient(mutatePatients, pk, x => testConsentPatch(x, t.id, Date.now()))} title="동의서를 받았으면 누르세요" className={CONSENT_OFF}>동의서 전</button>;
 }
 // onReconsult: 진료 뒤 처치(설명 대기 환자)의 확인 시간이 되면 [확인] 옆 작은 글씨 '확인 · 재진료' (10-10 사용자: 간혹 안압을 보고 다시 진료)
-export function ProcCheckRow({ p, mutatePatients, filter = () => true, short = false, onReconsult = null }) {
-  const [armed, setArmed] = useState(null);
+export function ProcCheckRow({ p, mutatePatients, filter = () => true, onReconsult = null, onToast = null }) {
   const [, setTick] = useState(0);
   useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(t); }, []);
-  useEffect(() => { if (!armed) return undefined; const t = setTimeout(() => setArmed(null), 3000); return () => clearTimeout(t); }, [armed]);
   const items = checkItems(p).filter(filter);
   if (!items.length) return null;
   const pk = patientKey(p);
   const now = Date.now();
-  const confirm = (c) => { setArmed(null); patchPatient(mutatePatients, pk, x => confirmProcCheckPatch(x, c.list, c.i.uid, c.i.performedAt, Date.now())); };
-  const cancel = (c) => { setArmed(null); patchPatient(mutatePatients, pk, x => cancelProcCheckPatch(x, c.list, c.i.uid, c.i.performedAt)); };
+  // 확인: 저장 결과로 들어갔을 때만 알림(되돌리기는 아직 그 확인 그대로일 때만 다시 '확인 대기')
+  const confirm = (c) => {
+    const at = Date.now();
+    patchPatient(mutatePatients, pk, x => confirmProcCheckPatch(x, c.list, c.i.uid, c.i.performedAt, at)).then(next => {
+      const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!rec || !onToast) return;
+      if (!(rec[c.list] || []).some(i => i.uid === c.i.uid && i.checkedAt === at)) { onToast(`${p.name} 환자는 이미 다른 곳에서 처리되었습니다 · 바꾸지 않았습니다`); return; }
+      onToast(`${p.name} ${procLabel(c.i)} 확인`, () => patchPatient(mutatePatients, pk, x => ({
+        [c.list]: (x[c.list] || []).map(i => (i.uid === c.i.uid && i.checkedAt === at ? { ...i, done: false, doneAt: null, checkedAt: undefined } : i)),
+      })));
+    }, () => {});
+  };
+  const cancel = (c) => patchPatient(mutatePatients, pk, x => cancelProcCheckPatch(x, c.list, c.i.uid, c.i.performedAt));
+  // 시간 전: 작은 글씨 '시행 취소'(두 번) + [지금 확인] — 검사 준비·시간 재기 줄과 같은 모양 (10-10)
+  // 시간 됨: 노란 [확인] (진료 뒤 처치는 옆에 작은 글씨 '확인 · 재진료')
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {items.map(c => {
-        const due = procCheckDue(c.i, now);
-        const mins = Math.floor((now - c.i.performedAt) / 60000);
-        const label = `${procLabel(c.i)} ${fmtClock(c.i.performedAt)}`;
-        if (due) return (
-          <span key={c.i.uid} className="flex items-center gap-2">
-            {onReconsult && c.list === 'procedures' && p.seen && !p.consultDone && (
-              <button type="button" onClick={() => onReconsult(c)} title="확인하고 같은 교수님 진료 대기로" className="text-xs text-slate-500 hover:text-slate-800 underline whitespace-nowrap">확인 · 재진료</button>
-            )}
-            <button type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} className="text-sm px-4 py-2 rounded-lg bg-yellow-300 border border-yellow-500 text-yellow-950 font-semibold">{short ? '확인' : `${label} · ${mins}분 지남 · 확인`}</button>
-          </span>
-        );
-        if (armed === c.i.uid) return (
-          <span key={c.i.uid} className="flex items-center gap-1">
-            <button type="button" onClick={() => confirm(c)} className="text-sm px-3 py-2 rounded-lg bg-green-600 text-white font-medium">지금 완료</button>
-            <button type="button" onClick={() => cancel(c)} className="text-sm px-3 py-2 rounded-lg border border-rose-400 bg-rose-50 text-rose-700 font-medium">시행 취소</button>
-          </span>
-        );
-        return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => setArmed(c.i.uid)} title={`${c.i.checkMin}분 뒤 확인 · 누르면 [지금 완료] [시행 취소]`} className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">{short ? '확인 대기' : `${label} · 확인 대기`}</button>;
-      })}
+      {items.map(c => (procCheckDue(c.i, now) ? (
+        <span key={c.i.uid} className="flex items-center gap-2">
+          {onReconsult && c.list === 'procedures' && p.seen && !p.consultDone && (
+            <button type="button" onClick={() => onReconsult(c)} title="확인하고 같은 교수님 진료 대기로" className="text-xs text-slate-500 hover:text-slate-800 underline whitespace-nowrap">확인 · 재진료</button>
+          )}
+          <button type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} className="text-sm px-4 py-2 rounded-lg bg-yellow-300 border border-yellow-500 text-yellow-950 font-semibold">확인</button>
+        </span>
+      ) : (
+        <span key={c.i.uid} className="flex items-center gap-2">
+          <TwoStepButton onConfirm={() => cancel(c)} className="text-xs text-slate-400 hover:text-rose-600 underline whitespace-nowrap" armedClassName="text-xs px-2 py-0.5 rounded border border-rose-400 bg-rose-50 text-rose-700 font-medium whitespace-nowrap">시행 취소</TwoStepButton>
+          <button type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} title={`${c.i.checkMin}분 전이지만 지금 확인`} className="text-sm px-4 py-2 rounded-lg border border-green-400 bg-white text-green-700 font-medium">지금 확인</button>
+        </span>
+      )))}
     </div>
   );
 }
@@ -1608,9 +1612,10 @@ export function ProcCheckRow({ p, mutatePatients, filter = () => true, short = f
 // 할 일 줄: 왼쪽 구역 색깔 표 + 할 일(굵게), 버튼은 늘 오른쪽 끝. wait: 다른 곳(처치실·검사실)에서 진행 중 — 점선 표, 버튼 없음(산동 등 예외)
 const TAG_TONE = { violet: 'bg-violet-600', rose: 'bg-rose-600', amber: 'bg-amber-600', sky: 'bg-sky-600', indigo: 'bg-indigo-600', emerald: 'bg-emerald-600', slate: 'bg-slate-400' };
 export function TaskLine({ tag, tone = 'indigo', wait = false, what, small, children }) {
+  const showTag = !!tag;
   return (
-    <div data-task-line={tag} className="w-full flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-      <span className={`shrink-0 text-[0.8125rem] font-extrabold leading-snug rounded-lg px-2.5 py-1 ${wait ? 'bg-white border-[1.5px] border-dashed border-slate-400 text-slate-600' : `${TAG_TONE[tone] || TAG_TONE.indigo} text-white`}`}>{tag}</span>
+    <div data-task-line={tag || '할 일'} className="w-full flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+      {showTag && <span className={`shrink-0 text-[0.8125rem] font-extrabold leading-snug rounded-lg px-2.5 py-1 ${wait ? 'bg-white border-[1.5px] border-dashed border-slate-400 text-slate-600' : `${TAG_TONE[tone] || TAG_TONE.indigo} text-white`}`}>{tag}</span>}
       <span className={`min-w-0 ${wait ? 'text-[0.9375rem] font-semibold text-slate-600' : 'text-[1.0625rem] font-bold text-slate-900'}`}>
         {what}{small && <span className={`ml-1.5 ${wait ? 'text-[0.8125rem] text-slate-400' : 'text-sm text-slate-500'} font-semibold`}>{small}</span>}
       </span>

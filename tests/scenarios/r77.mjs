@@ -44,7 +44,7 @@ tr.t.ok(await tr.p.getByText(/새로 들어온 처치가 남아 있습니다: �
 
 // 2) 진료실 [교수님 처치 완료] ← 새 교수님 처치
 await editKey('daily-patients', l => l.map(p => (p.name === '송하린' ? { ...p, procedures: [...p.procedures, proc('q2', 'prof', '봉합사 제거', { orderedAt: Date.now() })] } : p)));
-await cs.t.cardOf('송하린').getByRole('button', { name: '교수님 처치 완료', exact: true }).click(); await cs.t.W(1500);
+await cs.t.cardOf('송하린').getByRole('button', { name: '처치 완료', exact: true }).click(); await cs.t.W(1500); // 10-10: 표 '교수님' + [처치 완료]
 r = await pt('송하린');
 cs.t.ok(r.procedures.find(i => i.uid === 'q1').done === true && r.procedures.find(i => i.uid === 'q2').done === false, '교수님 처치도 화면에 보이던 것만 완료');
 cs.t.ok(await cs.p.getByText(/새로 들어온 교수님 처치가 남아 있습니다/).count() === 1, '교수님 처치 안내');

@@ -58,7 +58,7 @@ await back();
 await pick('진료실');
 await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await wait();
 c = cardOf('송하린');
-ok(await c.getByText('처치 완료', { exact: true }).count() === 1, '설명 대기 카드에 처치 완료 배지');
+ok(/한 처치\s*전공의 처치/.test(await c.innerText()) && await c.getByText('처치 완료', { exact: true }).count() === 0, "설명 대기 카드: 참고 줄 '한 처치' (10-10: 같은 정보의 '처치 완료' 표시는 없앰)");
 await c.getByRole('button', { name: '귀가', exact: true }).click(); await wait(600);
 ok(await page.locator('div.bg-white').filter({ has: page.getByRole('button', { name: '귀가', exact: true }) }).filter({ hasText: '송하린' }).count() === 0, '귀가 처리');
 await back();

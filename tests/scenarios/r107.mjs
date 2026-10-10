@@ -97,7 +97,7 @@ ok(!r.treatRequest && r.preProcs?.length === 1 && r.preProcs[0].name === '만니
 ok(await inSec('treat-preproc', '조현우').locator('[data-task-line="진료 전 처치"]').filter({ hasText: '31번방 요청' }).count() === 1, "진료 전 처치 칸: '만니톨 31번방 요청'");
 ok(!F.roomPending(r, (await getKey('settings')).value, 'B'), '만니톨이 끝나기 전에는 검사실에서 부르지 않음');
 await inSec('treat-preproc', '조현우').getByRole('button', { name: '처치 완료', exact: true }).click(); await W(1200);
-ok(await inSec('treat-check', '조현우').getByRole('button', { name: '확인 대기', exact: true }).count() === 1, "만니톨 [처치 완료] → 결과 확인 '확인 대기' (30분)");
+ok(await inSec('treat-check', '조현우').getByRole('button', { name: '지금 확인', exact: true }).count() === 1, "만니톨 [처치 완료] → 결과 확인 '확인 대기' + [지금 확인] (30분)");
 await editKey('daily-patients', l => l.map(p => (p.name === '조현우' ? { ...p, preProcs: p.preProcs.map(i => ({ ...i, performedAt: i.performedAt - 31 * 60000 })) } : p))); await W(1500);
 ok(await inSec('treat-check', '조현우').getByRole('button', { name: '확인 · 재진료' }).count() === 0, "진료 전 처치에는 '확인 · 재진료' 없음 (확인하면 원래대로 검사·진료로)");
 await inSec('treat-check', '조현우').getByRole('button', { name: '확인', exact: true }).click(); await W(1200);
@@ -122,7 +122,7 @@ ok(!!(await rec('신종희')).procedures[0].performedAt, '동의서 확인 뒤 Y
 await back(); await pick('진료실'); await W(600);
 await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1200);
 const hw = inSec('consult-explain', '황도윤');
-ok(await hw.getByRole('button', { name: '교수님 처치 완료', exact: true }).isDisabled() && await hw.getByRole('button', { name: '동의서 전', exact: true }).count() === 1, "설명 대기 교수님 처치: '동의서 전' + 회색 [교수님 처치 완료]");
+ok(await hw.getByRole('button', { name: '처치 완료', exact: true }).isDisabled() && await hw.getByRole('button', { name: '동의서 전', exact: true }).count() === 1, "설명 대기 교수님 처치: '동의서 전' + 회색 [처치 완료]");
 const nk = inSec('consult-explain', '남궁하늘');
 ok(await nk.getByRole('button', { name: '확인 · 재진료', exact: true }).count() === 1, "확인 시간이 된 진료 뒤 처치: [확인] 옆 '확인 · 재진료'");
 await page.screenshot({ path: `${SP}/r107-explain.png`, fullPage: true });
