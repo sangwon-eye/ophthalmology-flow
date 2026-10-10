@@ -408,6 +408,11 @@ export function procNeedsConsent(settings, item) {
 export function consentMissing(settings, items) {
   return (items || []).filter(i => procNeedsConsent(settings, i) && !i.consentAt);
 }
+// 교수님 처치 중 처치실에서 동의서를 먼저 받아야 하는 것 (10-10 사용자: 동의서는 처치실 → 받은 뒤 진료실에서 처치, 진료 전·뒤 모두)
+// 시행 전인 것만. 처치실은 원래 줄(진료 전 처치·처치 대기)에 [동의서 전]만, 진료실은 점선 '처치실 · 동의서 전'
+export function profConsentPending(settings, items) {
+  return consentMissing(settings, (items || []).filter(i => i.performer === 'prof' && !i.done && !i.performedAt));
+}
 // 검사(검사 준비가 있는 검사만, 예: FAG): 환자 기록의 새 칸 consent[검사id] = 확인 시각
 export function testNeedsConsent(t) {
   return !!t?.consent && hasPrep(t);
@@ -437,7 +442,8 @@ export function testConsentCancelPatch(x, testId, seenAt) {
   return { consent: next };
 }
 export function inTreatRoom(p, settings) {
-  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p) || (pastVision(p) && preProcPending(p, 'resident'));
+  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p) || (pastVision(p) && preProcPending(p, 'resident'))
+    || (!p.consultDone && profConsentPending(settings, p.procedures).length > 0) || (pastVision(p) && profConsentPending(settings, p.preProcs).length > 0);
 }
 // 진료실 화면 '진료 전 처치' 칸: 교수님 담당 진료 전 처치가 남음 (시행 뒤 확인 대기 포함)
 export function inProfPreProc(p) {
@@ -686,10 +692,13 @@ export function getStage(p, settings) {
   if (treatRequested(p)) return { label: `처치실 대기 (${examAsked(p) ? `${p.treatRequest.from || '검사실'} 요청 확인` : '진료실 요청 확인'})`, area: 'treatReq' };
   if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : p.hxAssign ? '처치실 대기 (검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
   if (preProcWaiting(p)) {
-    const names = (who) => notPerformed(preProcsLeft(p, who)).map(x => x.name).join(', ');
-    if (!preProcWaiting(p, 'prof')) return { label: `처치실 대기 (진료 전 처치: ${names('resident')})`, area: 'preProc' };
-    if (!preProcWaiting(p, 'resident')) return { label: `진료실 대기 (진료 전 처치: ${names('prof')})`, area: 'preProc' };
-    return { label: `진료 전 처치 (처치실 ${names('resident')} · 진료실 ${names('prof')})`, area: 'preProc' };
+    // 처치실 쪽: 전공의 처치 + 동의서 전인 교수님 처치('YAG 동의서'), 진료실 쪽: 동의서를 받은(또는 필요 없는) 교수님 처치
+    const noConsent = new Set(profConsentPending(settings, p.preProcs).map(x => x.uid));
+    const treatSide = [...notPerformed(preProcsLeft(p, 'resident')).map(x => x.name), ...(p.preProcs || []).filter(x => noConsent.has(x.uid)).map(x => `${x.name} 동의서`)].join(', ');
+    const consultSide = notPerformed(preProcsLeft(p, 'prof')).filter(x => !noConsent.has(x.uid)).map(x => x.name).join(', ');
+    if (!consultSide) return { label: `처치실 대기 (진료 전 처치: ${treatSide})`, area: 'preProc' };
+    if (!treatSide) return { label: `진료실 대기 (진료 전 처치: ${consultSide})`, area: 'preProc' };
+    return { label: `진료 전 처치 (처치실 ${treatSide} · 진료실 ${consultSide})`, area: 'preProc' };
   }
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
   // 검사 준비: 처치실(시작 전 · 진료실 검사 준비의 동의서 전) → 진료실(진료실 검사 준비 시작 전)
@@ -1873,10 +1882,10 @@ export function treatWork(patients, settings) {
   return {
     requests: patients.filter(treatRequested),
     triage: patients.filter(needsTriageAssign),
-    procs: patients.filter(p => needsTriageExam(p, settings) || (!p.consultDone && notPerformed(pendingProcedures(p, 'resident')).length > 0)),
+    procs: patients.filter(p => needsTriageExam(p, settings) || (!p.consultDone && (notPerformed(pendingProcedures(p, 'resident')).length > 0 || profConsentPending(settings, p.procedures).length > 0))),
     prep: patients.filter(p => !p.consultDone && pastVision(p) && treatPrepTodo(p, settings).length > 0),
     check: patients.filter(p => prepChecks(p, settings).length > 0 || (!p.consultDone && (treatTimedRunning(p, settings).length > 0 || prepStartedTests(p, settings).length > 0 || checkItems(p).length > 0))),
-    preProc: patients.filter(p => !p.consultDone && pastVision(p) && notPerformed(preProcsLeft(p, 'resident')).length > 0),
+    preProc: patients.filter(p => !p.consultDone && pastVision(p) && (notPerformed(preProcsLeft(p, 'resident')).length > 0 || profConsentPending(settings, p.preProcs).length > 0)),
     exams: patients.filter(p => !p.consultDone && treatExamPending(p, settings)),
   };
 }

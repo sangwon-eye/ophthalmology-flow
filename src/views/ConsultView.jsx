@@ -1,7 +1,7 @@
 // 진료실 화면
 import React, { useState, useEffect, useContext } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { inConsultPrep, consultPrepTests, prepOf, prepDue, prepWaitMin, testConsentMissing, preProcsLeft, inProfPreProc, pendingRooms, consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procCheckDue, resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { profConsentPending, inConsultPrep, consultPrepTests, prepOf, prepDue, prepWaitMin, testConsentMissing, preProcsLeft, inProfPreProc, pendingRooms, consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procCheckDue, resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
 import { PrepButtons, prepWhat, CONSENT_TITLE, ConsentChips, TaskLine, RefLine, RefItem, TwoStepButton, doctorDotColor, doctorTintStyle, DoctorOrderContext, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
@@ -622,9 +622,12 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 // 할 일 줄 (10-10 사용자): 여기서 할 일(색 표 + 오른쪽 버튼) / 다른 곳에서 진행 중(점선 표, 버튼 없음). 순서: 교수님 처치 → 처치 후 확인 → 다른 곳 진행
                 const resLeft = notPerformed(pendingProcedures(p, 'resident'));
                 const resCheck = (p.procedures || []).filter(i => i.performer === 'resident' && !i.done && i.performedAt);
-                const profLeft = notPerformed(pendingProcedures(p, 'prof'));
+                // 동의서 전인 교수님 처치는 처치실에서 동의서를 받은 뒤에 (점선 '처치실 · 동의서 전', 10-10 사용자)
+                const profNoConsent = profConsentPending(settings, p.procedures);
+                const profLeft = notPerformed(pendingProcedures(p, 'prof')).filter(i => !profNoConsent.includes(i));
                 const doneProcs = (p.procedures || []).filter(i => i.done);
-                const dilAt = procDilatePending(p) ? (profLeft.some(i => i.dilate) || !resLeft.some(i => i.dilate) ? 'prof' : 'res') : '';
+                // 산동 점안 버튼 자리: 교수님 처치 첫 줄 → 처치실 처치 점선 → 동의서 전 점선 (어느 줄이든 하나에만)
+                const dilAt = !procDilatePending(p) ? '' : profLeft.length && (profLeft.some(i => i.dilate) || !resLeft.some(i => i.dilate)) ? 'prof' : resLeft.length ? 'res' : 'consent';
                 const dil = <DilationRow compact group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />;
                 const postNames = allTests.filter(t => (p.postTests || []).includes(t.id) && p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ');
                 const blocked = early && homeBlocked(p, settings);
@@ -642,6 +645,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                       <button type="button" disabled={consentMissing(settings, [x]).length > 0} title={consentMissing(settings, [x]).length ? CONSENT_TITLE : undefined} onClick={() => finishProfProcedure(p, null, false, x.uid)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
                     </TaskLine>
                   ))}
+                  {profNoConsent.length > 0 && <TaskLine wait tag="처치실" what={profNoConsent.map(procLabel).join(', ')} small="동의서 전">{dilAt === 'consent' && dil}</TaskLine>}
                   {checkItems(p).filter(c => c.list === 'procedures' && c.i.performer === 'prof').map(c => {
                     const due = procCheckDue(c.i);
                     return (
@@ -745,7 +749,8 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
             <div id="consult-preproc" className="mb-6 scroll-mt-36">
               <SectionTitle hint="교수님 담당 진료 전 처치(예: 만니톨)와 진료실에서 하는 검사 준비(예: FAG skin test, 동의서는 처치실)입니다. 처치를 시행하면 확인 시간 동안 다른 검사를 할 수 있고, 확인해야 진료 대기로 갑니다.">진료 전 처치 · {preProcList.length}명</SectionTitle>
               {preProcList.map(p => {
-                const left = notPerformed(preProcsLeft(p, 'prof'));
+                const preNoConsent = profConsentPending(settings, p.preProcs);
+                const left = notPerformed(preProcsLeft(p, 'prof')).filter(i => !preNoConsent.includes(i));
                 const resLeft = preProcsLeft(p, 'resident');
                 // 남은 검사: 위 줄에 검사 준비로 이미 보이는 검사(예: FAG)는 빼서 되풀이하지 않음
                 const prepIds = new Set(consultPrepTests(p, settings).map(t => t.id));
@@ -761,6 +766,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                         <button type="button" disabled={consentMissing(settings, [i]).length > 0} title={consentMissing(settings, [i]).length ? CONSENT_TITLE : undefined} onClick={() => finishPreProcs(p, null, i.uid)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
                       </TaskLine>
                     ))}
+                    {preNoConsent.length > 0 && <TaskLine wait tag="처치실" what={preNoConsent.map(procLabel).join(', ')} small="동의서 전" />}
                     {checkItems(p).filter(c => c.list === 'preProcs' && c.i.performer === 'prof').map(c => {
                       const due = procCheckDue(c.i);
                       return (

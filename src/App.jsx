@@ -1,6 +1,6 @@
 // 최상위 App (저장소 동기화와 화면 전환)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { placeConsultArrivals, historyChanges, setHistoryDay, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcsLeft, inProfPreProc, inConsultPrep, notPerformed, prepAtConsult, testConsentMissing, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
+import { profConsentPending, placeConsultArrivals, historyChanges, setHistoryDay, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcsLeft, inProfPreProc, inConsultPrep, notPerformed, prepAtConsult, testConsentMissing, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorOrderContext, DoctorChip, SexAge, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, QrConsultBoard, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -26,8 +26,11 @@ export function patientQueueLabels(p, settings, prefs) {
   [['resident', treatRoomOf(settings).name], ['prof', '진료실']].forEach(([who, place]) => {
     if (!pastVision(p)) return;
     const left = preProcsLeft(p, who);
-    const todo = notPerformed(left);
+    // 동의서 전인 교수님 처치는 처치실 '동의서 대기' (10-10)
+    const noConsent = who === 'prof' ? profConsentPending(settings, p.preProcs) : [];
+    const todo = notPerformed(left).filter(x => !noConsent.includes(x));
     const checking = left.filter(x => x.performedAt);
+    if (noConsent.length) labels.push(`${treatRoomOf(settings).name} · ${noConsent.map(x => x.name).join(', ')} 동의서 대기`);
     if (todo.length) labels.push(`${place} · 진료 전 처치 (${todo.map(x => x.name).join(', ')})`);
     if (checking.length) labels.push(`${place} · ${checking.map(x => x.name).join(', ')} 확인 대기`);
   });
@@ -42,6 +45,7 @@ export function patientQueueLabels(p, settings, prefs) {
     labels.push(`${r.name} · ${tests}${activeVf(p) ? ' (VF 진행 중 · 다른 장비 호출 금지)' : ' 대기'}`);
   });
   if (needsTriageExam(p, settings)) labels.push(`${treatRoomOf(settings).name} · 예진 대기`);
+  if (inProfProcedure(p) && profConsentPending(settings, p.procedures).length) labels.push(`${treatRoomOf(settings).name} · ${profConsentPending(settings, p.procedures).map(x => x.name).join(', ')} 동의서 대기`);
   if (inProfProcedure(p)) labels.push('진료실 · 교수님 처치 대기');
   if (inResidentProcedure(p)) labels.push(`${treatRoomOf(settings).name} · 전공의 처치 대기`);
   if (awaitingExplain(p)) labels.push(p.explainedEarly ? (procedureStatus(p) === 'doing' ? '설명 완료 · 처치 후 귀가' : '진료실 · 처치 완료 · 귀가 대기') : `진료실 · 설명 대기${procedureStatus(p) === 'doing' ? ' (처치 중)' : ''}`);

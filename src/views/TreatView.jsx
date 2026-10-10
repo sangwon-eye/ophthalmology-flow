@@ -1,6 +1,6 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { treatPrepTodo, prepAtConsult, preProcsLeft, examAsked, treatRequestFrom, consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procDilatePatch, markDilateSet, newId, treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepDue, prepChecks, orderForPicking, prepLabel, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
+import { profConsentPending, treatPrepTodo, prepAtConsult, preProcsLeft, examAsked, treatRequestFrom, consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procDilatePatch, markDilateSet, newId, treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepDue, prepChecks, orderForPicking, prepLabel, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
 import { PrepButtons, prepWhat, CONSENT_TITLE, ConsentChips, TestConsentChip, ProcedureModal, TaskLine, RefLine, RefItem, CardDetail, HxRef, TwoStepButton, ProcCheckRow, PostTestModal, ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -435,6 +435,12 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                   <button type="button" disabled={noConsent([i])} title={noConsent([i]) ? CONSENT_TITLE : undefined} onClick={() => finishPreProcs(p, null, i.uid)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
                 </TaskLine>
               ))}
+              {/* 교수님 처치는 동의서만 처치실에서 (같은 줄 모양, 버튼은 [동의서 전]만) → 받으면 진료실 '진료 전 처치' 칸으로 (10-10 사용자) */}
+              {profConsentPending(settings, p.preProcs).map(i => (
+                <TaskLine key={i.uid} tag="진료 전 처치" tone="rose" what={procNames([i])} small="교수님 · 진료실">
+                  <ConsentChips p={p} list="preProcs" items={[i]} settings={settings} mutatePatients={mutatePatients} />
+                </TaskLine>
+              ))}
               {after.length > 0 && <RefLine><RefItem k="처치 후 검사">{after.map(t => t.short || t.name).join(', ')}</RefItem></RefLine>}
             </SimpleCard>
             );
@@ -448,7 +454,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             <SimpleCard key={patientKey(p)} p={p} tone="violet" stale={staleOf(p)}>
               {treatPrepTodo(p, settings).map(t => (prepAtConsult(t)
                 // 진료실에서 하는 검사 준비(예: FAG skin test, 10-10): 처치실은 동의서만 → 확인하면 진료실 '진료 전 처치' 칸으로
-                ? <TaskLine key={t.id} tag="동의서" tone="violet" what={t.short || t.name} small={`${prepLabel(t)} · 진료실`}><TestConsentChip p={p} t={t} mutatePatients={mutatePatients} /></TaskLine>
+                ? <TaskLine key={t.id} tag="검사 준비" tone="violet" what={prepWhat(t)} small="진료실"><TestConsentChip p={p} t={t} mutatePatients={mutatePatients} /></TaskLine>
                 : <TaskLine key={t.id} tag="검사 준비" tone="violet" what={prepWhat(t)} small={`${prepWaitMin(t)}분`}>{prepButtons(p, t)}</TaskLine>
               ))}
               {/* 처치실이 전체를 조율: 여기서도 오늘 검사 바꾸기 */}
@@ -530,7 +536,9 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
         {procs.map(p => {
           const triageNow = needsTriageExam(p, settings);
           const res = inResidentProcedure(p) ? notPerformed(pendingProcedures(p, 'resident')) : [];
-          const prof = pendingProcedures(p, 'prof');
+          // 교수님 처치 중 동의서 전인 것은 이 카드에서 동의서만 받음 (받으면 설명 대기 카드에서 [처치 완료] — 10-10 사용자)
+          const profConsent = p.consultDone ? [] : profConsentPending(settings, p.procedures);
+          const prof = pendingProcedures(p, 'prof').filter(i => !profConsent.includes(i));
           const dil = <DilationRow compact group crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />;
           return (
           <SimpleCard key={patientKey(p)} p={p} tone="indigo" stale={staleOf(p)}
@@ -549,6 +557,11 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
                 <button type="button" disabled={noConsent([i])} onClick={() => setPostFor({ p, kind: 'resident', uid: i.uid })} title={p.seen ? '처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다' : '처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다'} className="text-xs text-slate-500 hover:text-slate-800 underline disabled:text-slate-300 disabled:no-underline">{p.seen ? '검사 · 재진료' : '검사 추가 후 완료'}</button>
                 <ConsentChips p={p} list="procedures" items={[i]} settings={settings} mutatePatients={mutatePatients} />
                 <button type="button" disabled={noConsent([i])} title={noConsent([i]) ? CONSENT_TITLE : undefined} onClick={() => finishResident(p, null, false, i.uid)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
+              </TaskLine>
+            ))}
+            {profConsent.map(i => (
+              <TaskLine key={i.uid} tag="처치" tone="indigo" what={procNames([i])} small="교수님 · 진료실">
+                <ConsentChips p={p} list="procedures" items={[i]} settings={settings} mutatePatients={mutatePatients} />
               </TaskLine>
             ))}
             {(triageNow || prof.length > 0 || res.length > 0) && (

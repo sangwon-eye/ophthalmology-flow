@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone, QrCode } from 'lucide-react';
-import { examAsked, inProgressText, boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcWaiting, preProcsLeft, notPerformed, treatPrepTodo, roomPending, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { profConsentPending, examAsked, inProgressText, boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcWaiting, preProcsLeft, notPerformed, treatPrepTodo, roomPending, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
 import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
@@ -411,8 +411,8 @@ export function ExamBoardList({ patients, settings, compact, wide }) {
   // 처치실에서 먼저 할 일(진료 전 처치, 검사 준비)도 함께 안내
   const treat = treatRoomOf(settings);
   // 진료 전 처치는 시행 전인 것만, 검사 준비는 처치실에서 할 것만 (진료실에서 하는 검사 준비는 동의서 전일 때만 — 10-10)
-  const treatTodo = (p) => !pastVision(p) ? [] : preProcWaiting(p, 'resident')
-    ? notPerformed(preProcsLeft(p, 'resident')).map(x => x.name)
+  const treatTodo = (p) => !pastVision(p) ? [] : preProcWaiting(p, 'resident') || profConsentPending(settings, p.preProcs).length
+    ? [...notPerformed(preProcsLeft(p, 'resident')), ...profConsentPending(settings, p.preProcs)].map(x => x.name)
     : treatPrepTodo(p, settings).map(t => `${t.name || t.short} 검사 준비`);
   const list = patients
     .filter(p => !p.consultDone && (pendingRooms(p, settings).length > 0 || treatTodo(p).length > 0))

@@ -1,7 +1,7 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
 import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
-import { resultChecksPending, COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, preProcWaiting, prepAtConsult, testConsentMissing, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
+import { profConsentPending, resultChecksPending, COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, preProcWaiting, prepAtConsult, testConsentMissing, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
 import { shiftISO, visionNames } from '../core/storage.jsx';
 import { APP_VERSION, DoctorTag, TextSizeControl } from '../ui/common.jsx';
 import { BoardView, consultRoomLabel, patientBoardName } from './BoardView.jsx';
@@ -105,7 +105,7 @@ export function beep(ok) {
 // 접수 안내 문구가 없어도 진료 전 처치 환자에게는 처치실로 가라고 안내 (교수님 담당 처치만 남으면 진료실 앞 — 10-10)
 export function kioskNoteFor(p, settings, prefs) {
   if (p.kioskNote) return p.kioskNote;
-  if (preProcPending(p, 'resident')) {
+  if (preProcPending(p, 'resident') || profConsentPending(settings, p.preProcs).length) {
     const t = treatRoomOf(settings);
     return `시력검사 없이 바로 ${t.patientName || t.name}로 오세요`;
   }
@@ -131,7 +131,8 @@ export function kioskGuide(p, patients, settings, prefs) {
   if (p.consultDone || p.seen) return { title: '진료가 끝났습니다', note: '간호사 안내를 받으시기 바랍니다' };
   if (inConsult(p)) return toRoomFront;
   if (!visionComplete(p)) return { title: '시력검사 대기 중입니다', note: '큰 복도에서 기다려 주세요' };
-  if (treatRequested(p) || needsTriageAssign(p) || preProcWaiting(p, 'resident')) return toTreat;
+  // 교수님 처치도 동의서 전이면 처치실 먼저 (10-10)
+  if (treatRequested(p) || needsTriageAssign(p) || preProcWaiting(p, 'resident') || profConsentPending(settings, p.preProcs).length) return toTreat;
   // 교수님 담당 진료 전 처치(예: 만니톨)는 진료실 간호사가 (10-10)
   if (preProcWaiting(p, 'prof')) return { title: '다음은 처치입니다', note: `${room} 앞으로 이동해 주세요` };
   // 남은 검사가 있는 곳 (검사 준비가 남은 검사는 처치실부터, 검사 준비 결과로 취소된 검사는 뺌)

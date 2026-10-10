@@ -126,8 +126,18 @@ ok(!!(await rec('신종희')).procedures[0].performedAt, '동의서 확인 뒤 Y
 // 3) 진료실 설명 대기: 교수님 처치 동의서 · 확인 · 재진료
 await back(); await pick('진료실'); await W(600);
 await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1200);
-const hw = inSec('consult-explain', '황도윤');
-ok(await hw.getByRole('button', { name: '처치 완료', exact: true }).isDisabled() && await hw.getByRole('button', { name: '동의서 전', exact: true }).count() === 1, "설명 대기 교수님 처치: '동의서 전' + 회색 [처치 완료]");
+// 교수님 처치도 동의서는 처치실에서 먼저 (10-10 사용자): 진료실은 점선 '처치실 · 동의서 전'(버튼 없음) → 처치실 처치 대기에 [동의서 전]만
+let hw = inSec('consult-explain', '황도윤');
+ok(await hw.locator('[data-task-line="처치실"]').filter({ hasText: '동의서 전' }).count() === 1 && await hw.getByRole('button', { name: '처치 완료', exact: true }).count() === 0 && await hw.getByRole('button', { name: '동의서 전', exact: true }).count() === 0, "설명 대기 교수님 처치(동의서 전): 점선 '처치실 · 동의서 전', 버튼 없음");
+await back(); await pick('처치실'); await W(1200);
+const hwT = inSec('treat-procs', '황도윤');
+ok(await hwT.locator('[data-task-line="처치"]').filter({ hasText: '교수님 · 진료실' }).count() === 1 && await hwT.getByRole('button', { name: '처치 완료', exact: true }).count() === 0, "처치실 처치 대기: '처치 주사 · OD 교수님 · 진료실' + [동의서 전]만");
+await hwT.getByRole('button', { name: '동의서 전', exact: true }).click(); await W(1200);
+ok(!!(await rec('황도윤')).procedures[0].consentAt && await inSec('treat-procs', '황도윤').count() === 0, '처치실에서 동의서 → 처치실에서 빠짐');
+await back(); await pick('진료실'); await W(600);
+await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1200);
+hw = inSec('consult-explain', '황도윤');
+ok(await hw.getByRole('button', { name: '처치 완료', exact: true }).isEnabled() && await hw.getByRole('button', { name: /^동의서 ✓/ }).count() === 1, '동의서 뒤 설명 대기: [처치 완료] 눌림');
 const nk = inSec('consult-explain', '남궁하늘');
 ok(await nk.getByRole('button', { name: '확인 · 재진료', exact: true }).count() === 1, "확인 시간이 된 진료 뒤 처치: [확인] 옆 '확인 · 재진료'");
 await page.screenshot({ path: `${SP}/r107-explain.png`, fullPage: true });
