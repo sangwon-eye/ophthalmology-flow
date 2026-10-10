@@ -1,7 +1,7 @@
 // 메인 화면(이 컴퓨터의 화면 선택)
 import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
-import { resultChecksPending, COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
+import { resultChecksPending, COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, preProcWaiting, prepAtConsult, testConsentMissing, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
 import { shiftISO, visionNames } from '../core/storage.jsx';
 import { APP_VERSION, DoctorTag, TextSizeControl } from '../ui/common.jsx';
 import { BoardView, consultRoomLabel, patientBoardName } from './BoardView.jsx';
@@ -131,23 +131,27 @@ export function kioskGuide(p, patients, settings, prefs) {
   if (p.consultDone || p.seen) return { title: '진료가 끝났습니다', note: '간호사 안내를 받으시기 바랍니다' };
   if (inConsult(p)) return toRoomFront;
   if (!visionComplete(p)) return { title: '시력검사 대기 중입니다', note: '큰 복도에서 기다려 주세요' };
-  if (treatRequested(p) || needsTriageAssign(p) || preProcPending(p, 'resident')) return toTreat;
+  if (treatRequested(p) || needsTriageAssign(p) || preProcWaiting(p, 'resident')) return toTreat;
   // 교수님 담당 진료 전 처치(예: 만니톨)는 진료실 간호사가 (10-10)
-  if (preProcPending(p, 'prof')) return { title: '다음은 처치입니다', note: `${room} 앞으로 이동해 주세요` };
+  if (preProcWaiting(p, 'prof')) return { title: '다음은 처치입니다', note: `${room} 앞으로 이동해 주세요` };
   // 남은 검사가 있는 곳 (검사 준비가 남은 검사는 처치실부터, 검사 준비 결과로 취소된 검사는 뺌)
   const roomIds = new Set(settings.rooms.map(r => r.id));
   const places = new Set();
   sortedTests(settings).forEach(t => {
     if (!roomIds.has(t.roomId) || !p.assigned?.[t.id] || p.done?.[t.id] || prepPositive(p, t)) return;
-    places.add(prepBlocked(p, t) ? treat.id : t.roomId);
+    // 검사 준비가 남은 검사는 준비하는 곳부터: 처치실, 또는 진료실에서 하는 검사 준비(동의서를 받은 뒤 — 10-10)
+    places.add(!prepBlocked(p, t) ? t.roomId : prepAtConsult(t) && !testConsentMissing(p, t) ? 'consult' : treat.id);
   });
   if (places.size >= 2) return { title: '검사가 남았습니다', note: '큰 복도에서 기다려 주세요' };
+  if (places.size === 1 && places.has('consult')) return { title: '검사 전 준비가 남았습니다', note: `${room} 앞으로 이동해 주세요` };
   if (places.size === 1) {
     const r = settings.rooms.find(x => x.id === [...places][0]);
     return { title: '검사가 한 곳 남았습니다', note: `${withRo(r?.patientName || r?.name || '검사실')} 이동해 주세요` };
   }
   if (needsTriageExam(p, settings)) return toTreat;
   // '나중에 확인' 결과(MMP)를 기다리는 중 (10-07): 남은 검사 안내가 먼저, 결과 확인 뒤 진료 대기(모니터)에 이름이 나옴
+  // 시행한 진료 전 처치의 확인을 기다리는 중 (예: 만니톨 30분 — 그동안 검사는 위에서 안내)
+  if (preProcPending(p)) return { title: '처치 후 확인을 기다리고 있습니다', note: `${preProcPending(p, 'prof') ? room : treatName} 앞에서 기다려 주세요` };
   if (resultChecksPending(p, settings)) return { title: '검사 결과를 기다리고 있습니다', note: '큰 복도에서 기다려 주세요' };
   const n = consultFrontCount(settings);
   if (n && consultQueue(patients, p.doctor, settings, prefs).slice(0, n).some(x => patientKey(x) === patientKey(p))) return toRoomFront;

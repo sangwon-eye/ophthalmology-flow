@@ -1,10 +1,10 @@
 // 진료실 화면
 import React, { useState, useEffect, useContext } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { preProcsLeft, inProfPreProc, pendingRooms, consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procCheckDue, resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { inConsultPrep, consultPrepTests, prepOf, prepDue, prepWaitMin, testConsentMissing, preProcsLeft, inProfPreProc, pendingRooms, consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procCheckDue, resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
-import { CONSENT_TITLE, ConsentChips, TaskLine, RefLine, RefItem, TwoStepButton, doctorDotColor, doctorTintStyle, DoctorOrderContext, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { PrepButtons, prepWhat, CONSENT_TITLE, ConsentChips, TaskLine, RefLine, RefItem, TwoStepButton, doctorDotColor, doctorTintStyle, DoctorOrderContext, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -169,15 +169,21 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   const dropsList = mine.filter(p => p.checkin && !inConsult(p) && dropsPending(p, doctorPrefs, waitMin)).sort(byQueue);
   const dropsReady = mine.filter(p => p.checkin && !p.consultDone && !p.seen && (redoActive(p) || crActive(p, doctorPrefs)) && ['due', 'ready'].includes(dilationState(p, doctorPrefs, waitMin).status));
   // 띵동: 이 교수님 진료실에 진료 호출이 생기면 (진료실 앞 PC 등), CR·산동 점안 시간이 되면. 교수님을 바꾸면 기준만 다시 잡음
-  useChime([...mine.filter(inConsult).map(patientKey), ...dropsReady.map(p => `drop:${patientKey(p)}`)], { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
+  // 진료 전 처치 확인 시간·진료실 검사 준비(skin test) 시간이 되면 (10-10 사용자: 진료실에서도 띵동)
+  const preDue = mine.filter(p => !p.consultDone).flatMap(p => [
+    ...checkItems(p).filter(c => c.list === 'preProcs' && c.i.performer === 'prof' && procCheckDue(c.i)).map(c => `pchk:${patientKey(p)}:${c.i.uid}`),
+    ...consultPrepTests(p, settings).filter(t => prepDue(prepOf(p, t), t)).map(t => `prep:${patientKey(p)}:${t.id}`),
+  ]);
+  useChime([...mine.filter(inConsult).map(patientKey), ...dropsReady.map(p => `drop:${patientKey(p)}`), ...preDue], { ready: !!lastSync && !!selectedDoctor, context: selectedDoctor });
   const waiting = mine.filter(p => consultWaiting(p, settings, doctorPrefs)).sort(byConsultQueue);
   // 진료 보류: 진료 중 [보내기]로 나간 환자 + 처치 후 검사를 마치고 재진료할 환자 (procReconsult)
   // '나중에 확인' 결과(MMP)를 기다리는 환자는 검사가 남은 것과 같이 셈 (10-07 사용자: '검사 진행 중'에 포함)
   const notReady = (p) => !allDone(p, settings) || resultChecksPending(p, settings);
   const onHold = mine.filter(p => (p.consultHold || procReconsultLabel(p)) && !p.consultDone && !p.seen && (notReady(p) || p.treatRequest));
   // 교수님 담당 진료 전 처치(예: 만니톨, 10-10 사용자): 진료 뒤 교수님 처치처럼 진료실에서 (처치실에는 안 보임)
-  const preProcList = mine.filter(p => p.checkin && inProfPreProc(p)).sort(byQueue);
-  const testing = mine.filter(p => !p.consultDone && !p.consultHold && !procReconsultLabel(p) && !p.seen && p.checkin && notReady(p) && !inTreatRoom(p, settings) && !inProfPreProc(p)).length;
+  // + 진료실에서 하는 검사 준비(예: FAG skin test — 동의서는 처치실, 10-10 사용자)
+  const preProcList = mine.filter(p => p.checkin && (inProfPreProc(p) || inConsultPrep(p, settings))).sort(byQueue);
+  const testing = mine.filter(p => !p.consultDone && !p.consultHold && !procReconsultLabel(p) && !p.seen && p.checkin && notReady(p) && !inTreatRoom(p, settings) && !inProfPreProc(p) && !inConsultPrep(p, settings)).length;
   const residentCount = mine.filter(p => inTreatRoom(p, settings)).length;
   const recent = mine
     .filter(p => p.consultDone)
@@ -737,11 +743,13 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
 
           {preProcList.length > 0 && (
             <div id="consult-preproc" className="mb-6 scroll-mt-36">
-              <SectionTitle hint="교수님 담당 진료 전 처치입니다 (예: 만니톨). 처치가 끝나면 검사가 있으면 검사실, 없으면 진료 대기로 갑니다.">진료 전 처치 · {preProcList.length}명</SectionTitle>
+              <SectionTitle hint="교수님 담당 진료 전 처치(예: 만니톨)와 진료실에서 하는 검사 준비(예: FAG skin test, 동의서는 처치실)입니다. 처치를 시행하면 확인 시간 동안 다른 검사를 할 수 있고, 확인해야 진료 대기로 갑니다.">진료 전 처치 · {preProcList.length}명</SectionTitle>
               {preProcList.map(p => {
                 const left = notPerformed(preProcsLeft(p, 'prof'));
                 const resLeft = preProcsLeft(p, 'resident');
-                const after = allTests.filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
+                // 남은 검사: 위 줄에 검사 준비로 이미 보이는 검사(예: FAG)는 빼서 되풀이하지 않음
+                const prepIds = new Set(consultPrepTests(p, settings).map(t => t.id));
+                const after = allTests.filter(t => p.assigned?.[t.id] && !p.done?.[t.id] && !prepIds.has(t.id));
                 return (
                   <SimpleCard key={patientKey(p)} p={p} tone="rose">
                     {/* 처치마다 한 줄 · 각자 [처치 완료] (처치실 진료 전 처치와 같은 모양). 산동 점안 버튼은 첫 줄에만 */}
@@ -762,8 +770,20 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                         </TaskLine>
                       );
                     })}
+                    {/* 진료실에서 하는 검사 준비: 동의서 전이면 점선(처치실), 시작 전 [시작], 시작하면 확인 대기 → 시간 됨 (처치실 결과 확인과 같은 버튼) */}
+                    {consultPrepTests(p, settings).map(t => {
+                      const st = prepOf(p, t);
+                      if (testConsentMissing(p, t)) return <TaskLine key={`cp-${t.id}`} wait tag="처치실" what={prepWhat(t)} small="동의서 전" />;
+                      const btns = <PrepButtons p={p} t={t} mutatePatients={mutatePatients} onToast={showToast} />;
+                      if (!st?.startedAt) return <TaskLine key={`cp-${t.id}`} tag="검사 준비" tone="violet" what={prepWhat(t)} small={`${prepWaitMin(t)}분`}>{btns}</TaskLine>;
+                      const due = prepDue(st, t);
+                      return (
+                        <TaskLine key={`cp-${t.id}`} tag={due ? '시간 됨' : '확인 대기'} tone={due ? 'violet' : 'slate'} what={prepWhat(t)}
+                          small={`${fmtClock(st.startedAt)} 시작${due ? '' : ` · ${Math.max(0, Math.ceil((st.startedAt + prepWaitMin(t) * 60000 - Date.now()) / 60000))}분 남음`}`}>{btns}</TaskLine>
+                      );
+                    })}
                     {resLeft.length > 0 && <TaskLine wait tag="처치실" what={resLeft.map(procLabel).join(', ')} small="진행 중" />}
-                    {after.length > 0 && <RefLine><RefItem k="처치 후 검사">{after.map(t => t.short || t.name).join(', ')}</RefItem></RefLine>}
+                    {after.length > 0 && <RefLine><RefItem k="남은 검사">{after.map(t => t.short || t.name).join(', ')}</RefItem></RefLine>}
                   </SimpleCard>
                 );
               })}

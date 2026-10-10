@@ -159,6 +159,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             ['noDilate', '산동 금지', noDilateTest(t), true],
             ['prepOn', '검사 준비', !!t.prepOn, roomKey !== 'vision'],
             ['consent', '동의서', !!t.consent, !!t.prepOn],
+            ['prepAtConsult', '진료실에서', !!t.prepAtConsult, !!t.prepOn],
             ['timed', '시간 재기', !!t.timed, true],
             ['holdCall', '진행 중 호출 금지', holdCallOf(t), roomKey !== 'vision' && !(t.timed && t.prepMode === 'go')],
             ['withExams', '대기 중에도', !!t.withExams, isTreat],

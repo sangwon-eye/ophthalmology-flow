@@ -1,7 +1,7 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { INPUT, examAsked, treatRequested, treatExamPending, inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { checkItems, procLabel, prepAtConsult, INPUT, examAsked, treatRequested, treatExamPending, inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { findKioskPatient } from './RoleSelect.jsx';
 import { WIDE_LIST, SectionHead, FuMissingBadge, TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
@@ -462,6 +462,12 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                     ))}
                   </div>
                 )}
+                {/* 진료 전 처치를 시행하고 확인을 기다리는 중(예: 만니톨 30분 — 그동안 검사 가능, 10-10): 확인 시각을 작게 */}
+                {!isVision && !p.consultDone && checkItems(p).some(c => c.list === 'preProcs') && (
+                  <div data-preproc-check className="w-full text-xs text-slate-500">
+                    {checkItems(p).filter(c => c.list === 'preProcs').map(c => `${procLabel(c.i)} 확인 ${fmtClock(c.i.performedAt + (Number(c.i.checkMin) || 0) * 60000)}`).join(' · ')}
+                  </div>
+                )}
                 {!isVision && (() => {
                   const o = orderState(p, settings, room.id);
                   if (!o.needed.length) return null;
@@ -510,7 +516,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                   const rr = rt?.roomId === 'vision' ? visionNames(settings).name : settings.rooms.find(r => r.id === rt?.roomId)?.name || '';
                   return <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{rr} {rt?.short || rt?.name || '검사'} 중 · 호출 금지</span>;
                 })()}
-                {held && <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{treatRoomOf(settings).name} {held.short || held.name} 중 · 호출 금지</span>}
+                {held && <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{prepAtConsult(held) ? '진료실' : treatRoomOf(settings).name} {held.short || held.name} 중 · 호출 금지</span>}
                 {asked && <>
                   <span data-treat-asked className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{treatRoomOf(settings).name} 확인 중{p.treatRequest.note ? ` · ${p.treatRequest.note}` : ''}</span>
                   <TwoStepButton onConfirm={() => cancelAsk(p)} className="text-xs text-slate-500 hover:text-rose-600 underline" armedClassName="text-xs px-2 py-0.5 rounded border border-rose-400 bg-rose-50 text-rose-700 font-medium">요청 취소</TwoStepButton>
@@ -518,7 +524,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                 {tests.filter(t => p.assigned?.[t.id] && t.id !== VISION_KEY).map(t => (
                   !p.done?.[t.id] && prepBlocked(p, t) ? (
                     // 처치실 준비(예: skin test)가 끝나야 할 수 있는 검사: 잠긴 칸으로 상태만 보여줌
-                    <div key={t.id} title="처치실 준비가 끝나면 할 수 있어요" className={`${TEST_TILE} px-3 text-sm ${prepPositive(p, t) ? 'border-red-300 bg-red-50 text-red-700' : 'border-dashed border-slate-300 bg-slate-50 text-slate-500'}`}>
+                    <div key={t.id} title={`${prepAtConsult(t) ? '진료실' : treatRoomOf(settings).name} ${prepLabel(t)}가 끝나면 할 수 있어요`} className={`${TEST_TILE} px-3 text-sm ${prepPositive(p, t) ? 'border-red-300 bg-red-50 text-red-700' : 'border-dashed border-slate-300 bg-slate-50 text-slate-500'}`}>
                       <span className="font-semibold">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
                       <span className="ml-1.5 text-xs">{prepPositive(p, t) ? '검사 취소' : prepOf(p, t)?.startedAt ? `${prepLabel(t)} 중` : `${prepLabel(t)} 전`}</span>
                     </div>

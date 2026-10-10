@@ -191,6 +191,8 @@ export function clearOrders(p, testIds) {
 // 검사 전 처치실 준비 단계 (예: FAG 동의서 · skin test 20분). 설정에서 검사마다 켭니다.
 // p.prep[testId] = { startedAt, result: 'neg' | 'pos', at, name }
 export function hasPrep(t) { return !!t?.prepOn; }
+// 검사 준비를 진료실 간호사가 (설정 칩 '진료실에서' → 검사 설정 새 칸 prepAtConsult, 10-10 사용자: FAG 동의서는 처치실, skin test는 진료실)
+export function prepAtConsult(t) { return hasPrep(t) && !!t.prepAtConsult; }
 export function prepOf(p, t) { return p.prep?.[t.id] || null; }
 // 설정의 두 가지 칩 (한 검사에 둘 중 하나만):
 //  [검사 준비] prepOn : 그 검사 전에 처치실 '검사 준비'에서 할 일 (예: FAG 동의서·skin test). 확인해야 검사실로
@@ -290,6 +292,11 @@ export function preProcsLeft(p, who) {
 export function preProcPending(p, who) {
   return preProcsLeft(p, who).length > 0;
 }
+// 아직 시행 전인 진료 전 처치가 있음 → 검사실이 부르지 않음 (예: 만니톨을 맞기 전).
+// 시행한 뒤 확인을 기다리는 동안은 다른 검사 가능, 진료 대기는 확인 뒤 (10-10 사용자: 만니톨 30분 동안 다른 검사실 검사 — MMP와 같은 규칙)
+export function preProcWaiting(p, who) {
+  return notPerformed(preProcsLeft(p, who)).length > 0;
+}
 
 // 남은 검사 (준비 전인 검사 포함, 양성으로 보류된 검사는 뺌)
 export function remainingTests(p, settings, roomId) {
@@ -347,7 +354,7 @@ export function pastVision(p) {
 
 // 진료 전 처치가 남아 있으면 검사실보다 처치가 먼저입니다.
 export function roomPending(p, settings, roomId) {
-  return pastVision(p) && !preProcPending(p) && pendingTests(p, settings, roomId).length > 0;
+  return pastVision(p) && !preProcWaiting(p) && pendingTests(p, settings, roomId).length > 0;
 }
 
 export function pendingRooms(p, settings) {
@@ -678,18 +685,25 @@ export function getStage(p, settings) {
   if (!visionComplete(p)) return { label: '시력/안압 검사 대기', area: 'vision' };
   if (treatRequested(p)) return { label: `처치실 대기 (${examAsked(p) ? `${p.treatRequest.from || '검사실'} 요청 확인` : '진료실 요청 확인'})`, area: 'treatReq' };
   if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : p.hxAssign ? '처치실 대기 (검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
-  if (preProcPending(p)) {
-    const names = (who) => preProcsLeft(p, who).map(x => x.name).join(', ');
-    if (!preProcPending(p, 'prof')) return { label: `처치실 대기 (진료 전 처치: ${names('resident')})`, area: 'preProc' };
-    if (!preProcPending(p, 'resident')) return { label: `진료실 대기 (진료 전 처치: ${names('prof')})`, area: 'preProc' };
+  if (preProcWaiting(p)) {
+    const names = (who) => notPerformed(preProcsLeft(p, who)).map(x => x.name).join(', ');
+    if (!preProcWaiting(p, 'prof')) return { label: `처치실 대기 (진료 전 처치: ${names('resident')})`, area: 'preProc' };
+    if (!preProcWaiting(p, 'resident')) return { label: `진료실 대기 (진료 전 처치: ${names('prof')})`, area: 'preProc' };
     return { label: `진료 전 처치 (처치실 ${names('resident')} · 진료실 ${names('prof')})`, area: 'preProc' };
   }
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
-  const prepNames = prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => t.short || t.name);
-  if (prepNames.length) return { label: `처치실 대기 (${prepNames.join(', ')} 검사 준비)`, area: 'prep' };
+  // 검사 준비: 처치실(시작 전 · 진료실 검사 준비의 동의서 전) → 진료실(진료실 검사 준비 시작 전)
+  const prepTodo = treatPrepTodo(p, settings);
+  const nm = (list) => list.map(t => t.short || t.name).join(', ');
+  const treatSide = prepTodo.filter(t => !prepAtConsult(t));
+  const consentSide = prepTodo.filter(prepAtConsult);
+  if (prepTodo.length) return { label: `처치실 대기 (${[treatSide.length ? `${nm(treatSide)} 검사 준비` : '', consentSide.length ? `${nm(consentSide)} 동의서` : ''].filter(Boolean).join(' · ')})`, area: 'prep' };
+  const consultPrep = consultPrepTests(p, settings).filter(t => !prepOf(p, t)?.startedAt);
+  if (consultPrep.length) return { label: `진료실 대기 (${nm(consultPrep)} 검사 준비)`, area: 'prep' };
   const rooms = pendingRooms(p, settings);
   if (rooms.length) return { label: `${rooms.map(r => r.name).join(', ')} 검사 대기`, area: 'exam' };
   if (needsTriageExam(p, settings)) return { label: '처치실 대기 (예진)', area: 'triageExam' };
+  if (!p.seen && !p.calledRoom && preProcPending(p)) return { label: `진료 전 처치 확인 대기 (${preProcsLeft(p).map(x => x.name).join(', ')})`, area: 'preProc' };
   if (!p.seen && !p.calledRoom && resultChecksPending(p, settings)) return { label: `${resultCheckNames(p, settings)} 결과 확인 대기`, area: 'exam' };
   if (inProfProcedure(p)) return { label: p.explainedEarly ? '설명 완료 · 교수님 처치 후 귀가' : '교수님 처치 중 (설명 대기)', area: 'profProc' };
   if (inResidentProcedure(p)) return { label: p.explainedEarly ? '처치실 (설명 완료 · 처치 후 귀가)' : '처치실 대기 (처치)', area: 'resProc' };
@@ -1825,6 +1839,17 @@ export function treatTimedDue(p, settings, now = Date.now()) {
   return roomTests(settings, treatRoomOf(settings).id)
     .filter(t => isTimed(t) && !prepGoMode(t) && p.assigned?.[t.id] && prepRunning(p, t) && prepDue(prepOf(p, t), t, now));
 }
+// 처치실 '검사 준비' 칸에서 할 일: 처치실 검사 준비는 시작 전, 진료실 검사 준비는 동의서 확인 전(동의서만 — 10-10)
+export function treatPrepTodo(p, settings) {
+  return prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt && (!prepAtConsult(t) || testConsentMissing(p, t)));
+}
+// 진료실 '진료 전 처치' 칸의 검사 준비 (결과 전까지, 동의서 전이면 점선 '처치실 · 동의서 전')
+export function consultPrepTests(p, settings) {
+  return prepPendingTests(p, settings).filter(prepAtConsult);
+}
+export function inConsultPrep(p, settings) {
+  return !p.consultDone && pastVision(p) && consultPrepTests(p, settings).length > 0;
+}
 // 처치실 할 일 묶음별 환자 (정렬 전)
 // '시행하면 대기 칸에서 빠짐' (10-10 사용자): 처치·검사를 일단 시행(시작)하면 대기 칸에는 없고 '결과 확인'에만
 //  - 확인 시간이 있는 처치(전공의·진료 전·교수님 처치 모두): [처치 완료](시행) 즉시 결과 확인 '확인까지 N분' → 시간이 되면 노란 [확인]
@@ -1849,7 +1874,7 @@ export function treatWork(patients, settings) {
     requests: patients.filter(treatRequested),
     triage: patients.filter(needsTriageAssign),
     procs: patients.filter(p => needsTriageExam(p, settings) || (!p.consultDone && notPerformed(pendingProcedures(p, 'resident')).length > 0)),
-    prep: patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).some(t => !prepOf(p, t)?.startedAt)),
+    prep: patients.filter(p => !p.consultDone && pastVision(p) && treatPrepTodo(p, settings).length > 0),
     check: patients.filter(p => prepChecks(p, settings).length > 0 || (!p.consultDone && (treatTimedRunning(p, settings).length > 0 || prepStartedTests(p, settings).length > 0 || checkItems(p).length > 0))),
     preProc: patients.filter(p => !p.consultDone && pastVision(p) && notPerformed(preProcsLeft(p, 'resident')).length > 0),
     exams: patients.filter(p => !p.consultDone && treatExamPending(p, settings)),

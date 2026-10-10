@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { procNeedsConsent, procConsentPatch, procConsentCancelPatch, testConsentMissing, testConsentPatch, testConsentCancelPatch, previousMeasure, fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { prepOf, prepLabel, prepDue, prepGoMode, prepWaitMin, prepCompletesTest, restoreKeys, procNeedsConsent, procConsentPatch, procConsentCancelPatch, testConsentMissing, testConsentPatch, testConsentCancelPatch, previousMeasure, fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -297,7 +297,8 @@ export function SpecialPressButton({ onClick, onSpecial, className, title, child
 
 // 설정 > 검사 옵션 칩의 설명 (마우스를 올리면 보이고, 설정 위쪽 '옵션 설명'에 한 번 적혀 있음)
 export const TEST_OPTION_HELP = {
-  consent: '검사 준비 전에 동의서를 받았다고 체크해야 처치실 [시작]을 누를 수 있음 (예: FAG)',
+  consent: '검사 준비 전에 동의서를 받았다고 체크해야 [시작]을 누를 수 있음 (예: FAG). 동의서는 늘 처치실에서',
+  prepAtConsult: '검사 준비를 진료실 간호사가 함 (예: FAG skin test). 진료실 "진료 전 처치" 칸에 [시작]이 뜨고, [동의서]를 켜면 처치실에서 동의서를 받은 뒤에',
   popupOnClick: '누를 때마다 세부 창(단안·종류)을 띄움. 끄면 바로 체크되고 오른쪽 클릭으로 창을 엶',
   noOrder: "처방이 필요 없는 검사 (예: OSDI). '처방 전' 표시를 하지 않음",
   noDilate: '이 검사가 끝나기 전에는 점안(산동)을 막음 (예: VF)',
@@ -1567,6 +1568,70 @@ export function TestConsentChip({ p, t, mutatePatients }) {
   return <button type="button" data-consent={t.id} onClick={() => patchPatient(mutatePatients, pk, x => testConsentPatch(x, t.id, Date.now()))} title="동의서를 받았으면 누르세요" className={CONSENT_OFF}>동의서 전</button>;
 }
 // onReconsult: 진료 뒤 처치(설명 대기 환자)의 확인 시간이 되면 [확인] 옆 작은 글씨 '확인 · 재진료' (10-10 사용자: 간혹 안압을 보고 다시 진료)
+// 검사 준비 이름: 검사 이름 + 준비 이름 (예: FAG skin test). 같으면 하나만
+export function prepWhat(t) { const name = t.short || t.name; const label = prepLabel(t); return label && label !== name ? `${name} ${label}` : name; }
+// 검사 준비 버튼 (시작 전 · 진행 중 · 시간 됨) — 처치실(검사 준비·결과 확인)과 진료실(진료실에서 하는 검사 준비, 10-10)이 같이 씀
+// 모두 서버의 최신 기록으로 다시 확인: 다른 PC가 먼저 시작·확인·취소했으면 다시 적용하지 않고, 되돌리기도 아직 이 버튼이 바꾼 그대로일 때만
+export function PrepButtons({ p, t, mutatePatients, onToast }) {
+  const st = prepOf(p, t);
+  const label = prepLabel(t);
+  const due = prepDue(st, t);
+  const pk = patientKey(p);
+  const prepNow = (x) => x.prep?.[t.id] || null;
+  const toast = (msg, undo) => onToast?.(msg, undo);
+  // 저장된 결과로 이 버튼이 들어갔는지 확인한 뒤 안내 (안 들어갔으면 '이미 다른 곳에서' 안내, 되돌리기 없음)
+  const save = (fn, applied, msg, undo) => patchPatient(mutatePatients, pk, fn).then(next => {
+    const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+    if (!rec) return;
+    if (applied(rec)) toast(msg, undo);
+    else toast(`${p.name} 환자는 이미 다른 곳에서 처리되었습니다 · 바꾸지 않았습니다`);
+  }, () => {});
+  // 시작 전일 때만 시작(동의서를 켠 검사 준비는 동의서 확인 뒤), 같은 시작에 아직 결과가 없을 때만 시작 취소·반응 있음·확인
+  const canStart = (cur, x) => !cur?.startedAt && !testConsentMissing(x, t);
+  const sameRun = (cur) => !!cur?.startedAt && cur.startedAt === st?.startedAt && !cur.result;
+  // when(지금 서버 값): 이 조건일 때만 저장. 되돌리기는 아직 이 버튼이 넣은 값 그대로일 때만
+  const setPrep = (value, msg, when) => {
+    const before = p.prep?.[t.id] || null;
+    const same = (v) => JSON.stringify(v ?? null) === JSON.stringify(value ?? null);
+    save(x => (when(prepNow(x), x) ? { prep: { ...(x.prep || {}), [t.id]: value } } : {}), rec => same(prepNow(rec)), msg,
+      () => patchPatient(mutatePatients, pk, x => (same(prepNow(x)) ? { prep: { ...(x.prep || {}), [t.id]: before } } : {})));
+  };
+  // 바로 넘어감: 시작하면 검사 완료로 두고(다음 검사·진료로 이동), 확인은 나중에
+  const startGo = () => {
+    const at = Date.now();
+    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
+    save(x => (prepNow(x)?.startedAt || testConsentMissing(x, t) ? {} : {
+      prep: { ...(x.prep || {}), [t.id]: { startedAt: at, go: true, name: t.short || t.name } },
+      done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at },
+    }), rec => prepNow(rec)?.startedAt === at, `${p.name} ${label} 시작 · 시간이 되면 알려드려요`,
+    () => patchPatient(mutatePatients, pk, x => (prepNow(x)?.startedAt === at ? restoreKeys(x, before, [t.id]) : {})));
+  };
+  // [확인]: 검사실에서 검사할 수 있게 열어 줌. '확인하면 검사 완료'(예: Schirmer, MMP)면 검사도 완료로
+  const confirm = () => {
+    const at = Date.now();
+    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
+    save(x => (!sameRun(prepNow(x)) ? {} : {
+      prep: { ...(x.prep || {}), [t.id]: { ...st, result: 'neg', at } },
+      ...(prepCompletesTest(t) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
+    }), rec => prepNow(rec)?.at === at, `${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`,
+    () => patchPatient(mutatePatients, pk, x => (prepNow(x)?.at === at ? restoreKeys(x, before, [t.id]) : {})));
+  };
+  return <>
+    {st?.startedAt && <button type="button" onClick={() => setPrep({ ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`, sameRun)} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
+      className="text-xs text-red-600 underline">반응 있음</button>}
+    {st?.startedAt && !due && <button type="button" onClick={() => setPrep(null, `${p.name} ${label} 시작 취소`, sameRun)} className="text-xs text-slate-400 hover:text-rose-600 underline">시작 취소</button>}
+    {!st?.startedAt && <TestConsentChip p={p} t={t} mutatePatients={mutatePatients} />}
+    {!st?.startedAt ? (
+      <button type="button" data-prep-start={t.id} disabled={testConsentMissing(p, t)} onClick={() => (prepGoMode(t) ? startGo() : setPrep({ startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`, canStart))}
+        title={testConsentMissing(p, t) ? '동의서 확인 후 시작할 수 있습니다' : `${label} 시작 (${prepWaitMin(t)}분)`} className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">시작</button>
+    ) : due ? (
+      <button type="button" onClick={confirm} title={prepCompletesTest(t) ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
+        className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">끝 · 확인</button>
+    ) : (
+      <button type="button" onClick={confirm} title="시간 전이지만 지금 완료로 처리" className="text-sm px-4 py-2 rounded-lg border border-green-400 bg-white text-green-700 font-medium">지금 확인</button>
+    )}
+  </>;
+}
 export function ProcCheckRow({ p, mutatePatients, filter = () => true, onReconsult = null, onToast = null }) {
   const [, setTick] = useState(0);
   useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(t); }, []);

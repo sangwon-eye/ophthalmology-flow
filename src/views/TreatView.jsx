@@ -1,7 +1,7 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { preProcsLeft, examAsked, treatRequestFrom, consentMissing, testConsentMissing, checkReconsultPatch, undoCheckReconsultPatch, procDilatePatch, markDilateSet, newId, treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
-import { CONSENT_TITLE, ConsentChips, TestConsentChip, ProcedureModal, TaskLine, RefLine, RefItem, CardDetail, HxRef, TwoStepButton, ProcCheckRow, PostTestModal, ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
+import { treatPrepTodo, prepAtConsult, preProcsLeft, examAsked, treatRequestFrom, consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procDilatePatch, markDilateSet, newId, treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepDue, prepChecks, orderForPicking, prepLabel, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
+import { PrepButtons, prepWhat, CONSENT_TITLE, ConsentChips, TestConsentChip, ProcedureModal, TaskLine, RefLine, RefItem, CardDetail, HxRef, TwoStepButton, ProcCheckRow, PostTestModal, ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
@@ -201,16 +201,6 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     if (applied(rec)) showToast(msg, undo);
     else showToast(`${p.name} 환자는 이미 다른 곳에서 처리되었습니다 · 바꾸지 않았습니다`);
   }, () => {});
-  const startGo = (p, t) => {
-    const pk = patientKey(p);
-    const at = Date.now();
-    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
-    prepSave(p, x => (prepNow(x, t)?.startedAt || testConsentMissing(x, t) ? {} : {
-      prep: { ...(x.prep || {}), [t.id]: { startedAt: at, go: true, name: t.short || t.name } },
-      done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at },
-    }), rec => prepNow(rec, t)?.startedAt === at, `${p.name} ${prepLabel(t)} 시작 · 시간이 되면 알려드려요`,
-    () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.startedAt === at ? restoreKeys(x, before, [t.id]) : {})));
-  };
   const cancelGo = (p, t) => {
     const pk = patientKey(p);
     const st = prepOf(p, t);
@@ -236,30 +226,8 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       rec => prepNow(rec, t)?.at === at, `${p.name} ${t.short || t.name} 완료`,
       () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.at === at ? restoreKeys(x, before, [t.id]) : {})));
   };
-  // when(지금 서버 값): 이 조건일 때만 저장. 되돌리기는 아직 이 버튼이 넣은 값 그대로일 때만
-  const setPrep = (p, t, value, msg, when = () => true) => {
-    const pk = patientKey(p);
-    const before = p.prep?.[t.id] || null;
-    const same = (v) => JSON.stringify(v ?? null) === JSON.stringify(value ?? null);
-    prepSave(p, x => (when(prepNow(x, t), x) ? { prep: { ...(x.prep || {}), [t.id]: value } } : {}), rec => same(prepNow(rec, t)), msg,
-      () => patchPatient(mutatePatients, pk, x => (same(prepNow(x, t)) ? { prep: { ...(x.prep || {}), [t.id]: before } } : {})));
-  };
-  // 시작 전일 때만 시작, 같은 시작에 아직 결과가 없을 때만 시작 취소·검사 취소·확인
-  const notStarted = (cur) => !cur?.startedAt;
-  // 동의서를 켠 검사 준비(예: FAG)는 동의서 확인 뒤에만 시작 (10-10 사용자: 막음)
-  const canStart = (t) => (cur, x) => notStarted(cur) && !testConsentMissing(x, t);
+  // 같은 시작에 아직 결과가 없을 때만 시작 취소
   const sameRun = (st) => (cur) => !!cur?.startedAt && cur.startedAt === st?.startedAt && !cur.result;
-  // [확인]: 검사실에서 검사할 수 있게 열어 줌. '확인하면 검사 완료'(예: Schirmer, MMP)면 검사도 완료로
-  const confirmPrep = (p, t, st) => {
-    const pk = patientKey(p);
-    const at = Date.now();
-    const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
-    prepSave(p, x => (!sameRun(st)(prepNow(x, t)) ? {} : {
-      prep: { ...(x.prep || {}), [t.id]: { ...st, result: 'neg', at } },
-      ...(prepCompletesTest(t) ? { done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at } } : {}),
-    }), rec => prepNow(rec, t)?.at === at, `${p.name} ${t.short || t.name} ${prepCompletesTest(t) ? '완료' : '확인, 검사실로'}`,
-    () => patchPatient(mutatePatients, pk, x => (prepNow(x, t)?.at === at ? restoreKeys(x, before, [t.id]) : {})));
-  };
   // 처치 후 검사 (10-07): [처치 완료] 옆 '검사 추가 후 완료' → 검사 고르기 창
   const [postFor, setPostFor] = useState(null); // { p, kind: 'pre' | 'resident', uid }
   const postIds = (sel) => allTests.filter(t => sel[t.id]).map(t => t.id);
@@ -377,8 +345,6 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   // 동의서를 켠 처치가 확인 전이면 [처치 완료]·'검사 추가 후 완료'를 막음 (10-10 사용자)
   const noConsent = (items) => consentMissing(settings, items).length > 0;
   const procNames = (list) => (list || []).map(x => `${procLabel(x)}${x.note ? ` · ${x.note}` : ''}`).join(', ');
-  // 검사 준비 이름: 검사 이름 + 준비 이름 (예: FAG skin test). 같으면 하나만
-  const prepWhat = (t) => { const name = t.short || t.name; const label = prepLabel(t); return label && label !== name ? `${name} ${label}` : name; };
   const minsLeft = (start, min, at) => Math.max(0, Math.ceil((start + min * 60000 - at) / 60000));
   // [끝 · 확인] 방식 시간 재기(예: Schirmer) 시작 취소: 같은 시작에 결과 전일 때만
   const cancelTimed = (p, t) => {
@@ -388,27 +354,8 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     prepSave(p, x => (sameRun(st)(prepNow(x, t)) ? prepCancelPatch(x, t) : {}), rec => !prepNow(rec, t), `${p.name} ${prepLabel(t)} 시작 취소`,
       () => patchPatient(mutatePatients, pk, x => (!prepNow(x, t) ? restoreKeys(x, before, [t.id]) : {})));
   };
-  // 검사 준비 버튼 (시작 전 · 진행 중 · 시간 됨) — 검사 준비 칸과 결과 확인 칸이 같이 씀
-  const prepButtons = (p, t) => {
-    const st = prepOf(p, t);
-    const label = prepLabel(t);
-    const due = prepDue(st, t);
-    return <>
-      {st?.startedAt && <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`, sameRun(st))} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
-        className="text-xs text-red-600 underline">반응 있음</button>}
-      {st?.startedAt && !due && <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`, sameRun(st))} className="text-xs text-slate-400 hover:text-rose-600 underline">시작 취소</button>}
-      {!st?.startedAt && <TestConsentChip p={p} t={t} mutatePatients={mutatePatients} />}
-      {!st?.startedAt ? (
-        <button type="button" data-prep-start={t.id} disabled={testConsentMissing(p, t)} onClick={() => (prepGoMode(t) ? startGo(p, t) : setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`, canStart(t)))}
-          title={testConsentMissing(p, t) ? '동의서 확인 후 시작할 수 있습니다' : `${label} 시작 (${prepWaitMin(t)}분)`} className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">시작</button>
-      ) : due ? (
-        <button type="button" onClick={() => confirmPrep(p, t, st)} title={prepCompletesTest(t) ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
-          className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">끝 · 확인</button>
-      ) : (
-        <button type="button" onClick={() => confirmPrep(p, t, st)} title="시간 전이지만 지금 완료로 처리" className="text-sm px-4 py-2 rounded-lg border border-green-400 bg-white text-green-700 font-medium">지금 확인</button>
-      )}
-    </>;
-  };
+  // 검사 준비 버튼 (시작 전 · 진행 중 · 시간 됨) — 검사 준비 칸과 결과 확인 칸, 진료실이 같이 씀 (common.jsx PrepButtons)
+  const prepButtons = (p, t) => <PrepButtons p={p} t={t} mutatePatients={mutatePatients} onToast={showToast} />;
   // 결과 확인 칸의 줄들: 시행한 처치(확인 시간) · 시작한 시간 재기 검사 · 시작한 검사 준비 · 바로 넘어감 검사. 시간 된 것 먼저
   const checkLines = (p) => {
     const at = Date.now();
@@ -499,8 +446,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           <SectionTitle hint="처치실에서 시간을 재는 검사·준비입니다 (예: FAG skin test). 시작하면 '결과 확인'으로 옮겨 가고, 정한 시간이 되면 초록 [끝 · 확인]으로 바뀝니다.">검사 준비 · {prepList.length}명</SectionTitle>
           {prepList.map(p => (
             <SimpleCard key={patientKey(p)} p={p} tone="violet" stale={staleOf(p)}>
-              {prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => (
-                <TaskLine key={t.id} tag="검사 준비" tone="violet" what={prepWhat(t)} small={`${prepWaitMin(t)}분`}>{prepButtons(p, t)}</TaskLine>
+              {treatPrepTodo(p, settings).map(t => (prepAtConsult(t)
+                // 진료실에서 하는 검사 준비(예: FAG skin test, 10-10): 처치실은 동의서만 → 확인하면 진료실 '진료 전 처치' 칸으로
+                ? <TaskLine key={t.id} tag="동의서" tone="violet" what={t.short || t.name} small={`${prepLabel(t)} · 진료실`}><TestConsentChip p={p} t={t} mutatePatients={mutatePatients} /></TaskLine>
+                : <TaskLine key={t.id} tag="검사 준비" tone="violet" what={prepWhat(t)} small={`${prepWaitMin(t)}분`}>{prepButtons(p, t)}</TaskLine>
               ))}
               {/* 처치실이 전체를 조율: 여기서도 오늘 검사 바꾸기 */}
               <RefLine>

@@ -12,7 +12,9 @@ await editKey('settings', s => ({
   ...s,
   tests: [...s.tests.filter(t => !['sch', 'mmp'].includes(t.id)).map(t => (t.id === 'fag' ? { ...t, prepOn: true, prepName: 'skin test', prepWaitMin: 20, consent: true } : t)),
     { id: 'sch', name: 'Schirmer', short: 'Schirmer', roomId: 'treat', order: 30, options: [], popupOnClick: false, machine: '', timed: true, prepWaitMin: 5, withExams: true },
-    { id: 'mmp', name: 'MMP', short: 'MMP', roomId: 'treat', order: 31, options: [], popupOnClick: false, machine: '', timed: true, prepMode: 'go', prepWaitMin: 10, withExams: true }],
+    { id: 'mmp', name: 'MMP', short: 'MMP', roomId: 'treat', order: 31, options: [], popupOnClick: false, machine: '', timed: true, prepMode: 'go', prepWaitMin: 10, withExams: true },
+    // 진료실에서 하는 검사 준비 (10-10: 동의서는 처치실, skin test는 진료실)
+    { id: 'icg', name: 'ICG', short: 'ICG', roomId: 'B', order: 32, options: [], popupOnClick: false, machine: '', prepOn: true, prepName: 'skin test', prepWaitMin: 20, consent: true, prepAtConsult: true }],
   procedures: [
     { id: 'man', name: '만니톨', performer: 'prof', checkMin: 30 },
     { id: 'yag', name: 'YAG', performer: 'resident', eyeSelect: true, checkMin: 60, consent: true },
@@ -51,6 +53,9 @@ const list = [
   // 교수님 담당 진료 전 처치(진료실 '진료 전 처치' 칸, 10-10) + 같은 환자의 전공의 진료 전 처치(처치실, 진료실에는 점선)
   base(18, '배하늘', '김선웅', { assigned: { visionIop: true, oct: true }, preProcs: [{ uid: 'pm18', procId: 'man', name: '만니톨', performer: 'prof', done: false, fromRequest: '31번방' }, { uid: 'pr18', procId: 'prp', name: 'PRP', performer: 'resident', eye: 'OD', done: false }] }),
   base(19, '임서준', '김선웅', { preProcs: [{ uid: 'pm19', procId: 'man', name: '만니톨', performer: 'prof', done: false, performedAt: min(31), checkMin: 30 }] }),
+  base(20, '하윤서', '김선웅', { assigned: { visionIop: true, icg: true, oct: true } }), // 동의서 전 (처치실 '동의서' 줄, 진료실 점선)
+  base(21, '구민재', '김선웅', { assigned: { visionIop: true, icg: true }, consent: { icg: min(4) } }), // 진료실 [시작]
+  base(22, '채다인', '김선웅', { assigned: { visionIop: true, icg: true }, consent: { icg: min(30) }, prep: { icg: { startedAt: min(25), name: 'ICG' } } }), // 진료실 시간 됨
 ];
 await editKey('daily-patients', () => list);
 const browser = await chromium.launch();
