@@ -84,10 +84,7 @@ await page.getByRole('button', { name: '김선웅', exact: true }).first().click
 await page.waitForTimeout(400);
 await shot('r2-consult-kim');
 const song = page.locator('div.bg-white').filter({ has: page.getByText('송하린', { exact: true }) }).last();
-const badge = song.getByText('처치 중', { exact: true });
-const nameBox = await song.getByText('송하린', { exact: true }).boundingBox();
-const badgeBox = await badge.boundingBox();
-ok(badgeBox && nameBox && Math.abs((badgeBox.y + badgeBox.height / 2) - (nameBox.y + nameBox.height / 2)) < 12, '처치 중 배지가 이름 줄에 있음');
+ok(await song.locator('[data-task-line="처치실"]').count() === 1, "처치실에서 진행 중인 처치는 점선 '처치실' 줄 (10-10: 처치 중 배지 대신)");
 const undoCls = await song.getByRole('button', { name: '진료 완료 취소' }).getAttribute('class');
 ok(/text-xs/.test(undoCls), '진료 완료 취소는 작은 글씨');
 await song.screenshot({ path: `${SP}/r2-explain-card.png` });

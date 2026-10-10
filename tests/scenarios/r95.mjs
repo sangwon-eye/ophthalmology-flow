@@ -42,7 +42,7 @@ ok(await shows('검사가 한 곳 남았습니다', '정밀검사실로 이동�
 await page.goto(`${BASE}/`); await W();
 // 3) 처치실 결과 확인 → 진료 대기로
 await pick('처치실'); await W(800);
-await inSec('treat-check', '서준호').getByRole('button', { name: /^MMP \d\d:\d\d · 확인$/ }).click(); await W(1500);
+await inSec('treat-check', '서준호').getByRole('button', { name: '확인', exact: true }).click(); await W(1500);
 ok(!!(await rec('서준호')).prep.mmp.checked, 'MMP 결과 확인');
 await back();
 await doctor('김선웅');
@@ -52,15 +52,15 @@ await back();
 // 4) 진료 뒤: 설명 대기 'MMP 결과 확인 전' → 설명 완료는 설명만 먼저, 귀가는 확인 뒤
 await doctor('이종혁');
 const card = () => inSec('consult-explain', '황도윤');
-ok(await card().getByText('MMP 결과 확인 전', { exact: true }).count() === 1, "설명 대기 카드: 'MMP 결과 확인 전'");
+ok(await card().locator('[data-task-line="처치실"]').filter({ hasText: 'MMP 결과 확인 전' }).count() === 1, "설명 대기 카드: 점선 '처치실' 'MMP 결과 확인 전' (10-10)");
 await card().getByRole('button', { name: '설명 완료 · FU 나중에' }).click(); await W(1500);
 let h = await rec('황도윤');
 ok(!!h.explainedEarly && !h.consultDone, '결과 확인 전 설명 완료 → 설명만 먼저 (귀가 아님)');
-ok(await card().getByText('MMP 결과를 확인하면 귀가 처리할 수 있어요').count() === 1 && await card().getByRole('button', { name: '귀가', exact: true }).count() === 0, '결과 확인 전에는 [귀가] 없음');
+ok(await card().getByRole('button', { name: '귀가', exact: true }).isDisabled(), '결과 확인 전에는 [귀가] 회색 (누를 수 없음)');
 await card().screenshot({ path: `${SP}/r95-explain-card.png` });
 await back();
 await pick('처치실'); await W(800);
-await inSec('treat-check', '황도윤').getByRole('button', { name: /^MMP \d\d:\d\d · 확인$/ }).click(); await W(1500);
+await inSec('treat-check', '황도윤').getByRole('button', { name: '확인', exact: true }).click(); await W(1500);
 await back();
 await doctor('이종혁');
 await card().getByRole('button', { name: '귀가', exact: true }).click(); await W(1500);

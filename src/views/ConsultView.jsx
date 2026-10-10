@@ -600,7 +600,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                   )}
                   {resCheck.length > 0 && <TaskLine wait tag="처치실" what={resCheck.map(procLabel).join(', ')} small={`${resCheck.map(i => fmtClock(i.performedAt)).join(', ')} 시행 · 처치실에서 확인 (확인해야 귀가)`} />}
                   {postTestsPending(p) && <TaskLine wait tag="검사실" what={postNames} small="처치 뒤 검사 · 검사실에서 진행 중 (끝나야 귀가)" />}
-                  {resultChecksPending(p, settings) && <TaskLine wait tag="처치실" what={`${resultCheckNames(p, settings)} 결과 확인`} small="처치실에서 확인 (확인해야 귀가)" />}
+                  {resultChecksPending(p, settings) && <TaskLine wait tag="처치실" what={`${resultCheckNames(p, settings)} 결과 확인 전`} small="처치실에서 확인 (확인해야 귀가)" />}
                   {/* 마지막 줄: 참고(오늘 검사·한 처치·취소) + 오른쪽 버튼(설명 완료 또는 귀가) · 맨 끝 [처치 보내기](드물어서) */}
                   <RefLine line={false} right={<>
                     {early ? (
