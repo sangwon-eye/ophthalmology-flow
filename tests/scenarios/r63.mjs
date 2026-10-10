@@ -41,7 +41,7 @@ ok(/YAG · OS/.test(await cardOf('오세영').innerText()) && /안내 주사 · 
 await back();
 await pick('처치실');
 const tc = cardOf('오세영');
-ok(/YAG · OS/.test(await tc.innerText()) && await tc.getByRole('button', { name: '처치 완료' }).count() === 1, '교수님 처치가 남아 있어도 전공의 처치는 처치실에');
+ok(await tc.locator('[data-task-line="처치"]').filter({ hasText: 'YAG · OS' }).getByRole('button', { name: '처치 완료', exact: true }).count() === 1, '교수님 처치가 남아 있어도 전공의 처치는 처치실에 (10-10: 처치마다 한 줄·각자 [처치 완료])');
 ok(/교수님 처치도 남음:?\s*안내 주사 · OD/.test(await tc.innerText()), '교수님 처치도 남음 표시 (10-10: 참고 줄)');
 ok(await tc.getByRole('button', { name: /^산동 \d\d:\d\d$/ }).count() === 1, '처치실 카드에 산동 점안 시각');
 await page.screenshot({ path: `${SP}/r63-treat.png`, fullPage: true });

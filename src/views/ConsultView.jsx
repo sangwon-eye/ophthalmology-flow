@@ -337,10 +337,12 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
   // post: '검사 · 재진료' 창에서 고른 검사 (처치 후 검사, 끝나면 설명 대기로 — 그때까지 [귀가]는 막음)
   const [postFor, setPostFor] = useState(null);
   // reconsult: '검사 · 재진료' 창의 [재진료] (10-07) — 같은 교수님 진료 대기로, 검사도 고르면 검사 뒤 (procReconsultPatch)
-  const finishProfProcedure = (p, post = null, reconsult = false) => {
+  // uid: 그 줄의 처치 하나만 (10-10 사용자: 처치마다 따로 완료)
+  const finishProfProcedure = (p, post = null, reconsult = false, uid = null) => {
     const pk = patientKey(p);
     const at = Date.now();
-    const shown = notPerformed(pendingProcedures(p, 'prof'));
+    const visible = new Set(notPerformed(pendingProcedures(p, 'prof')).map(i => i.uid));
+    const shown = notPerformed(pendingProcedures(p, 'prof')).filter(i => !uid || i.uid === uid);
     const ids = new Set(shown.map(i => i.uid));
     const tests = post ? allTests.filter(t => post.sel[t.id]).map(t => t.id) : [];
     const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
@@ -364,9 +366,13 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
         return;
       }
       if (!(rec.procedures || []).some(i => i.performedAt === at || i.doneAt === at)) { showToast(`처치 완료 안 됨 · ${p.name} 환자는 동의서 확인 전이거나 이미 처리되었습니다`); return; }
-      const leftProf = notPerformed(pendingProcedures(rec, 'prof'));
+      const leftAll = notPerformed(pendingProcedures(rec, 'prof'));
+      // 그사이 새로 들어온 처치(화면에 없던 것)와 같은 카드의 다른 처치(아직 안 누른 것)를 나눠 안내
+      const leftProf = leftAll.filter(i => !visible.has(i.uid));
+      const rest = leftAll.filter(i => visible.has(i.uid));
       const waiting = checkItems(rec).filter(c => c.i.performedAt === at);
       const next = leftProf.length ? `새로 들어온 교수님 처치가 남아 있습니다: ${leftProf.map(procLabel).join(', ')}`
+        : rest.length ? `남은 처치 ${rest.map(procLabel).join(', ')}`
         : waiting.length ? `${waiting.map(c => `${c.i.checkMin}분`).join(', ')} 뒤 확인`
           : tests.length ? '검사실로 (검사 후 설명 대기)'
             : pendingProcedures(rec, 'resident').length ? '처치실로' : rec.explainedEarly ? '귀가 대기' : '설명 가능';
@@ -588,15 +594,16 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                 <SimpleCard key={patientKey(p)} p={p} tone="emerald" badges={<>
                   {early && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료{p.fuLater ? ' · FU 나중에' : ''}</span>}
                 </>}>
-                  {profLeft.length > 0 && (
-                    <TaskLine tag="교수님" tone="rose" what={profLeft.map(x => `${procLabel(x)}${x.note ? ` · ${x.note}` : ''}`).join(', ')}
-                      small={[profLeft.some(i => i.dilate) ? '산동 필요' : '', ...profLeft.filter(i => Number(i.checkMin) > 0).map(i => `확인 ${i.checkMin}분`)].filter(Boolean).join(' · ')}>
-                      {dilAt === 'prof' && dil}
-                      <button type="button" disabled={consentMissing(settings, profLeft).length > 0} onClick={() => setPostFor(p)} title="처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다" className="text-xs text-slate-500 hover:text-slate-800 underline disabled:text-slate-300 disabled:no-underline">검사 · 재진료</button>
-                      <ConsentChips p={p} list="procedures" items={profLeft} settings={settings} mutatePatients={mutatePatients} />
-                      <button type="button" disabled={consentMissing(settings, profLeft).length > 0} title={consentMissing(settings, profLeft).length ? CONSENT_TITLE : undefined} onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
+                  {/* 처치마다 한 줄 · 각자 [처치 완료] (10-10 사용자). 산동 점안 버튼은 첫 줄에만 */}
+                  {profLeft.map((x, idx) => (
+                    <TaskLine key={x.uid} tag="교수님" tone="rose" what={`${procLabel(x)}${x.note ? ` · ${x.note}` : ''}`}
+                      small={[x.dilate ? '산동 필요' : '', Number(x.checkMin) > 0 ? `확인 ${x.checkMin}분` : ''].filter(Boolean).join(' · ')}>
+                      {idx === 0 && dilAt === 'prof' && dil}
+                      <button type="button" disabled={consentMissing(settings, [x]).length > 0} onClick={() => setPostFor({ p, uid: x.uid })} title="처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다" className="text-xs text-slate-500 hover:text-slate-800 underline disabled:text-slate-300 disabled:no-underline">검사 · 재진료</button>
+                      <ConsentChips p={p} list="procedures" items={[x]} settings={settings} mutatePatients={mutatePatients} />
+                      <button type="button" disabled={consentMissing(settings, [x]).length > 0} title={consentMissing(settings, [x]).length ? CONSENT_TITLE : undefined} onClick={() => finishProfProcedure(p, null, false, x.uid)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
                     </TaskLine>
-                  )}
+                  ))}
                   {checkItems(p).filter(c => c.list === 'procedures' && c.i.performer === 'prof').map(c => {
                     const due = procCheckDue(c.i);
                     return (
@@ -795,10 +802,10 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
       )}
 
       {postFor && (
-        <PostTestModal p={postFor} tests={allTests} settings={settings} mainIds={mainTestIds(doctorPrefs, postFor.doctor)}
-          items={notPerformed(pendingProcedures(postFor, 'prof'))}
+        <PostTestModal p={postFor.p} tests={allTests} settings={settings} mainIds={mainTestIds(doctorPrefs, postFor.p.doctor)}
+          items={notPerformed(pendingProcedures(postFor.p, 'prof')).filter(i => !postFor.uid || i.uid === postFor.uid)}
           reconsultOption
-          onConfirm={(sel, detail, recon) => { const p = postFor; setPostFor(null); finishProfProcedure(p, { sel, detail }, recon); }}
+          onConfirm={(sel, detail, recon) => { const { p, uid } = postFor; setPostFor(null); finishProfProcedure(p, { sel, detail }, recon, uid); }}
           onCancel={() => setPostFor(null)} />
       )}
       {explainFor && (
