@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { previousMeasure, fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { procNeedsConsent, procConsentPatch, procConsentCancelPatch, testConsentMissing, testConsentPatch, testConsentCancelPatch, previousMeasure, fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -297,6 +297,7 @@ export function SpecialPressButton({ onClick, onSpecial, className, title, child
 
 // 설정 > 검사 옵션 칩의 설명 (마우스를 올리면 보이고, 설정 위쪽 '옵션 설명'에 한 번 적혀 있음)
 export const TEST_OPTION_HELP = {
+  consent: '검사 준비 전에 동의서를 받았다고 체크해야 처치실 [시작]을 누를 수 있음 (예: FAG)',
   popupOnClick: '누를 때마다 세부 창(단안·종류)을 띄움. 끄면 바로 체크되고 오른쪽 클릭으로 창을 엶',
   noOrder: "처방이 필요 없는 검사 (예: OSDI). '처방 전' 표시를 하지 않음",
   noDilate: '이 검사가 끝나기 전에는 점안(산동)을 막음 (예: VF)',
@@ -1538,7 +1539,35 @@ export function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCa
 // 시행한 처치 하나에 버튼 하나. 시간 전 'YAG · OS 11:05 · 확인 대기'(한 번 누르면 3초 동안 [지금 완료] [시행 취소]),
 // 시간이 지나면 노란 'N분 지남 · 확인' → 누르면 끝. 서버 기록이 보이던 시행 그대로일 때만 저장
 // short: 할 일 줄 안에서 — 왼쪽에 처치 이름·시각이 이미 있으므로 버튼은 할 일만 ([확인 대기] / [확인]) (10-10 사용자: 같은 말 반복 줄이기)
-export function ProcCheckRow({ p, mutatePatients, filter = () => true, short = false }) {
+// 동의서 (10-10 사용자): 설정에서 [동의서]를 켠 처치만. 확인 전 주황 점선 '동의서 전'(한 번 누르면 확인) → 초록 '동의서 ✓ 시각'(두 번 눌러 취소)
+// 여러 처치가 함께면 처치 이름을 붙임. 확인 전에는 부르는 쪽에서 [처치 완료]를 막음(consentMissing)
+export const CONSENT_TITLE = '동의서 확인 후 누를 수 있습니다';
+const CONSENT_OFF = 'text-sm px-3 py-2 rounded-lg border-2 border-dashed border-orange-400 bg-orange-50 text-orange-700 font-bold whitespace-nowrap';
+const CONSENT_ON = 'text-sm px-3 py-2 rounded-lg border border-green-500 bg-green-50 text-green-700 font-bold whitespace-nowrap';
+export function ConsentChips({ p, list, items, settings, mutatePatients }) {
+  const need = (items || []).filter(i => procNeedsConsent(settings, i));
+  if (!need.length) return null;
+  const pk = patientKey(p);
+  const named = need.length > 1;
+  return need.map(i => (i.consentAt ? (
+    <TwoStepButton key={i.uid} onConfirm={() => patchPatient(mutatePatients, pk, x => procConsentCancelPatch(x, list, i.uid, i.consentAt))} className={CONSENT_ON}
+      armedClassName="text-sm px-3 py-2 rounded-lg border border-rose-400 bg-rose-50 text-rose-700 font-bold whitespace-nowrap">{named ? `${procLabel(i)} ` : ''}동의서 ✓ {fmtClock(i.consentAt)}</TwoStepButton>
+  ) : (
+    <button key={i.uid} type="button" data-consent={i.uid} onClick={() => patchPatient(mutatePatients, pk, x => procConsentPatch(x, list, i.uid, Date.now()))} title="동의서를 받았으면 누르세요" className={CONSENT_OFF}>{named ? `${procLabel(i)} ` : ''}동의서 전</button>
+  )));
+}
+// 검사 준비가 있는 검사(예: FAG)의 동의서: 환자 기록 consent[검사id]
+export function TestConsentChip({ p, t, mutatePatients }) {
+  if (!t?.consent) return null;
+  const pk = patientKey(p);
+  const at = p.consent?.[t.id];
+  if (at) return <TwoStepButton onConfirm={() => patchPatient(mutatePatients, pk, x => testConsentCancelPatch(x, t.id, at))} className={CONSENT_ON}
+    armedClassName="text-sm px-3 py-2 rounded-lg border border-rose-400 bg-rose-50 text-rose-700 font-bold whitespace-nowrap">동의서 ✓ {fmtClock(at)}</TwoStepButton>;
+  if (!testConsentMissing(p, t)) return null;
+  return <button type="button" data-consent={t.id} onClick={() => patchPatient(mutatePatients, pk, x => testConsentPatch(x, t.id, Date.now()))} title="동의서를 받았으면 누르세요" className={CONSENT_OFF}>동의서 전</button>;
+}
+// onReconsult: 진료 뒤 처치(설명 대기 환자)의 확인 시간이 되면 [확인] 옆 작은 글씨 '확인 · 재진료' (10-10 사용자: 간혹 안압을 보고 다시 진료)
+export function ProcCheckRow({ p, mutatePatients, filter = () => true, short = false, onReconsult = null }) {
   const [armed, setArmed] = useState(null);
   const [, setTick] = useState(0);
   useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(t); }, []);
@@ -1555,7 +1584,14 @@ export function ProcCheckRow({ p, mutatePatients, filter = () => true, short = f
         const due = procCheckDue(c.i, now);
         const mins = Math.floor((now - c.i.performedAt) / 60000);
         const label = `${procLabel(c.i)} ${fmtClock(c.i.performedAt)}`;
-        if (due) return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} className="text-sm px-4 py-2 rounded-lg bg-yellow-300 border border-yellow-500 text-yellow-950 font-semibold">{short ? '확인' : `${label} · ${mins}분 지남 · 확인`}</button>;
+        if (due) return (
+          <span key={c.i.uid} className="flex items-center gap-2">
+            {onReconsult && c.list === 'procedures' && p.seen && !p.consultDone && (
+              <button type="button" onClick={() => onReconsult(c)} title="확인하고 같은 교수님 진료 대기로" className="text-xs text-slate-500 hover:text-slate-800 underline whitespace-nowrap">확인 · 재진료</button>
+            )}
+            <button type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} className="text-sm px-4 py-2 rounded-lg bg-yellow-300 border border-yellow-500 text-yellow-950 font-semibold">{short ? '확인' : `${label} · ${mins}분 지남 · 확인`}</button>
+          </span>
+        );
         if (armed === c.i.uid) return (
           <span key={c.i.uid} className="flex items-center gap-1">
             <button type="button" onClick={() => confirm(c)} className="text-sm px-3 py-2 rounded-lg bg-green-600 text-white font-medium">지금 완료</button>
@@ -1753,7 +1789,8 @@ export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = tru
   );
 }
 
-export function ProcedureModal({ patient, procedures, crAvailable = false, onConfirm, onCancel }) {
+// addMode: 처치실 요청 카드의 [처치 추가] (10-10) — 다시 진료·기타 요청 없이 처치만, 진료 전이면 진료 전 처치로
+export function ProcedureModal({ patient, procedures, crAvailable = false, onConfirm, onCancel, addMode = false }) {
   const [sel, setSel] = useState({});
   // 처치마다: 설정에서 [눈 고르기]를 켠 처치는 OU·OD·OS, [메모 칸]을 켠 처치는 짧은 메모
   const [eye, setEye] = useState({});
@@ -1763,7 +1800,7 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
   const [customBy, setCustomBy] = useState('resident');
   // 점안 후 다시 진료 (CR·산동 중 하나). 진료실 간호사가 점안하고, 끝나면 진료 대기 맨 앞으로
   const [redo, setRedo] = useState('');
-  const redoKinds = [...(crAvailable ? ['cr'] : []), 'dilate'];
+  const redoKinds = addMode ? [] : [...(crAvailable ? ['cr'] : []), 'dilate'];
   const customName = custom.trim();
   const chosen = [
     ...procedures.filter(x => sel[x.id]).map(x => ({
@@ -1771,15 +1808,15 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
       eye: x.eyeSelect && eye[x.id] ? eye[x.id] : undefined,
       note: x.memoField ? String(memo[x.id] || '').trim() : '',
     })),
-    ...(customName ? [{ id: 'custom', name: customName, performer: customBy, note: '' }] : []),
+    ...(customName && !addMode ? [{ id: 'custom', name: customName, performer: customBy, note: '' }] : []),
   ];
   const box = (on) => `flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${on ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200'}`;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-full overflow-y-auto">
-        <h3 className="text-lg font-medium mb-1 text-slate-900">{patient.name}님 처치</h3>
-        <p className="text-sm text-slate-500 mb-4">진료 완료 후 설명 대기로 가서 '처치 중'으로 표시됩니다. 교수님 처치는 설명 대기 카드에서, 전공의 처치는 처치실에서 완료합니다.</p>
-        <div className={`grid gap-2 mb-2 ${redoKinds.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+        <h3 className="text-lg font-medium mb-1 text-slate-900">{patient.name}님 처치{addMode ? ' 추가' : ''}</h3>
+        {!addMode && <p className="text-sm text-slate-500 mb-4">진료 완료 후 설명 대기로 가서 '처치 중'으로 표시됩니다. 교수님 처치는 설명 대기 카드에서, 전공의 처치는 처치실에서 완료합니다.</p>}
+        {redoKinds.length > 0 && <div className={`grid gap-2 mb-2 ${redoKinds.length > 1 ? 'sm:grid-cols-2' : ''}`}>
           {redoKinds.map(k => (
             <label key={k} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${redo === k ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'}`}>
               <input type="checkbox" checked={redo === k} onChange={() => setRedo(r => (r === k ? '' : k))} className="w-5 h-5" />
@@ -1787,7 +1824,7 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
               <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">진료실 점안</span>
             </label>
           ))}
-        </div>
+        </div>}
         {redo && <p className="text-xs text-slate-500 px-1 mb-2">진료실 화면 'CR·산동 점안' 칸으로 가고, 점안이 끝나면 진료 대기 맨 앞으로 돌아옵니다. 같이 고른 처치는 다시 진료가 끝난 뒤 시작합니다.</p>}
         <div className="grid gap-2 sm:grid-cols-2 mb-4 mt-3">
           {procedures.length === 0 && <div className="text-sm text-slate-400">설정 &gt; 처치에서 처치 목록을 먼저 만들어주세요</div>}
@@ -1820,7 +1857,7 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
             );
           })}
         </div>
-        <div className="rounded-xl border border-slate-200 p-3 mb-6">
+        {!addMode && <div className="rounded-xl border border-slate-200 p-3 mb-6">
           <div className="text-sm text-slate-700 mb-2">기타 요청 (직접 입력)</div>
           <div className="flex flex-wrap items-center gap-2">
             <input value={custom} onChange={e => setCustom(e.target.value)} placeholder="예: 안약 점안 교육, 봉합사 제거" className={`${INPUT} flex-1 min-w-[12rem]`} />
@@ -1833,16 +1870,16 @@ export function ProcedureModal({ patient, procedures, crAvailable = false, onCon
               ))}
             </div>
           </div>
-        </div>
-        <div className="flex gap-3">
+        </div>}
+        <div className={`flex gap-3 ${addMode ? 'mt-2' : ''}`}>
           <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
           <button
             type="button"
             disabled={!chosen.length && !redo}
             onClick={() => onConfirm(chosen, redo)}
-            className={`flex-1 py-3 rounded-xl font-medium ${chosen.length || redo ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-400'}`}
+            className={`flex-1 py-3 rounded-xl font-medium ${chosen.length || redo ? (addMode ? 'bg-indigo-600 text-white' : 'bg-amber-600 text-white') : 'bg-slate-200 text-slate-400'}`}
           >
-            처치 지정
+            {addMode ? '처치 추가' : '처치 지정'}
           </button>
         </div>
       </div>

@@ -374,9 +374,55 @@ export function needsTriageExam(p, settings) {
   const wanted = (assignAtTreat(p) && p.triageRequired !== false) || !!p.extraTriage;
   return !p.consultDone && wanted && !p.triageDone && testsComplete(p, settings);
 }
-// 진료실에서 '처치실 확인 요청'으로 보낸 환자
+// 진료실에서 '처치실 확인 요청'으로 보낸 환자 (10-10부터 검사실 요청도 같은 칸: treatRequest.roomId·note)
 export function treatRequested(p) {
   return !p.consultDone && !!p.treatRequest;
+}
+// 검사실에서 보낸 '처치실 확인 요청' (10-10 사용자: 예 — 안압이 높아 검사 전에 만니톨을 맞을지 확인).
+// 처치실이 답할 때까지 검사실에서는 '처치실 확인 중'으로 멈춤 (진행 중 호출 금지와 같은 잠금)
+export function examAsked(p) {
+  return treatRequested(p) && !!p.treatRequest.roomId;
+}
+// 요청 카드의 왼쪽 표: '31번방 요청' / '진료실 요청'
+export function treatRequestFrom(p) {
+  return p?.treatRequest?.roomId ? `${p.treatRequest.from || '검사실'} 요청` : '진료실 요청';
+}
+
+/* 동의서 (10-10 사용자): 설정 > 처치·검사(검사 준비)마다 [동의서]를 켜면, 확인 전에는 [처치 완료]·검사 준비 [시작]을 막음 */
+// 처치 항목(procedures·preProcs): 확인 시각은 항목의 새 칸 consentAt. 시행한 뒤에는 묻지 않음
+export function procNeedsConsent(settings, item) {
+  return !!(settings?.procedures || []).find(x => x.id === item?.procId)?.consent && !item.performedAt && !item.done;
+}
+export function consentMissing(settings, items) {
+  return (items || []).filter(i => procNeedsConsent(settings, i) && !i.consentAt);
+}
+// 검사(검사 준비가 있는 검사만, 예: FAG): 환자 기록의 새 칸 consent[검사id] = 확인 시각
+export function testNeedsConsent(t) {
+  return !!t?.consent && hasPrep(t);
+}
+export function testConsentMissing(p, t) {
+  return testNeedsConsent(t) && !p?.consent?.[t.id];
+}
+// 확인·취소는 서버 최신 값으로 (취소는 보이던 시각 그대로일 때만, 시행한 뒤에는 바꾸지 않음)
+export function procConsentPatch(x, list, uid, at) {
+  const items = x[list] || [];
+  if (!items.some(i => i.uid === uid && !i.consentAt && !i.performedAt && !i.done)) return {};
+  return { [list]: items.map(i => (i.uid === uid ? { ...i, consentAt: at } : i)) };
+}
+export function procConsentCancelPatch(x, list, uid, seenAt) {
+  const items = x[list] || [];
+  if (!items.some(i => i.uid === uid && i.consentAt === seenAt && !i.performedAt && !i.done)) return {};
+  return { [list]: items.map(i => (i.uid === uid ? { ...i, consentAt: undefined } : i)) };
+}
+export function testConsentPatch(x, testId, at) {
+  if (x.consent?.[testId] || prepOf(x, { id: testId })?.startedAt) return {};
+  return { consent: { ...(x.consent || {}), [testId]: at } };
+}
+export function testConsentCancelPatch(x, testId, seenAt) {
+  if (x.consent?.[testId] !== seenAt || prepOf(x, { id: testId })?.startedAt) return {};
+  const next = { ...(x.consent || {}) };
+  delete next[testId];
+  return { consent: next };
 }
 export function inTreatRoom(p, settings) {
   return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p) || (pastVision(p) && preProcPending(p));
@@ -479,6 +525,19 @@ export function undoProcReconsultPatch(x, at) {
   const r = x.procReconsult;
   if (!r || r.at !== at || x.seen || x.consultDone || x.calledRoom) return {};
   return { seen: true, seenAt: r.prev?.seenAt || at, explainedEarly: !!r.prev?.explainedEarly, procReconsult: null };
+}
+// 처치 후 확인 + 재진료 (10-10 사용자: 만니톨처럼 확인 시간 뒤 안압을 보고 간혹 다시 진료) — 확인과 재진료를 한 번에, 둘 다 될 때만
+export function checkReconsultPatch(x, list, uid, performedAt, names, at) {
+  const conf = confirmProcCheckPatch(x, list, uid, performedAt, at);
+  const rc = procReconsultPatch(x, names, at);
+  if (!conf[list] || !rc.procReconsult) return {};
+  return { ...conf, ...rc };
+}
+// 되돌리기: 아직 그대로(진료 호출 전)일 때만 — 설명 대기로 돌리고 그 처치는 다시 '확인 대기'
+export function undoCheckReconsultPatch(x, list, uid, at) {
+  const back = undoProcReconsultPatch(x, at);
+  if (!('procReconsult' in back)) return {};
+  return { ...back, [list]: (x[list] || []).map(i => (i.uid === uid && i.checkedAt === at ? { ...i, done: false, doneAt: null, checkedAt: undefined } : i)) };
 }
 // 진료실 카드 표시 (다시 진료 완료 전까지)
 export function procReconsultLabel(p) {
@@ -608,7 +667,7 @@ export function getStage(p, settings) {
   if (p.linkWaiting) return { label: `${p.primaryDoctor || '1차'} 진료 후 대기 (2차 진료)`, area: 'linked' };
   if (!p.checkin) return { label: '접수 대기', area: 'reception' };
   if (!visionComplete(p)) return { label: '시력/안압 검사 대기', area: 'vision' };
-  if (treatRequested(p)) return { label: '처치실 대기 (진료실 요청 확인)', area: 'treatReq' };
+  if (treatRequested(p)) return { label: `처치실 대기 (${examAsked(p) ? `${p.treatRequest.from || '검사실'} 요청 확인` : '진료실 요청 확인'})`, area: 'treatReq' };
   if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : p.hxAssign ? '처치실 대기 (검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
   if (preProcPending(p)) return { label: `처치실 대기 (진료 전 처치: ${(p.preProcs || []).filter(x => !x.done).map(x => x.name).join(', ')})`, area: 'preProc' };
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
@@ -1741,10 +1800,10 @@ export function examRooms(settings) {
 export function roomWaiting(patients, settings, roomId) {
   return patients.filter(p => !p.consultDone && roomPending(p, settings, roomId));
 }
-// 검사실 묶음에서 대기 순서가 가장 빠른 환자 (지금 검사 중·호출 금지 중인 환자는 뺌)
+// 검사실 묶음에서 대기 순서가 가장 빠른 환자 (지금 검사 중·호출 금지 중·처치실 확인 중인 환자는 뺌)
 export function earliestExamPatient(patients, settings) {
   const ids = examRooms(settings).map(r => r.id);
-  const list = patients.filter(p => !p.consultDone && !activeVf(p) && !prepHolding(p, settings) && ids.some(id => roomPending(p, settings, id)));
+  const list = patients.filter(p => !p.consultDone && !activeVf(p) && !prepHolding(p, settings) && !examAsked(p) && ids.some(id => roomPending(p, settings, id)));
   return [...list].sort(byQueue)[0] || null;
 }
 // '[끝 · 확인]'을 눌러야 완료되는 처치실 시간 재기 검사 중 시간이 된 것 (예: Schirmer)

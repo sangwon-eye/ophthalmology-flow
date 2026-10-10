@@ -1,7 +1,7 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
-import { TaskLine, RefLine, RefItem, CardDetail, HxRef, TwoStepButton, ProcCheckRow, PostTestModal, ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
+import { examAsked, treatRequestFrom, consentMissing, testConsentMissing, checkReconsultPatch, undoCheckReconsultPatch, procDilatePatch, markDilateSet, newId, treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
+import { CONSENT_TITLE, ConsentChips, TestConsentChip, ProcedureModal, TaskLine, RefLine, RefItem, CardDetail, HxRef, TwoStepButton, ProcCheckRow, PostTestModal, ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
@@ -51,16 +51,67 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     }).then(next => {
       const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
       if (!rec) return;
-      if (rec.treatHandledAt !== at) { showToast(`${p.name} 환자의 진료실 요청은 이미 다른 곳에서 처리되었습니다 · 바꾸지 않았습니다`); return; }
+      if (rec.treatHandledAt !== at) { showToast(`${p.name} 환자의 ${treatRequestFrom(p)}은 이미 다른 곳에서 처리되었습니다 · 바꾸지 않았습니다`); return; }
       const steps = [vision && '시력/안압', testIds.length && '검사', triage && '예진'].filter(Boolean);
       // 되돌리기: 이 버튼이 바꾼 검사(추가한 검사·시력/안압)만 원래대로, 다른 PC가 그사이 완료한 검사는 그대로
       const touched = [...testIds, ...(vision ? [VISION_KEY] : [])];
       const { assigned: bA, done: bD, doneAt: bT, detail: bDe, ...scalars } = before;
-      showToast(`${p.name} ${steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => (x.treatHandledAt !== at ? {} : {
+      showToast(`${p.name} ${examAsked(p) ? '확인 완료, 검사실로' : steps.length ? `${steps.join(' → ')} 후 진료 대기로` : '확인 완료, 진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => (x.treatHandledAt !== at ? {} : {
         ...(vision ? scalars : { treatRequest: scalars.treatRequest, extraTriage: scalars.extraTriage, triageDone: scalars.triageDone, triageAt: scalars.triageAt, orders: scalars.orders }),
         ...restoreKeys(x, { assigned: bA, done: bD, doneAt: bT, detail: bDe }, touched),
         treatHandledAt: null,
       })));
+    }, () => {});
+  };
+  // 요청 카드 [처치 추가] (10-10 사용자: 예 — 검사실에서 안압이 높아 만니톨을 맞을지 확인 요청)
+  // 진료 전이면 '진료 전 처치'로(끝나면 남은 검사 → 진료 대기, 지금 규칙 그대로), 진료 뒤(설명 대기)면 진료 후 처치로. 요청은 처리됨
+  const [addFor, setAddFor] = useState(null);
+  const addProcedures = (chosen) => {
+    const p = addFor;
+    const pk = patientKey(p);
+    const at = Date.now();
+    setAddFor(null);
+    const from = examAsked(p) ? (p.treatRequest.from || '검사실') : '진료실';
+    const items = chosen.map(c => ({
+      uid: newId(p.seen ? 'pr' : 'pp'), procId: c.id, name: c.name, performer: c.performer, note: c.note || '', done: false, doneAt: null,
+      ...(c.eye ? { eye: c.eye } : {}), ...(c.dilate ? { dilate: true } : {}), addedAt: at, fromRequest: from,
+    }));
+    const before = { treatRequest: p.treatRequest, treatHandledAt: p.treatHandledAt ?? null };
+    // 서버 최신 값으로: 그 요청이 아직 남아 있을 때만 (다른 PC가 먼저 처리했으면 넣지 않음)
+    patchPatient(mutatePatients, pk, x => {
+      if (!treatRequested(x) || x.treatRequest?.at !== p.treatRequest?.at) return {};
+      const marked = markDilateSet(x, x.seen ? items.map(i => ({ ...i, orderedAt: at, fromExplain: true })) : items);
+      return {
+        treatRequest: null, treatHandledAt: at, ...procDilatePatch(x, items),
+        ...(x.seen ? { procedures: [...(x.procedures || []), ...marked] } : { preProcs: [...(x.preProcs || []), ...marked] }),
+      };
+    }).then(next => {
+      const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!rec) return;
+      if (rec.treatHandledAt !== at) { showToast(`처치 추가 안 됨 · ${p.name} 환자의 ${treatRequestFrom(p)}은 이미 다른 곳에서 처리되었습니다`); return; }
+      // 되돌리기: 이번에 넣은 처치가 아직 시행 전이면 빼고 요청을 다시 남김 (이 처치 때문에 켠 산동은 점안 전이면 원래대로)
+      const undo = () => patchPatient(mutatePatients, pk, x => {
+        const list = rec.seen ? 'procedures' : 'preProcs';
+        const mine = (x[list] || []).filter(i => i.addedAt === at);
+        if (x.treatHandledAt !== at || mine.some(i => i.performedAt || i.done)) return {};
+        const setBy = mine.find(i => i.dilateSet);
+        return {
+          ...before, [list]: (x[list] || []).filter(i => i.addedAt !== at),
+          ...(setBy && !(x.drops || []).some(Boolean) ? { dilateOverride: typeof setBy.dilateWas === 'boolean' ? setBy.dilateWas : undefined } : {}),
+        };
+      });
+      showToast(`${p.name} ${items.map(procLabel).join(', ')} ${rec.seen ? '처치 추가' : '진료 전 처치로'}`, undo);
+    }, () => {});
+  };
+  // 처치 후 확인 + 재진료 (10-10): 진료 뒤 처치의 확인 시간이 되면 '확인 · 재진료' — 확인하고 같은 교수님 진료 대기로
+  const checkAndReconsult = (p, c) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    patchPatient(mutatePatients, pk, x => checkReconsultPatch(x, c.list, c.i.uid, c.i.performedAt, procLabel(c.i), at)).then(next => {
+      const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!rec) return;
+      if (rec.procReconsult?.at !== at) { showToast(`재진료 안 됨 · ${p.name} 환자는 그사이 다른 곳에서 처리되었습니다`); return; }
+      showToast(`${p.name} ${procLabel(c.i)} 확인, 진료 대기로 (재진료)`, () => patchPatient(mutatePatients, pk, x => undoCheckReconsultPatch(x, c.list, c.i.uid, at)));
     }, () => {});
   };
   const triage = [...work.triage].sort(order);
@@ -154,7 +205,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const pk = patientKey(p);
     const at = Date.now();
     const before = { prep: p.prep, done: p.done, doneAt: p.doneAt };
-    prepSave(p, x => (prepNow(x, t)?.startedAt ? {} : {
+    prepSave(p, x => (prepNow(x, t)?.startedAt || testConsentMissing(x, t) ? {} : {
       prep: { ...(x.prep || {}), [t.id]: { startedAt: at, go: true, name: t.short || t.name } },
       done: { ...x.done, [t.id]: true }, doneAt: { ...(x.doneAt || {}), [t.id]: at },
     }), rec => prepNow(rec, t)?.startedAt === at, `${p.name} ${prepLabel(t)} 시작 · 시간이 되면 알려드려요`,
@@ -190,11 +241,13 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const pk = patientKey(p);
     const before = p.prep?.[t.id] || null;
     const same = (v) => JSON.stringify(v ?? null) === JSON.stringify(value ?? null);
-    prepSave(p, x => (when(prepNow(x, t)) ? { prep: { ...(x.prep || {}), [t.id]: value } } : {}), rec => same(prepNow(rec, t)), msg,
+    prepSave(p, x => (when(prepNow(x, t), x) ? { prep: { ...(x.prep || {}), [t.id]: value } } : {}), rec => same(prepNow(rec, t)), msg,
       () => patchPatient(mutatePatients, pk, x => (same(prepNow(x, t)) ? { prep: { ...(x.prep || {}), [t.id]: before } } : {})));
   };
   // 시작 전일 때만 시작, 같은 시작에 아직 결과가 없을 때만 시작 취소·검사 취소·확인
   const notStarted = (cur) => !cur?.startedAt;
+  // 동의서를 켠 검사 준비(예: FAG)는 동의서 확인 뒤에만 시작 (10-10 사용자: 막음)
+  const canStart = (t) => (cur, x) => notStarted(cur) && !testConsentMissing(x, t);
   const sameRun = (st) => (cur) => !!cur?.startedAt && cur.startedAt === st?.startedAt && !cur.result;
   // [확인]: 검사실에서 검사할 수 있게 열어 줌. '확인하면 검사 완료'(예: Schirmer, MMP)면 검사도 완료로
   const confirmPrep = (p, t, st) => {
@@ -226,16 +279,20 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const tests = post ? postIds(post.sel) : [];
     const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
     const before = { assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, postTests: p.postTests };
-    patchPatient(mutatePatients, pk, x => ({
+    // 서버 최신 값으로: 동의서를 켠 처치는 동의서 확인 뒤에만 (10-10 사용자: 막음)
+    patchPatient(mutatePatients, pk, x => (consentMissing(settings, (x.preProcs || []).filter(i => ids.has(i.uid))).length ? {} : {
       preProcs: (x.preProcs || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)),
       ...addPostTestsPatch(x, tests, detail),
-    }));
-    const next = { ...p, preProcs: (p.preProcs || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)), ...addPostTestsPatch(p, tests, detail) };
-    const waiting = checkItems(next).filter(c => c.list === 'preProcs' && c.i.performedAt === at);
-    showToast(waiting.length ? `${p.name} ${waiting.map(c => procLabel(c.i)).join(', ')} 시행 · ${waiting.map(c => `${c.i.checkMin}분`).join(', ')} 뒤 확인`
-      : `${p.name} 진료 전 처치 완료, ${pendingRooms(next, settings).length ? '검사실로' : '진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
-      ...unperform('preProcs', at)(x), ...undoPost(before, tests)(x),
-    })));
+    })).then(list => {
+      const next = Array.isArray(list) ? list.find(x => patientKey(x) === pk) : null;
+      if (!next) return;
+      if (!(next.preProcs || []).some(i => i.performedAt === at || i.doneAt === at)) { showToast(`처치 완료 안 됨 · ${p.name} 환자는 동의서 확인 전이거나 이미 처리되었습니다`); return; }
+      const waiting = checkItems(next).filter(c => c.list === 'preProcs' && c.i.performedAt === at);
+      showToast(waiting.length ? `${p.name} ${waiting.map(c => procLabel(c.i)).join(', ')} 시행 · ${waiting.map(c => `${c.i.checkMin}분`).join(', ')} 뒤 확인`
+        : `${p.name} 진료 전 처치 완료, ${pendingRooms(next, settings).length ? '검사실로' : '진료 대기로'}`, () => patchPatient(mutatePatients, pk, x => ({
+        ...unperform('preProcs', at)(x), ...undoPost(before, tests)(x),
+      })));
+    }, () => {});
   };
 
   // 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 하지 않은 것이므로 그대로 남김)
@@ -248,13 +305,14 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     const tests = post ? postIds(post.sel) : [];
     const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
     const before = { assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, postTests: p.postTests };
-    patchPatient(mutatePatients, pk, x => (x.consultDone || (reconsult && !x.seen) ? {} : {
+    patchPatient(mutatePatients, pk, x => (x.consultDone || (reconsult && !x.seen) || consentMissing(settings, (x.procedures || []).filter(i => ids.has(i.uid))).length ? {} : {
       procedures: (x.procedures || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)),
       ...addPostTestsPatch(x, tests, detail),
       ...(reconsult ? procReconsultPatch(x, shown.map(procLabel).join(', '), at) : {}),
     })).then(next => {
       const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
       if (!rec) return;
+      if (!(rec.procedures || []).some(i => i.performedAt === at || i.doneAt === at)) { showToast(`처치 완료 안 됨 · ${p.name} 환자는 동의서 확인 전이거나 이미 처리되었습니다`); return; }
       const left = notPerformed(pendingProcedures(rec, 'resident'));
       const waiting = checkItems(rec).filter(c => c.list === 'procedures' && c.i.performedAt === at);
       // 재진료 되돌리기는 아직 그대로(진료 호출 전)일 때만 통째로 — 이미 불렀으면 처치 기록도 그대로
@@ -301,11 +359,13 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
     ...(treatTests.length ? [{ id: 'treat-exams', label: '진료 전 검사', list: examList,
       due: examList.filter(p => treatTests.some(t => isTimed(t) && p.assigned?.[t.id] && prepRunning(p, t) && prepDue(prepOf(p, t), t, now))).length,
       stale: examList.filter(p => !activeVf(p) && !timedRunning(p) && staleOf(p)).length }] : []),
-    { id: 'treat-request', label: '진료실 요청', list: requests, stale: requests.filter(staleOf).length },
+    { id: 'treat-request', label: '요청', list: requests, stale: requests.filter(staleOf).length },
     { id: 'treat-triage', label: '검사 지정', list: triage, stale: triage.filter(staleOf).length },
     { id: 'treat-procs', label: '처치 대기', list: procs, stale: procs.filter(staleOf).length },
   ];
   // ── 카드 할 일 줄 도우미 (10-10) ──
+  // 동의서를 켠 처치가 확인 전이면 [처치 완료]·'검사 추가 후 완료'를 막음 (10-10 사용자)
+  const noConsent = (items) => consentMissing(settings, items).length > 0;
   const procNames = (list) => (list || []).map(x => `${procLabel(x)}${x.note ? ` · ${x.note}` : ''}`).join(', ');
   // 검사 준비 이름: 검사 이름 + 준비 이름 (예: FAG skin test). 같으면 하나만
   const prepWhat = (t) => { const name = t.short || t.name; const label = prepLabel(t); return label && label !== name ? `${name} ${label}` : name; };
@@ -327,9 +387,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       {st?.startedAt && <button type="button" onClick={() => setPrep(p, t, { ...st, result: 'pos', at: Date.now() }, `${p.name} ${t.short || t.name} 검사 취소`, sameRun(st))} title="반응이 있어 이 검사를 오늘 하지 않음 (진료실에 표시)"
         className="text-xs text-red-600 underline">검사 취소</button>}
       {st?.startedAt && !due && <button type="button" onClick={() => setPrep(p, t, null, `${p.name} ${label} 시작 취소`, sameRun(st))} className="text-xs text-slate-400 hover:text-rose-600 underline">시작 취소</button>}
+      {!st?.startedAt && <TestConsentChip p={p} t={t} mutatePatients={mutatePatients} />}
       {!st?.startedAt ? (
-        <button type="button" data-prep-start={t.id} onClick={() => (prepGoMode(t) ? startGo(p, t) : setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`, notStarted))}
-          title={`${label} 시작 (${prepWaitMin(t)}분)`} className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium">시작</button>
+        <button type="button" data-prep-start={t.id} disabled={testConsentMissing(p, t)} onClick={() => (prepGoMode(t) ? startGo(p, t) : setPrep(p, t, { startedAt: Date.now(), name: t.short || t.name }, `${p.name} ${label} 시작`, canStart(t)))}
+          title={testConsentMissing(p, t) ? '동의서 확인 후 시작할 수 있습니다' : `${label} 시작 (${prepWaitMin(t)}분)`} className="text-sm px-4 py-2 rounded-lg bg-violet-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">시작</button>
       ) : due ? (
         <button type="button" onClick={() => confirmPrep(p, t, st)} title={prepCompletesTest(t) ? '누르면 검사 완료' : '누르면 검사실에서 검사할 수 있어요'}
           className="text-sm px-4 py-2 rounded-lg bg-green-600 text-white font-medium">끝 · 확인</button>
@@ -349,7 +410,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       lines.push({ due, key: `pc-${c.i.uid}`, node: (
         <TaskLine key={`pc-${c.i.uid}`} tag={due ? '처치 후 확인' : '확인 대기'} tone={due ? 'violet' : 'slate'} what={procLabel(c.i)}
           small={`${c.i.performer === 'prof' ? '교수님 처치 · ' : ''}${fmtClock(c.i.performedAt)} 시행 · ${due ? `${mins}분 지남` : `확인까지 ${minsLeft(c.i.performedAt, Number(c.i.checkMin) || 0, at)}분`}`}>
-          <ProcCheckRow short p={p} mutatePatients={mutatePatients} filter={x => x.list === c.list && x.i.uid === c.i.uid} />
+          <ProcCheckRow short p={p} mutatePatients={mutatePatients} filter={x => x.list === c.list && x.i.uid === c.i.uid} onReconsult={cc => checkAndReconsult(p, cc)} />
         </TaskLine>
       ) });
     });
@@ -407,10 +468,11 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             const after = sortedTests(settings).filter(t => p.assigned?.[t.id] && !p.done?.[t.id]);
             return (
             <SimpleCard key={patientKey(p)} p={p} tone="rose" stale={staleOf(p)}>
-              <TaskLine tag="진료 전 처치" tone="rose" what={procNames(notPerformed(p.preProcs))}>
+              <TaskLine tag="진료 전 처치" tone="rose" what={procNames(notPerformed(p.preProcs))} small={[...new Set(notPerformed(p.preProcs).map(i => i.fromRequest).filter(Boolean))].map(r => `${r} 요청`).join(' · ')}>
                 <DilationRow compact group crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />
-                <button type="button" onClick={() => setPostFor({ p, kind: 'pre' })} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 추가 후 완료</button>
-                <button type="button" onClick={() => finishPreProcs(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">처치 완료</button>
+                <button type="button" disabled={noConsent(notPerformed(p.preProcs))} onClick={() => setPostFor({ p, kind: 'pre' })} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다" className="text-xs text-slate-500 hover:text-slate-800 underline disabled:text-slate-300 disabled:no-underline">검사 추가 후 완료</button>
+                <ConsentChips p={p} list="preProcs" items={notPerformed(p.preProcs)} settings={settings} mutatePatients={mutatePatients} />
+                <button type="button" disabled={noConsent(notPerformed(p.preProcs))} title={noConsent(notPerformed(p.preProcs)) ? CONSENT_TITLE : undefined} onClick={() => finishPreProcs(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
               </TaskLine>
               {after.length > 0 && <RefLine><RefItem k="처치 후 검사">{after.map(t => t.short || t.name).join(', ')}</RefItem></RefLine>}
             </SimpleCard>
@@ -446,25 +508,34 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
       </div>
       {requests.length > 0 && (
         <div id="treat-request" className="mb-8 scroll-mt-36">
-          <SectionTitle hint="진료실에서 확인을 요청한 환자입니다. 메모를 확인하고, 추가할 검사가 있으면 지정하세요.">진료실 요청 확인 · {requests.length}명</SectionTitle>
-          {requests.map(p => (
+          <SectionTitle hint="진료실·검사실에서 확인을 요청한 환자입니다. 메모를 확인하고, 필요하면 처치(예: 만니톨)나 검사를 넣으세요.">요청 확인 (진료실 · 검사실) · {requests.length}명</SectionTitle>
+          {requests.map(p => {
+            // 메모가 '온 이유' → 할 일 줄에 노란 굵은 글씨 (검사실 요청은 요청에 적은 메모, 진료실 요청은 진료실 메모)
+            const asked = examAsked(p);
+            const note = asked ? p.treatRequest.note : p.sendNote?.text;
+            return (
             <SimpleCard key={patientKey(p)} p={p} tone="amber" stale={staleOf(p)} hideNote>
-              {/* 진료실 메모가 '온 이유' → 할 일 줄에 노란 굵은 글씨 */}
-              <TaskLine tag="진료실 요청" tone="amber"
-                what={p.sendNote?.text ? <span className="rounded-md bg-yellow-100 px-2 py-0.5 text-yellow-900">{p.sendNote.text}</span> : '확인 요청'}
-                small={p.sendNote?.text ? (p.sendNote.from || '진료실') : ''} />
+              <TaskLine tag={treatRequestFrom(p)} tone="amber"
+                what={note ? <span className="rounded-md bg-yellow-100 px-2 py-0.5 text-yellow-900">{note}</span> : '확인 요청'}
+                small={!asked && note ? (p.sendNote.from || '진료실') : ''} />
               <div className="w-full flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => setReqFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">검사 추가</button>
-                <button type="button" onClick={() => finishRequest(p, [], {}, { vision: true })} className="text-sm px-4 py-2 rounded-lg border border-blue-300 text-blue-700 font-medium">시력/안압 다시</button>
-                <button type="button" onClick={() => finishRequest(p, [], {}, { triage: true })} className="text-sm px-4 py-2 rounded-lg border border-sky-300 text-sky-700 font-medium">예진 추가</button>
-                <button type="button" onClick={() => finishRequest(p)} className="text-sm px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 font-medium">확인 완료 · 진료 대기로</button>
+                <button type="button" onClick={() => setAddFor(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">처치 추가</button>
+                {asked ? (
+                  <button type="button" onClick={() => finishRequest(p)} className="text-sm px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 font-medium">확인 · 검사실로</button>
+                ) : <>
+                  <button type="button" onClick={() => setReqFor(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">검사 추가</button>
+                  <button type="button" onClick={() => finishRequest(p, [], {}, { vision: true })} className="text-sm px-4 py-2 rounded-lg border border-blue-300 text-blue-700 font-medium">시력/안압 다시</button>
+                  <button type="button" onClick={() => finishRequest(p, [], {}, { triage: true })} className="text-sm px-4 py-2 rounded-lg border border-sky-300 text-sky-700 font-medium">예진 추가</button>
+                  <button type="button" onClick={() => finishRequest(p)} className="text-sm px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 font-medium">확인 완료 · 진료 대기로</button>
+                </>}
               </div>
               <RefLine detail={<CardDetail p={p} history={history} tests={allTests} />}>
                 <MeasureLine label="오늘" m={p.measure} emptyText="측정값 없음" />
                 <TestsRef p={p} tests={allTests} done />
               </RefLine>
             </SimpleCard>
-          ))}
+            );
+          })}
         </div>
       )}
       <div id="treat-triage" className={`${triage.length ? 'mb-8' : 'mb-4'} scroll-mt-36`}>
@@ -511,8 +582,9 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             {res.length > 0 && (
               <TaskLine tag="처치" tone="indigo" what={procNames(res)} small="전공의">
                 {dil}
-                <button type="button" onClick={() => setPostFor({ p, kind: 'resident' })} title={p.seen ? '처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다' : '처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다'} className="text-xs text-slate-500 hover:text-slate-800 underline">{p.seen ? '검사 · 재진료' : '검사 추가 후 완료'}</button>
-                <button type="button" onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">처치 완료</button>
+                <button type="button" disabled={noConsent(res)} onClick={() => setPostFor({ p, kind: 'resident' })} title={p.seen ? '처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다' : '처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다'} className="text-xs text-slate-500 hover:text-slate-800 underline disabled:text-slate-300 disabled:no-underline">{p.seen ? '검사 · 재진료' : '검사 추가 후 완료'}</button>
+                <ConsentChips p={p} list="procedures" items={res} settings={settings} mutatePatients={mutatePatients} />
+                <button type="button" disabled={noConsent(res)} title={noConsent(res) ? CONSENT_TITLE : undefined} onClick={() => finishResident(p)} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">처치 완료</button>
               </TaskLine>
             )}
             {(triageNow || prof.length > 0 || res.length > 0) && (
@@ -547,6 +619,10 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
           reconsultOption={postFor.kind === 'resident' && !!postFor.p.seen}
           onConfirm={(sel, detail, recon) => { const { p, kind } = postFor; setPostFor(null); if (kind === 'pre') finishPreProcs(p, { sel, detail }); else finishResident(p, { sel, detail }, recon); }}
           onCancel={() => setPostFor(null)} />
+      )}
+      {addFor && (
+        <ProcedureModal addMode key={`add-${patientKey(addFor)}`} patient={addFor} procedures={settings.procedures || []}
+          onConfirm={(chosen) => addProcedures(chosen)} onCancel={() => setAddFor(null)} />
       )}
       {reqFor && (
         <TestCheckModal

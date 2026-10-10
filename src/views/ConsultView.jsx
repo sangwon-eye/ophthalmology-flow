@@ -1,10 +1,10 @@
 // 진료실 화면
 import React, { useState, useEffect, useContext } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { procCheckDue, resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { consentMissing, checkReconsultPatch, undoCheckReconsultPatch, procCheckDue, resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
-import { TaskLine, RefLine, RefItem, TwoStepButton, doctorDotColor, doctorTintStyle, DoctorOrderContext, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { CONSENT_TITLE, ConsentChips, TaskLine, RefLine, RefItem, TwoStepButton, doctorDotColor, doctorTintStyle, DoctorOrderContext, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
@@ -321,6 +321,17 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     showToast(`${p.name} 처치 지정, ${where} (설명 대기에 '처치 중' 표시)`, () => (already ? patch(pk, removeItems) : backToRoom(pk, removeItems, x => x.procOrderedAt === at)));
   };
 
+  // 처치 후 확인 + 재진료 (10-10): 진료 뒤 처치의 확인 시간이 되면 '확인 · 재진료' — 확인하고 같은 교수님 진료 대기로
+  const checkAndReconsult = (p, c) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    patch(pk, x => checkReconsultPatch(x, c.list, c.i.uid, c.i.performedAt, procLabel(c.i), at)).then(next => {
+      const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!rec) return;
+      if (rec.procReconsult?.at !== at) { showToast(`재진료 안 됨 · ${p.name} 환자는 그사이 다른 곳에서 처리되었습니다`); return; }
+      showToast(`${p.name} ${procLabel(c.i)} 확인, 진료 대기로 (재진료)`, () => patch(pk, x => undoCheckReconsultPatch(x, c.list, c.i.uid, at)));
+    }, () => {});
+  };
   // 교수님 처치 완료: 화면에 보이던 처치만 완료 (그사이 다른 PC가 새로 보낸 처치는 그대로 남김)
   // 처치 후 확인 시간이 있는 처치(설정 > 처치, 예: YAG)는 시행 시각만 적고 '확인 대기' (확인해야 끝남 — 10-07)
   // post: '검사 · 재진료' 창에서 고른 검사 (처치 후 검사, 끝나면 설명 대기로 — 그때까지 [귀가]는 막음)
@@ -334,7 +345,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
     const tests = post ? allTests.filter(t => post.sel[t.id]).map(t => t.id) : [];
     const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
     const before = { assigned: p.assigned, done: p.done, doneAt: p.doneAt, detail: p.detail, postTests: p.postTests };
-    patch(pk, x => (x.consultDone || (reconsult && !x.seen) ? {} : {
+    patch(pk, x => (x.consultDone || (reconsult && !x.seen) || consentMissing(settings, (x.procedures || []).filter(i => ids.has(i.uid))).length ? {} : {
       procedures: (x.procedures || []).map(i => (ids.has(i.uid) ? performProcItem(i, settings, at) : i)),
       ...addPostTestsPatch(x, tests, detail),
       ...(reconsult ? procReconsultPatch(x, shown.map(procLabel).join(', '), at) : {}),
@@ -352,6 +363,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
         })));
         return;
       }
+      if (!(rec.procedures || []).some(i => i.performedAt === at || i.doneAt === at)) { showToast(`처치 완료 안 됨 · ${p.name} 환자는 동의서 확인 전이거나 이미 처리되었습니다`); return; }
       const leftProf = notPerformed(pendingProcedures(rec, 'prof'));
       const waiting = checkItems(rec).filter(c => c.i.performedAt === at);
       const next = leftProf.length ? `새로 들어온 교수님 처치가 남아 있습니다: ${leftProf.map(procLabel).join(', ')}`
@@ -582,8 +594,9 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     <TaskLine tag="교수님 처치" tone="rose" what={profLeft.map(x => `${procLabel(x)}${x.note ? ` · ${x.note}` : ''}`).join(', ')}
                       small={[profLeft.some(i => i.dilate) ? '산동 필요' : '', ...profLeft.filter(i => Number(i.checkMin) > 0).map(i => `확인 ${i.checkMin}분`)].filter(Boolean).join(' · ')}>
                       {dilAt === 'prof' && dil}
-                      <button type="button" onClick={() => setPostFor(p)} title="처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 · 재진료</button>
-                      <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
+                      <button type="button" disabled={consentMissing(settings, profLeft).length > 0} onClick={() => setPostFor(p)} title="처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다" className="text-xs text-slate-500 hover:text-slate-800 underline disabled:text-slate-300 disabled:no-underline">검사 · 재진료</button>
+                      <ConsentChips p={p} list="procedures" items={profLeft} settings={settings} mutatePatients={mutatePatients} />
+                      <button type="button" disabled={consentMissing(settings, profLeft).length > 0} title={consentMissing(settings, profLeft).length ? CONSENT_TITLE : undefined} onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium disabled:bg-slate-200 disabled:text-slate-400">교수님 처치 완료</button>
                     </TaskLine>
                   )}
                   {checkItems(p).filter(c => c.list === 'procedures' && c.i.performer === 'prof').map(c => {
@@ -591,7 +604,7 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
                     return (
                       <TaskLine key={c.i.uid} tag={due ? '처치 후 확인' : '확인 대기'} tone={due ? 'violet' : 'slate'} what={procLabel(c.i)}
                         small={`${fmtClock(c.i.performedAt)} 시행 · ${due ? `${Math.floor((Date.now() - c.i.performedAt) / 60000)}분 지남` : `확인까지 ${Math.max(0, Math.ceil((c.i.performedAt + (Number(c.i.checkMin) || 0) * 60000 - Date.now()) / 60000))}분`}`}>
-                        <ProcCheckRow short p={p} mutatePatients={mutatePatients} filter={x => x.list === 'procedures' && x.i.uid === c.i.uid} />
+                        <ProcCheckRow short p={p} mutatePatients={mutatePatients} filter={x => x.list === 'procedures' && x.i.uid === c.i.uid} onReconsult={cc => checkAndReconsult(p, cc)} />
                       </TaskLine>
                     );
                   })}

@@ -1,7 +1,7 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { treatExamPending, inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { INPUT, examAsked, treatRequested, treatExamPending, inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { findKioskPatient } from './RoleSelect.jsx';
 import { WIDE_LIST, SectionHead, FuMissingBadge, TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
@@ -49,6 +49,22 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const [query, setQuery] = useState('');
   const [measureFor, setMeasureFor] = useState(null);
   const [resultFor, setResultFor] = useState(null); // 결과 입력 검사(MR 등): { key, testId }
+  // 검사실 → 처치실 확인 요청 (10-10 사용자: 예 — 안압이 높아 검사 전에 만니톨을 맞을지). 처치실이 답할 때까지 '처치실 확인 중'으로 멈춤
+  const [askFor, setAskFor] = useState(null);
+  const askTreat = (p, note) => {
+    const pk = patientKey(p);
+    const at = Date.now();
+    setAskFor(null);
+    // 서버 최신 값으로: 이미 처치실 요청이 있거나 귀가했으면 넣지 않음
+    patchPatient(mutatePatients, pk, x => (x.consultDone || treatRequested(x) ? {} : { treatRequest: { at, from: room.name, roomId: room.id, ...(note ? { note } : {}) } })).then(next => {
+      const rec = Array.isArray(next) ? next.find(x => patientKey(x) === pk) : null;
+      if (!rec) return;
+      if (rec.treatRequest?.at !== at) { showToast(`요청 안 됨 · ${p.name} 환자는 이미 처치실 요청이 있거나 다른 곳에서 처리되었습니다`); return; }
+      showToast(`${p.name} 처치실에 확인 요청 · 답이 올 때까지 검사 멈춤`, () => patchPatient(mutatePatients, pk, x => (x.treatRequest?.at === at ? { treatRequest: null } : {})));
+    }, () => {});
+  };
+  // 요청 취소: 아직 그 요청 그대로일 때만
+  const cancelAsk = (p) => { const at = p.treatRequest?.at; patchPatient(mutatePatients, patientKey(p), x => (x.treatRequest?.at === at && examAsked(x) ? { treatRequest: null } : {})); };
   const [detailFor, setDetailFor] = useState(null);
   const [toastNode, showToast] = useUndoToast();
   // 시력방에서 QR을 찍으면 (10-08 사용자): 접수 전이면 직원 [접수]와 같게 접수하고, 시력·안압 창을 바로 엶 (처리 함수는 아래 scanRef)
@@ -399,7 +415,8 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
             const runningVf = activeVf(p);
             // 처치실에서 '진행 중 호출 금지' 검사(예: Schirmer) 중이면 VF 검사 중처럼 잠금 (처치실 화면 자신은 제외)
             const held = isVision || room?.builtin === 'treat' ? null : prepHolding(p, settings);
-            const locked = !!(runningVf || held);
+            const asked = !isVision && !isTreatRoom && examAsked(p);
+            const locked = !!(runningVf || held || asked);
             const topTest = showPriority && !locked ? pendingTests(p, settings, room.id)[0] : null;
             const otherRooms = isVision ? [] : settings.rooms.filter(r => r.id !== room.id && remainingTests(p, settings, r.id).length > 0);
             const prev = previousMeasure(p, history);
@@ -494,6 +511,10 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                   return <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{rr} {rt?.short || rt?.name || '검사'} 중 · 호출 금지</span>;
                 })()}
                 {held && <span className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{treatRoomOf(settings).name} {held.short || held.name} 중 · 호출 금지</span>}
+                {asked && <>
+                  <span data-treat-asked className="text-sm px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 font-semibold">{treatRoomOf(settings).name} 확인 중{p.treatRequest.note ? ` · ${p.treatRequest.note}` : ''}</span>
+                  <TwoStepButton onConfirm={() => cancelAsk(p)} className="text-xs text-slate-500 hover:text-rose-600 underline" armedClassName="text-xs px-2 py-0.5 rounded border border-rose-400 bg-rose-50 text-rose-700 font-medium">요청 취소</TwoStepButton>
+                </>}
                 {tests.filter(t => p.assigned?.[t.id] && t.id !== VISION_KEY).map(t => (
                   !p.done?.[t.id] && prepBlocked(p, t) ? (
                     // 처치실 준비(예: skin test)가 끝나야 할 수 있는 검사: 잠긴 칸으로 상태만 보여줌
@@ -563,6 +584,9 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                   // 검사실: 접힌 [검사 변경]은 검사 칸 줄 끝에 (위 검사 칸과 겹치는 '오늘 검사' 칩은 숨김)
                   return <>
                     {picker}
+                    {!isTreatRoom && !treatRequested(p) && !p.consultDone && (
+                      <button type="button" onClick={() => setAskFor(p)} title="처치실에 확인을 요청합니다 (예: 검사 전에 만니톨을 맞을지). 답이 올 때까지 이 환자 검사는 멈춤" className="text-xs text-slate-500 hover:text-slate-800 underline whitespace-nowrap">처치실 확인 요청</button>
+                    )}
                     {dilation}
                     {otherRooms.length > 0 && (
                       <span className="text-xs text-slate-500">
@@ -644,6 +668,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
           onCancel={() => setMeasureFor(null)}
         />
       )}
+      {askFor && <AskTreatModal p={askFor} onSend={(note) => askTreat(askFor, note)} onCancel={() => setAskFor(null)} />}
       {resultFor && (() => {
         const rp = patients.find(x => patientKey(x) === resultFor.key);
         const rt = settings.tests.find(t => t.id === resultFor.testId);
@@ -673,5 +698,24 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
     <ScreenShell wide={isVision} title={title} color={color} onBack={onBack} lastSync={lastSync} count={roomList.length} extra={isVision || isExamRoom ? <ChimeControl /> : undefined}>
       {content}
     </ScreenShell>
+  );
+}
+
+// 검사실 → 처치실 확인 요청 창 (10-10): 짧은 메모만 (예: 안압 OD 32, 만니톨?), Enter로 보냄
+function AskTreatModal({ p, onSend, onCancel }) {
+  const [note, setNote] = useState('');
+  const send = () => onSend(note.trim());
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
+        <h3 className="text-lg font-medium text-slate-900 mb-3">{p.name}님 · 처치실 확인 요청</h3>
+        <input autoFocus aria-label="처치실 확인 요청 메모" value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send(); }}
+          placeholder="예: 안압 OD 32, 만니톨?" className={INPUT} />
+        <div className="flex gap-2 mt-5">
+          <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600">취소</button>
+          <button type="button" onClick={send} className="flex-1 py-3 rounded-xl bg-amber-600 text-white font-medium">요청 보내기</button>
+        </div>
+      </div>
+    </div>
   );
 }

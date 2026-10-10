@@ -158,6 +158,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
             ['noOrder', '처방 없음', !!t.noOrder, true],
             ['noDilate', '산동 금지', noDilateTest(t), true],
             ['prepOn', '검사 준비', !!t.prepOn, roomKey !== 'vision'],
+            ['consent', '동의서', !!t.consent, !!t.prepOn],
             ['timed', '시간 재기', !!t.timed, true],
             ['holdCall', '진행 중 호출 금지', holdCallOf(t), roomKey !== 'vision' && !(t.timed && t.prepMode === 'go')],
             ['withExams', '대기 중에도', !!t.withExams, isTreat],
@@ -429,6 +430,10 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
                 <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="처치 창에서 이 처치를 체크하면 짧은 메모 칸이 나옵니다">
                   <input type="checkbox" checked={!!x.memoField} onChange={e => updateProc(x.id, { memoField: e.target.checked })} className="w-4 h-4" />
                   메모 칸
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer" title="동의서를 받았다고 체크해야 [처치 완료]를 누를 수 있습니다 (예: YAG, PRP, 주사)">
+                  <input type="checkbox" checked={!!x.consent} onChange={e => updateProc(x.id, { consent: e.target.checked })} className="w-4 h-4" />
+                  동의서
                 </label>
                 <label className="flex items-center gap-1.5 text-sm text-slate-700" title="시행 후 이 시간이 지나 [확인]을 눌러야 처치가 끝납니다 (예: YAG, Probing). 0이면 [처치 완료]로 바로 끝">
                   처치 후 확인

@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone, QrCode } from 'lucide-react';
-import { inProgressText, boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { examAsked, inProgressText, boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
 import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
@@ -426,6 +426,8 @@ export function ExamBoardList({ patients, settings, compact, wide }) {
             const lines = [];
             if (activeVf(p)) lines.push({ k: 'vf', tone: 'amber', room: '', text: testInProgressLabel(settings.tests.find(t => t.id === activeVf(p))) });
             else if (prepHolding(p, settings)) lines.push({ k: 'hold', tone: 'amber', room: '', text: testInProgressLabel(prepHolding(p, settings)) });
+            // 검사실에서 처치실 확인 요청 중 (10-10): 검사실에서 부르지 않으므로 검사실 줄 대신 한 줄
+            else if (examAsked(p)) lines.push({ k: 'ask', tone: 'amber', room: '', text: `${treat.patientName || treat.name} 확인 중` });
             else {
               if (treatTodo(p).length) lines.push({ k: 'treat', tone: 'rose', room: treat.patientName || treat.name, text: treatTodo(p).join(', ') });
               pendingRooms(p, settings).forEach(r => lines.push({ k: r.id, tone: roomColor(settings, r.id), room: r.patientName || r.name, text: pendingTests(p, settings, r.id).map(t => t.name || t.short).join(', ') }));
@@ -439,6 +441,7 @@ export function ExamBoardList({ patients, settings, compact, wide }) {
             <div key={patientKey(p)} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 break-keep">
               <div className="text-lg leading-snug"><NameTail p={p} box="" nameCls="font-bold text-white" tailCls="text-sm font-semibold text-slate-400" /></div>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {!activeVf(p) && !prepHolding(p, settings) && examAsked(p) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{treat.patientName || treat.name} 확인 중</span>}
                 {!activeVf(p) && prepHolding(p, settings) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{testInProgressLabel(prepHolding(p, settings))}</span>}
                 {activeVf(p) && <span className={`rounded-xl border px-3 py-1 text-sm font-medium ${darkChip('amber')}`}>{testInProgressLabel(settings.tests.find(t => t.id === activeVf(p)))}</span>}
                 {!activeVf(p) && treatTodo(p).length > 0 && (
@@ -446,7 +449,7 @@ export function ExamBoardList({ patients, settings, compact, wide }) {
                     {treat.patientName || treat.name}: {treatTodo(p).join(', ')}
                   </span>
                 )}
-                {(activeVf(p) || prepHolding(p, settings) ? [] : pendingRooms(p, settings)).map(r => {
+                {(activeVf(p) || prepHolding(p, settings) || examAsked(p) ? [] : pendingRooms(p, settings)).map(r => {
                   return (
                     <span key={r.id} className={`${compact ? 'text-xs' : 'text-sm'} px-3 py-1 rounded-xl border font-medium ${darkChip(roomColor(settings, r.id))}`}>
                       {r.patientName || r.name}: {pendingTests(p, settings, r.id).map(t => t.name || t.short).join(', ')}
@@ -477,8 +480,10 @@ export function RoomBoardList({ room, patients, settings }) {
           {list.map(p => {
             const vfTest = activeVf(p) && settings.tests.find(t => t.id === activeVf(p));
             // 검사 중이면 그 줄만 (검사실 대기 명단·시력방 + 검사실과 같은 규칙)
+            const treat = treatRoomOf(settings);
             const lines = vfTest
               ? [{ k: 'vf', tone: 'amber', room: '', text: testInProgressLabel(vfTest) }]
+              : examAsked(p) ? [{ k: 'ask', tone: 'amber', room: '', text: `${treat.patientName || treat.name} 확인 중` }]
               : [{ k: 'tests', tone: '', room: '', text: pendingTests(p, settings, room.id).map(t => t.name || t.short).join(', '), plain: true }];
             return <ExamLineCard key={patientKey(p)} p={p} lines={lines} />;
           })}
