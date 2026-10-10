@@ -24,7 +24,7 @@ ok(await c().getByRole('button', { name: 'MMP-9', exact: true }).count() >= 1 &&
 ok(await page.locator('#treat-check').count() === 0, '결과 확인에서도 빠짐');
 // Schirmer: 시작 → 지금 확인 → 완료 → 다시 누르면 미시행으로 유지
 await c().getByRole('button', { name: 'Schirmer', exact: true }).first().click(); await W(600);
-await c().getByRole('button', { name: '지금 확인' }).click(); await W(800);
+await page.locator('#treat-check div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).first().getByRole('button', { name: '지금 확인' }).click(); await W(800); // 10-10: 시작하면 결과 확인 칸으로
 ok((await pt()).done.sch === true, 'Schirmer 완료');
 await c().getByRole('button', { name: /Schirmer/ }).first().click(); await W(6000);
 x = await pt();

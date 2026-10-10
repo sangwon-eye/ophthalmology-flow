@@ -37,8 +37,8 @@ ok(await page.getByRole('button', { name: '지금 확인' }).count() >= 1, '시�
 ok(await page.getByText(/^결과 확인 · 1명/).count() === 1, "처치실 맨 위 '결과 확인'");
 await backdate('장민호', 'mmp', 11);
 await page.waitForTimeout(15000);
-const chk = page.getByRole('button', { name: /^MMP \d\d:\d\d · 확인$/ });
-ok(await chk.count() === 1, '시간이 되면 초록 [MMP 시각 · 확인]');
+const chk = page.locator('#treat-check').getByRole('button', { name: '확인', exact: true });
+ok(await chk.count() === 1, '시간이 되면 초록 [확인] (10-10: 버튼은 할 일만)');
 ok(await page.getByText(/장민호 MMP 확인할 시간/).count() >= 1, '알림 표시');
 await page.screenshot({ path: `${SP}/r33-mmp-due.png` });
 await chk.click(); await W();
@@ -47,33 +47,34 @@ ok(await page.locator('#treat-check').count() === 0, '확인 후 목록에서 �
 const sch = page.locator('div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).filter({ has: page.getByRole('button', { name: /^Schirmer/ }) }).last();
 ok(await sch.getByRole('button', { name: 'Schirmer', exact: true }).count() >= 1, '시간 재기 검사: 칸 이름은 검사 이름');
 await sch.getByRole('button', { name: 'Schirmer', exact: true }).first().click(); await W();
-ok(await sch.getByRole('button', { name: /^Schirmer \d\d:\d\d$/ }).count() === 1, '누르면 "Schirmer 시작 시각"');
+const schChk = page.locator('#treat-check div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).last();
+ok(await schChk.getByRole('button', { name: '지금 확인', exact: true }).count() === 1 && await schChk.getByRole('button', { name: '시작 취소', exact: true }).count() === 1, '누르면 결과 확인 칸으로 (10-10: [시작 취소] [지금 확인])');
 await backdate('임수빈', 'sch', 6);
 await page.waitForTimeout(15000);
 { const l = (await getKey('daily-patients')).value; ok(!l.find(p => p.name === '임수빈').done.sch, 'Schirmer: 시간이 돼도 확인 전에는 넘어가지 않음'); }
-ok(await sch.getByRole('button', { name: 'Schirmer 끝 · 확인' }).count() === 1, '시간이 되면 초록 [끝 · 확인]');
-await sch.getByRole('button', { name: 'Schirmer 끝 · 확인' }).click(); await W();
+ok(await schChk.getByRole('button', { name: '끝 · 확인', exact: true }).count() === 1, '시간이 되면 초록 [끝 · 확인]');
+await schChk.getByRole('button', { name: '끝 · 확인', exact: true }).click(); await W();
 { const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '임수빈').done.sch === true, 'Schirmer: 확인하면 검사 완료'); }
 ok(await page.getByText(/^진료 전 검사 · 1명/).count() === 1, '처치실: 진료 전 검사에 OSDI 환자(조현우)');
 ok(await page.locator('div.bg-white').filter({ has: page.getByText('조현우', { exact: true }) }).getByRole('button', { name: /^OSDI/ }).count() >= 1, 'OSDI는 검사실 대기 중에도 처치실에');
 await page.screenshot({ path: `${SP}/r16-treat.png`, fullPage: true });
-// 조현우 skin test 시작 → 다시 누르면 시작 취소 → 다시 시작 → 시간 지나 자동 완료
-const prepCard = page.locator('div.bg-white').filter({ hasText: '동의서 · skin test' }).filter({ has: page.getByText('조현우', { exact: true }) }).first();
-await prepCard.getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await W();
-await prepCard.getByRole('button', { name: /^동의서 · skin test \d/ }).click(); await W();
-ok(await prepCard.getByRole('button', { name: '동의서 · skin test', exact: true }).count() === 1, '다시 누르면 시작 취소');
-await prepCard.getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await W();
-await prepCard.screenshot({ path: `${SP}/r32-skin-started.png` });
+// 조현우 skin test 시작 → 결과 확인 칸으로, [시작 취소] → 다시 검사 준비 → 다시 시작 → 시간 지나 확인 (10-10: 버튼은 [시작])
+const prepOf = (n) => page.locator('#treat-prep div.bg-white').filter({ has: page.getByText(n, { exact: true }) }).first();
+const chkOf = (n) => page.locator('#treat-check div.bg-white').filter({ has: page.getByText(n, { exact: true }) }).first();
+await prepOf('조현우').getByRole('button', { name: '시작', exact: true }).click(); await W();
+await chkOf('조현우').getByRole('button', { name: '시작 취소', exact: true }).click(); await W();
+ok(await prepOf('조현우').getByRole('button', { name: '시작', exact: true }).count() === 1, '[시작 취소] → 다시 검사 준비 칸');
+await prepOf('조현우').getByRole('button', { name: '시작', exact: true }).click(); await W();
+await chkOf('조현우').screenshot({ path: `${SP}/r32-skin-started.png` });
 await backdate('조현우', 'fag', 21);
 // 한지훈 시작 → 반응 있음(검사 취소)
-const han = page.locator('div.bg-white').filter({ hasText: '동의서 · skin test' }).filter({ has: page.getByText('한지훈', { exact: true }) }).first();
-await han.getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await W();
-await han.getByRole('button', { name: '검사 취소' }).click(); await W();
+await prepOf('한지훈').getByRole('button', { name: '시작', exact: true }).click(); await W();
+await chkOf('한지훈').getByRole('button', { name: '검사 취소' }).click(); await W();
 await page.waitForTimeout(15000);
-await prepCard.screenshot({ path: `${SP}/r32-skin-done.png` });
-await prepCard.getByRole('button', { name: '동의서 · skin test 끝 · 확인' }).click(); await W();
+await chkOf('조현우').screenshot({ path: `${SP}/r32-skin-done.png` });
+await chkOf('조현우').getByRole('button', { name: '끝 · 확인', exact: true }).click(); await W();
 { const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '조현우').prep.fag.result === 'neg', 'skin test: 확인하면 검사실로'); }
-ok(await page.getByRole('button', { name: '동의서 · skin test', exact: true }).count() === 0, '남은 준비 없음');
+ok(await page.locator('#treat-prep').count() === 0 && await page.locator('#treat-check').count() === 0, '남은 준비 없음');
 await back();
 await pick('31번방');
 c = cardOf('조현우');

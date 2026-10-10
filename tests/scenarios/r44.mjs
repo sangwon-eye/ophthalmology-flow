@@ -1,5 +1,5 @@
 import { chromium, SP, getKey, editKey, tester, BASE } from '../lib.mjs';
-// Schirmer([끝 · 확인] 방식): 시간이 되면 '결과 확인'에도 올라오고, 어느 쪽에서 확인해도 둘 다에서 빠짐
+// Schirmer([끝 · 확인] 방식): 10-10부터 시작하면 진료 전 검사 칸에서 빠지고 '결과 확인'에만 (시간 전 '확인 대기', 시간이 되면 [끝 · 확인])
 await editKey('settings', s => {
   const rooms = s.rooms.some(r => r.builtin === 'treat') ? s.rooms : [...s.rooms, { id: 'treat', name: '처치실', patientName: '처치실', showPriority: false, builtin: 'treat' }];
   return { ...s, rooms, tests: [...s.tests,
@@ -22,19 +22,18 @@ const res = page.locator('#treat-check');
 const resText = async () => ((await res.count()) ? await res.innerText() : '');
 let t = await resText();
 ok(/임수빈/.test(t) && /한지훈/.test(t), '시간이 된 Schirmer 2명이 결과 확인에 올라옴');
-ok(!/장민호/.test(t), '아직 시간이 안 된 환자는 없음');
+const jang = res.locator('div.bg-white').filter({ hasText: '장민호' });
+ok(await jang.locator('[data-task-line="확인 대기"]').count() === 1 && await jang.getByRole('button', { name: '지금 확인', exact: true }).count() === 1, "아직 시간이 안 된 환자는 '확인 대기' + [지금 확인] (10-10: 시작하면 결과 확인으로)");
 ok(!/윤지아|TBUT/.test(t), '다른 검사실의 시간 재기 검사는 올라오지 않음');
-ok(/결과 확인 2/.test(await page.locator('[data-summary="treat-check"]').innerText()), '요약 줄: 결과 확인 2');
+ok(/결과 확인 3/.test(await page.locator('[data-summary="treat-check"]').innerText()), '요약 줄: 결과 확인 3 (확인 대기도 셈)');
+ok(await page.locator('#treat-exams').getByText('임수빈', { exact: true }).count() === 0, '진료 전 검사 칸에는 없음 (두 번 보이지 않음)');
 await page.screenshot({ path: `${SP}/r44-check.png` });
-// 결과 확인에서 확인 → 검사 완료, 진료 전 검사 칸에서도 사라짐
-await res.locator('div.bg-white').filter({ hasText: '임수빈' }).getByRole('button', { name: /Schirmer \d\d:\d\d · 확인/ }).click(); await W(800);
+await res.locator('div.bg-white').filter({ hasText: '임수빈' }).getByRole('button', { name: '끝 · 확인', exact: true }).click(); await W(800);
 let pt = (await getKey('daily-patients')).value.find(p => p.name === '임수빈');
-ok(pt.done.sch === true, '결과 확인에서 [확인] → Schirmer 완료');
-ok(await page.locator('#treat-exams').getByRole('button', { name: /Schirmer 끝 · 확인/ }).count() === 1, '진료 전 검사 칸에는 한지훈 것만 남음');
-// 진료 전 검사 칸에서 확인 → 결과 확인에서도 빠짐
-await page.locator('#treat-exams').getByRole('button', { name: /Schirmer 끝 · 확인/ }).click(); await W(800);
+ok(pt.done.sch === true, '결과 확인에서 [끝 · 확인] → Schirmer 완료');
+ok(!/임수빈/.test(await resText()), '확인하면 결과 확인에서 빠짐');
+await res.locator('div.bg-white').filter({ hasText: '한지훈' }).getByRole('button', { name: '끝 · 확인', exact: true }).click(); await W(800);
 pt = (await getKey('daily-patients')).value.find(p => p.name === '한지훈');
-ok(pt.done.sch === true, '진료 전 검사 칸에서 확인 → 완료');
-ok(!/한지훈/.test(await resText()), '결과 확인에서도 빠짐');
+ok(pt.done.sch === true && !/한지훈/.test(await resText()), '한지훈도 확인 → 완료, 결과 확인에서 빠짐');
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

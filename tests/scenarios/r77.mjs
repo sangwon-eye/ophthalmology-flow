@@ -52,7 +52,7 @@ cs.t.ok(await cs.p.getByText(/새로 들어온 교수님 처치가 남아 있습
 // 4) 검사 준비 [시작 취소] ← 다른 PC가 이미 확인
 const fagStart = (await pt('조현우')).prep.fag.startedAt;
 await editKey('daily-patients', l => l.map(p => (p.name === '조현우' ? { ...p, prep: { fag: { ...p.prep.fag, result: 'neg', at: Date.now() } } } : p)));
-await tr.t.cardOf('조현우').getByRole('button', { name: /^동의서 · skin test \d/ }).click(); await tr.t.W(1500);
+await tr.p.locator('#treat-check div.bg-white').filter({ has: tr.p.getByText('조현우', { exact: true }) }).first().getByRole('button', { name: '시작 취소', exact: true }).click(); await tr.t.W(1500); // 10-10: 시작하면 결과 확인 칸
 r = await pt('조현우');
 tr.t.ok(r.prep?.fag?.result === 'neg' && r.prep.fag.startedAt === fagStart, '늦게 누른 시작 취소는 다른 PC의 확인을 지우지 않음');
 tr.t.ok(await tr.p.getByText(/조현우 환자는 이미 다른 곳에서 처리되었습니다/).count() === 1, '시작 취소 안 됨 안내 ("시작 취소"라고 잘못 알리지 않음)');
@@ -60,7 +60,7 @@ tr.t.ok(await tr.p.getByText(/조현우 환자는 이미 다른 곳에서 처리
 // 5) 검사 준비 [시작] ← 다른 PC가 먼저 시작
 const firstStart = Date.now() - 90000;
 await editKey('daily-patients', l => l.map(p => (p.name === '한지훈' ? { ...p, prep: { fag: { startedAt: firstStart, name: 'FAG' } } } : p)));
-await tr.t.cardOf('한지훈').getByRole('button', { name: '동의서 · skin test', exact: true }).click(); await tr.t.W(1500);
+await tr.p.locator('#treat-prep div.bg-white').filter({ has: tr.p.getByText('한지훈', { exact: true }) }).first().getByRole('button', { name: '시작', exact: true }).click(); await tr.t.W(1500);
 tr.t.ok((await pt('한지훈')).prep?.fag?.startedAt === firstStart, '먼저 시작한 시각 그대로 (늦게 누른 시작은 다시 적용 안 함)');
 tr.t.ok(await tr.p.getByText(/한지훈 환자는 이미 다른 곳에서 처리되었습니다/).count() === 1, '시작 안 됨 안내');
 

@@ -36,11 +36,11 @@ await inSec('treat-procs', '송하린').getByRole('button', { name: '처치 완�
 let s = await rec('송하린');
 let pb = s.procedures.find(i => i.uid === 'pb1');
 ok(!pb.done && !!pb.performedAt && pb.checkMin === 10, 'Probing [처치 완료] → 시행 시각만 (확인 대기)');
-const waitBtn = inSec('treat-procs', '송하린').getByRole('button', { name: /^Probing \d\d:\d\d · 확인 대기$/ });
-ok(await waitBtn.count() === 1 && await inSec('treat-procs', '송하린').getByRole('button', { name: '처치 완료', exact: true }).count() === 0, '카드에 "Probing 시각 · 확인 대기" (처치 완료 버튼은 사라짐)');
+const waitBtn = inSec('treat-check', '송하린').getByRole('button', { name: '확인 대기', exact: true });
+ok(await waitBtn.count() === 1 && await page.locator('#treat-procs').getByText('송하린', { exact: true }).count() === 0, '시행하면 처치 대기에서 빠지고 결과 확인에 [확인 대기] (10-10)');
 await waitBtn.click(); await W(200);
-ok(await inSec('treat-procs', '송하린').getByRole('button', { name: '지금 완료' }).count() === 1 && await inSec('treat-procs', '송하린').getByRole('button', { name: '시행 취소' }).count() === 1, '한 번 누르면 [지금 완료] [시행 취소]');
-await inSec('treat-procs', '송하린').getByRole('button', { name: '지금 완료' }).click(); await W(1200);
+ok(await inSec('treat-check', '송하린').getByRole('button', { name: '지금 완료' }).count() === 1 && await inSec('treat-check', '송하린').getByRole('button', { name: '시행 취소' }).count() === 1, '한 번 누르면 [지금 완료] [시행 취소]');
+await inSec('treat-check', '송하린').getByRole('button', { name: '지금 완료' }).click(); await W(1200);
 pb = (await rec('송하린')).procedures.find(i => i.uid === 'pb1');
 ok(pb.done && !!pb.checkedAt, '[지금 완료] → Probing 끝');
 await back();
@@ -51,17 +51,17 @@ await page.getByRole('button', { name: '이종혁', exact: true }).first().click
 await inSec('consult-explain', '황도윤').getByRole('button', { name: '교수님 처치 완료' }).click(); await W(1200);
 let y = (await rec('황도윤')).procedures.find(i => i.uid === 'y1');
 ok(!y.done && y.checkMin === 60, 'YAG → 확인 대기 (60분)');
-ok(await inSec('consult-explain', '황도윤').getByRole('button', { name: /^YAG · OS \d\d:\d\d · 확인 대기$/ }).count() === 1, '설명 대기 카드: "YAG · OS 시각 · 확인 대기"');
+ok(await inSec('consult-explain', '황도윤').getByRole('button', { name: '확인 대기', exact: true }).count() === 1 && /YAG · OS/.test(await inSec('consult-explain', '황도윤').innerText()), '설명 대기 카드: "YAG · OS … 시행" + [확인 대기] (10-10: 버튼은 할 일만)');
 await inSec('consult-explain', '황도윤').getByRole('button', { name: '설명 완료 · FU 나중에' }).click(); await W(1200);
 let h = await rec('황도윤');
 ok(!!h.explainedEarly && !h.consultDone, '확인 전 설명 완료 → 설명만 먼저 (귀가 아님)');
-ok(await inSec('consult-explain', '황도윤').getByRole('button', { name: '귀가', exact: true }).count() === 0, '확인 전에는 [귀가] 없음');
+ok(await inSec('consult-explain', '황도윤').getByRole('button', { name: '귀가', exact: true }).isDisabled(), '확인 전에는 [귀가] 회색 (누를 수 없음)');
 await back();
 // 시간이 지남 → 처치실 결과 확인에 노란 'N분 지남 · 확인'
 await editKey('daily-patients', list => list.map(p => (p.name === '황도윤' ? { ...p, procedures: p.procedures.map(i => (i.uid === 'y1' ? { ...i, performedAt: i.performedAt - 61 * min } : i)) } : p)));
 await pick('처치실'); await W(1500);
-const dueBtn = inSec('treat-check', '황도윤').getByRole('button', { name: /^YAG · OS \d\d:\d\d · 6\d분 지남 · 확인$/ });
-ok(await dueBtn.count() === 1, '처치실 결과 확인: 교수님 처치도 "N분 지남 · 확인"');
+const dueBtn = inSec('treat-check', '황도윤').getByRole('button', { name: '확인', exact: true });
+ok(await dueBtn.count() === 1 && /6\d분 지남/.test(await inSec('treat-check', '황도윤').innerText()), '처치실 결과 확인: 교수님 처치도 "N분 지남" + [확인]');
 await page.screenshot({ path: `${SP}/r89-treat-check.png` });
 await dueBtn.click(); await W(1200);
 y = (await rec('황도윤')).procedures.find(i => i.uid === 'y1');
@@ -69,7 +69,7 @@ ok(y.done && !!y.checkedAt, '처치실에서 확인 → YAG 끝');
 await back();
 await pick('진료실');
 await page.getByRole('button', { name: '이종혁', exact: true }).first().click(); await W(1200);
-ok(await inSec('consult-explain', '황도윤').getByRole('button', { name: '귀가', exact: true }).count() === 1, '확인 뒤 [귀가] 가능');
+ok(await inSec('consult-explain', '황도윤').getByRole('button', { name: '귀가', exact: true }).isEnabled(), '확인 뒤 [귀가] 가능');
 
 // 3) 진료 후 처치 + 처치 후 검사: 김선웅 설명 대기 송하린 PRP(OD) '검사 추가 후 완료' → WFP(OD 다시) → 검사 후 설명 대기
 await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1200);
@@ -79,7 +79,7 @@ await page.screenshot({ path: `${SP}/r89-post-modal.png` });
 await modal().getByRole('button', { name: '처치 완료 · 검사로' }).click(); await W(1500);
 s = await rec('송하린');
 ok(s.procedures.find(i => i.uid === 'pr1').done && s.assigned.wfp && !s.done.wfp && s.detail?.wfp?.eye === 'OD' && (s.postTests || []).includes('wfp'), `PRP 완료 + WFP 다시(OD) (${JSON.stringify(s.detail?.wfp || {})})`);
-ok(await inSec('consult-explain', '송하린').getByText(/검사 중 · WFP/).count() === 1, '설명 대기 카드: "검사 중 · WFP"');
+ok(await inSec('consult-explain', '송하린').locator('[data-task-line="검사실"]').filter({ hasText: 'WFP' }).count() === 1, "설명 대기 카드: 점선 '검사실' WFP (10-10)");
 await inSec('consult-explain', '송하린').getByRole('button', { name: '설명 완료 · FU 나중에' }).click(); await W(1200);
 ok(!!(await rec('송하린')).explainedEarly && !(await rec('송하린')).consultDone, '검사 전 설명 완료 → 설명만 먼저');
 await back();
@@ -90,7 +90,7 @@ await wfp.click(); await W(1200);
 await back();
 await pick('진료실');
 await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1200);
-ok(await inSec('consult-explain', '송하린').getByRole('button', { name: '귀가', exact: true }).count() === 1, '검사가 끝나면 설명 대기에서 [귀가]');
+ok(await inSec('consult-explain', '송하린').getByRole('button', { name: '귀가', exact: true }).isEnabled(), '검사가 끝나면 설명 대기에서 [귀가]');
 await back();
 
 // 4) 진료 전 처치 + 처치 후 검사: 장민호 PRP → WFP → 검사실, 끝나면 진료 대기

@@ -56,8 +56,8 @@ for (const [label, w, h, s] of sizes) {
     const pill = page.locator('[data-wait-count]');
     ok((await pill.innerText()).trim() === '대기 10명' && await pill.evaluate(e => getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(e).color === 'rgb(255, 255, 255)'), "① 머리줄 '대기 10명' 방 색깔 알약 (흰 글씨)");
     ok(await page.locator('.t-name').first().evaluate(e => parseFloat(getComputedStyle(e).fontSize) >= 19 && Number(getComputedStyle(e).fontWeight) >= 700), '③ 이름 크게·굵게');
-    const dots = await page.locator('[data-doctor-dot]').evaluateAll(es => [...new Set(es.map(e => getComputedStyle(e).backgroundColor))].length);
-    ok(dots === 3, `④ 교수님 3명 = 색 점 3가지 (${dots})`);
+    const dots = await page.locator('[data-doctor-chip]').evaluateAll(es => [...new Set(es.map(e => getComputedStyle(e).backgroundColor))].length);
+    ok(dots === 3, `④ 교수님 3명 = 교수님 칸 색 3가지 (10-10: 점 대신 칸 전체를 연하게) (${dots})`);
     const head = page.locator('[data-section-head]').filter({ hasText: /^검사 대기 · 10명$/ });
     ok(await head.count() === 1 && await head.evaluate(e => getComputedStyle(e).borderLeftWidth === '4px' && Number(getComputedStyle(e).fontWeight) >= 700), "⑦ '검사 대기 · 10명' 굵게 + 왼쪽 막대");
   }
@@ -94,7 +94,8 @@ for (const [label, w, h, s] of sizes) {
   ok(await muted.count() === 1 && await muted.evaluate(e => Number(getComputedStyle(e).fontWeight) < 700), "⑦ 0명인 구역 제목은 흐리게 ('처치 대기 · 0명')");
   await page.screenshot({ path: `${SP}/r103-treat-${label}.png` });
   await back(); await pick('진료실'); await W(900);
-  ok(await page.locator('[data-doctor-dot]').count() >= 3, '④ 진료실 교수님 고르기 버튼에도 색 점');
+  const picker = await page.getByRole('button', { name: /^(김선웅|나상훈|이종혁)$/ }).evaluateAll(es => new Set(es.map(e => getComputedStyle(e).backgroundColor)).size);
+  ok(picker >= 3, `④ 진료실 교수님 고르기 버튼도 교수님 색 (${picker})`);
   await page.screenshot({ path: `${SP}/r103-consult-${label}.png` });
   ok(errors.length === 0, `${label}: 페이지 오류 없음 ${errors.join(' / ')}`);
   await page.close();
@@ -105,7 +106,7 @@ for (const [label, w, h, s] of sizes) {
   const { errors, ok, W, pick, back } = tester(page);
   await page.goto(`${BASE}/`); await W(900);
   await pick('시력'); await W(800);
-  const dotOf = (doc) => page.locator('span.rounded-full').filter({ hasText: new RegExp(`^${doc}$`) }).first().locator('[data-doctor-dot]').evaluate(e => getComputedStyle(e).backgroundColor);
+  const dotOf = (doc) => page.locator('[data-doctor-chip]').filter({ hasText: new RegExp(`^${doc}$`) }).first().evaluate(e => getComputedStyle(e).backgroundColor);
   const before = await dotOf('이종혁');
   await back(); await pick('설정');
   await page.getByRole('button', { name: '교수 관리', exact: true }).click(); await W(300);
@@ -115,9 +116,9 @@ for (const [label, w, h, s] of sizes) {
   ok(prefs?.['김선웅']?.dotColor === '#0891b2', "설정에서 고른 색이 교수님별 설정 새 칸(dotColor)에 저장");
   await page.screenshot({ path: `${SP}/r103-settings-color.png` });
   await back(); await pick('시력'); await W(800);
-  ok(await dotOf('김선웅') === 'rgb(8, 145, 178)', '직원 화면 김선웅 점 = 고른 색');
+  ok(await dotOf('김선웅') === 'rgba(8, 145, 178, 0.14)', '직원 화면 김선웅 점 = 고른 색');
   const after = await dotOf('이종혁');
-  ok(after !== 'rgb(8, 145, 178)' && before === 'rgb(8, 145, 178)', `자동 색이던 교수님(이종혁)은 겹치지 않는 다른 색으로 (${before} → ${after})`);
+  ok(after !== 'rgba(8, 145, 178, 0.14)' && before === 'rgba(8, 145, 178, 0.14)', `자동 색이던 교수님(이종혁)은 겹치지 않는 다른 색으로 (${before} → ${after})`);
   await back(); await pick('설정');
   await page.getByRole('button', { name: '교수 관리', exact: true }).click(); await W(300);
   await page.locator('[data-dot-picker="김선웅"]').getByRole('button', { name: '자동', exact: true }).click(); await W(200);

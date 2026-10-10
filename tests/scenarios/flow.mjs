@@ -42,8 +42,8 @@ await c.getByRole('button', { name: '설명 완료', exact: true }).click(); awa
 const modal = page.locator('.fixed.inset-0').last();
 await modal.getByRole('button', { name: '설명 완료', exact: true }).click(); await wait(600);
 c = cardOf('송하린');
-ok(await c.getByText(/^설명 완료/).count() >= 1 && await c.getByText('처치 중', { exact: true }).count() === 1, '설명 완료 + 처치 중 배지 (이름 줄)');
-ok(await c.getByText('처치가 끝나면 귀가 처리할 수 있어요').count() === 1, '처치 끝나기 전에는 귀가 버튼 없음');
+ok(await c.getByText(/^설명 완료/).count() >= 1 && await c.locator('[data-task-line="처치실"]').count() === 1, "설명 완료 + 점선 '처치실' 줄 (10-10: 처치 중 배지 대신)");
+ok(await c.getByRole('button', { name: '귀가', exact: true }).isDisabled(), '처치 끝나기 전에는 회색 [귀가] (누를 수 없음)');
 await c.screenshot({ path: `${SP}/r2-flow-explained.png` });
 await back();
 

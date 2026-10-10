@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   Check, Plus, ChevronUp, ChevronDown, AlertTriangle, Trash2, GripVertical, RotateCcw, StickyNote,
 } from 'lucide-react';
-import { fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
+import { previousMeasure, fuMissingNow, REDO_LABEL, sexAgeLabel, checkItems, procCheckDue, confirmProcCheckPatch, cancelProcCheckPatch, procLabel, RESULT_FIELDS, hasResultValue, resultEyeText, resultFieldsOf, hxPending, nctMeasured, hasAnyValue as hasAnyMeasure, COLOR_MAP, DILATE_EYE_LABEL, EYE_OPTIONS, INPUT, MEASURE_FIELDS, PERFORMER_LABEL, VISION_KEY, activeVf, cleanDetail, crActive, detailEye, dilateEyeOf, dilationBlockers, dilationState, confirmDilationPatch, fieldText, fmtClock, forcedToday, hxNeeded, inConsult, isVfTest, makePreProcs, needsDilation, normalizeMeasure, octEyeGroups, orderForPicking, orderedOptions, patchPatient, patientKey, pickDetail, prepPositiveNames, setDragActive, setLate, testLabelWithOptions, timeToMin, toggleDrop, addExtraDrop, undoExtraDrop, withoutPrep } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS } from '../core/storage.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -300,7 +300,7 @@ export const TEST_OPTION_HELP = {
   popupOnClick: '누를 때마다 세부 창(단안·종류)을 띄움. 끄면 바로 체크되고 오른쪽 클릭으로 창을 엶',
   noOrder: "처방이 필요 없는 검사 (예: OSDI). '처방 전' 표시를 하지 않음",
   noDilate: '이 검사가 끝나기 전에는 점안(산동)을 막음 (예: VF)',
-  prepOn: '검사 전에 처치실 "검사 준비"에서 먼저 할 일 (예: FAG 동의서·skin test). 시간이 되면 [확인]해야 검사실로',
+  prepOn: '검사 전에 처치실 "검사 준비"에서 먼저 할 일 (예: FAG 동의서·skin test). [시작]하면 "결과 확인"으로, 시간이 되면 [끝 · 확인]해야 검사실로',
   timed: '검사 자체가 시간을 재는 검사 (예: Schirmer, MMP). 검사 칸을 누르면 시작 시각 → 시간이 되면 [끝 · 확인]',
   holdCall: '이 검사를 하는 동안 다른 검사실에서 부르지 않음 (VF는 처음부터 켜짐). 일반 검사는 [▶ 시작]·[종료]가 생기고, 검사 준비·시간 재기 검사는 시작~확인 동안',
   withExams: '처치실 검사: 다른 검사실을 기다리는 동안에도 처치실 목록에 뜸 (예: OSDI). 끄면 다른 검사 뒤에 (예: Syringing)',
@@ -1015,11 +1015,13 @@ export function TodayTestsLine({ p, tests }) {
   );
 }
 // 설명 대기용 간단 요약: 오늘 한 검사 + 산동
-export function TodayDoneLine({ p, tests, prefs }) {
+// inline: 설명 대기 카드 참고 줄 안에 (작은 회색 이름 + 굵은 값)
+export function TodayDoneLine({ p, tests, prefs, inline = false }) {
   const done = [...(nctMeasured(p) ? ['NCT'] : []), ...tests.filter(t => t.id !== VISION_KEY && p.assigned?.[t.id] && p.done?.[t.id]).map(t => testLabelWithOptions(t, p.detail?.[t.id]))];
   const drops = (p.drops || []).filter(Boolean);
   const eye = dilateEyeOf(p.dilateEye);
   if (drops.length) done.push(crActive(p, prefs) ? 'CR' : `산동${eye ? ` ${eye}` : ''}`);
+  if (inline) return <RefItem k="오늘 검사">{done.length ? done.join(', ') : '없음'}</RefItem>;
   return (
     <div className="w-full text-sm text-slate-700">
       <span className="text-xs text-slate-400 mr-2">오늘 검사</span>{done.length ? done.join(', ') : '없음'}
@@ -1278,12 +1280,25 @@ export function DoctorDot({ name, color }) {
   if (!name && !color) return null;
   return <span aria-hidden="true" data-doctor-dot className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: color || doctorDotColor(ctx, name) }} />;
 }
+// 교수님 칸 전체를 그 색으로 연하게 + 같은 색 계열 굵은 글자 (10-10 사용자: 점은 작아서 눈에 안 띔 — A안).
+// 진한 색 칸은 이 프로그램에서 '누르는 버튼' 모양이라 쓰지 않음
+export function doctorTintStyle(color) {
+  const hex = String(color || '#64748b').replace('#', '');
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
+  return { background: `rgba(${r},${g},${b},0.14)`, borderColor: `rgba(${r},${g},${b},0.6)`, color: `rgb(${Math.round(r * 0.62)},${Math.round(g * 0.62)},${Math.round(b * 0.62)})` };
+}
+// 교수님 이름 칸 (명단 관리 고르기·메인 화면 인원·설정 등): color를 주면 그 색(설정 화면의 고치는 중 색)
+export function DoctorTag({ name, color, className = '' }) {
+  const ctx = useContext(DoctorOrderContext);
+  if (!name) return null;
+  return <span data-doctor-chip className={`rounded-full font-bold border whitespace-nowrap ${className || 'text-xs px-2.5 py-0.5'}`} style={doctorTintStyle(color || doctorDotColor(ctx, name))}>{name}</span>;
+}
 export function DoctorChip({ p }) {
   const ctx = useContext(DoctorOrderContext);
   if (!p.doctor) return null;
   return (
-    <span className="text-xs px-2 py-0.5 rounded-full bg-white text-slate-700 font-semibold border inline-flex items-center gap-1.5" style={{ borderColor: `${doctorDotColor(ctx, p.doctor)}66` }}>
-      <DoctorDot name={p.doctor} />{p.doctor}
+    <span data-doctor-chip className="text-xs px-2.5 py-0.5 rounded-full font-bold border whitespace-nowrap" style={doctorTintStyle(doctorDotColor(ctx, p.doctor))}>
+      {p.doctor}
     </span>
   );
 }
@@ -1522,7 +1537,8 @@ export function DilationEyeModal({ patientName, on, eye, onApply, onRemove, onCa
 // 처치 후 확인 (10-07 사용자 결정, 산동 확인과 같은 방식 — 버튼을 늘리지 않음):
 // 시행한 처치 하나에 버튼 하나. 시간 전 'YAG · OS 11:05 · 확인 대기'(한 번 누르면 3초 동안 [지금 완료] [시행 취소]),
 // 시간이 지나면 노란 'N분 지남 · 확인' → 누르면 끝. 서버 기록이 보이던 시행 그대로일 때만 저장
-export function ProcCheckRow({ p, mutatePatients, filter = () => true }) {
+// short: 할 일 줄 안에서 — 왼쪽에 처치 이름·시각이 이미 있으므로 버튼은 할 일만 ([확인 대기] / [확인]) (10-10 사용자: 같은 말 반복 줄이기)
+export function ProcCheckRow({ p, mutatePatients, filter = () => true, short = false }) {
   const [armed, setArmed] = useState(null);
   const [, setTick] = useState(0);
   useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 15000); return () => clearInterval(t); }, []);
@@ -1539,17 +1555,72 @@ export function ProcCheckRow({ p, mutatePatients, filter = () => true }) {
         const due = procCheckDue(c.i, now);
         const mins = Math.floor((now - c.i.performedAt) / 60000);
         const label = `${procLabel(c.i)} ${fmtClock(c.i.performedAt)}`;
-        if (due) return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} className="text-sm px-4 py-2 rounded-lg bg-yellow-300 border border-yellow-500 text-yellow-950 font-semibold">{label} · {mins}분 지남 · 확인</button>;
+        if (due) return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => confirm(c)} className="text-sm px-4 py-2 rounded-lg bg-yellow-300 border border-yellow-500 text-yellow-950 font-semibold">{short ? '확인' : `${label} · ${mins}분 지남 · 확인`}</button>;
         if (armed === c.i.uid) return (
           <span key={c.i.uid} className="flex items-center gap-1">
             <button type="button" onClick={() => confirm(c)} className="text-sm px-3 py-2 rounded-lg bg-green-600 text-white font-medium">지금 완료</button>
             <button type="button" onClick={() => cancel(c)} className="text-sm px-3 py-2 rounded-lg border border-rose-400 bg-rose-50 text-rose-700 font-medium">시행 취소</button>
           </span>
         );
-        return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => setArmed(c.i.uid)} title={`${c.i.checkMin}분 뒤 확인 · 누르면 [지금 완료] [시행 취소]`} className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">{label} · 확인 대기</button>;
+        return <button key={c.i.uid} type="button" data-proc-check={c.i.uid} onClick={() => setArmed(c.i.uid)} title={`${c.i.checkMin}분 뒤 확인 · 누르면 [지금 완료] [시행 취소]`} className="text-sm px-4 py-2 rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">{short ? '확인 대기' : `${label} · 확인 대기`}</button>;
       })}
     </div>
   );
+}
+
+// ── 처치실·설명 대기 카드 (10-10 사용자): '할 일 줄' + '참고 줄' ──
+// 할 일 줄: 왼쪽 구역 색깔 표 + 할 일(굵게), 버튼은 늘 오른쪽 끝. wait: 다른 곳(처치실·검사실)에서 진행 중 — 점선 표, 버튼 없음(산동 등 예외)
+const TAG_TONE = { violet: 'bg-violet-600', rose: 'bg-rose-600', amber: 'bg-amber-600', sky: 'bg-sky-600', indigo: 'bg-indigo-600', emerald: 'bg-emerald-600', slate: 'bg-slate-400' };
+export function TaskLine({ tag, tone = 'indigo', wait = false, what, small, children }) {
+  return (
+    <div data-task-line={tag} className="w-full flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+      <span className={`shrink-0 text-[0.8125rem] font-extrabold leading-snug rounded-lg px-2.5 py-1 ${wait ? 'bg-white border-[1.5px] border-dashed border-slate-400 text-slate-600' : `${TAG_TONE[tone] || TAG_TONE.indigo} text-white`}`}>{tag}</span>
+      <span className={`min-w-0 ${wait ? 'text-[0.9375rem] font-semibold text-slate-600' : 'text-[1.0625rem] font-bold text-slate-900'}`}>
+        {what}{small && <span className={`ml-1.5 ${wait ? 'text-[0.8125rem] text-slate-400' : 'text-sm text-slate-500'} font-semibold`}>{small}</span>}
+      </span>
+      {children && <span className="ml-auto flex flex-wrap items-center justify-end gap-2">{children}</span>}
+    </div>
+  );
+}
+// 참고 줄 항목: 작은 회색 이름 + 굵은 값
+export function RefItem({ k, children }) {
+  return <span className="whitespace-nowrap"><span className="text-slate-400 mr-1">{k}</span><b className="font-semibold text-slate-700">{children}</b></span>;
+}
+// 참고 줄: 작은 회색 한 줄(오늘 시력·오늘 검사·History 요약·드문 버튼). detail이 있으면 오른쪽 끝 [자세히 ▾] → 아래로 펼침
+// right: 줄 오른쪽 끝에 붙는 버튼(설명 대기의 설명 완료 등). line=false면 위 점선 없이
+export function RefLine({ children, detail = null, right = null, line = true }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="w-full">
+      <div data-ref-line className={`flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[0.8125rem] text-slate-500 ${line ? 'border-t border-dashed border-slate-200 pt-2 mt-0.5' : ''}`}>
+        {children}
+        {(detail || right) && (
+          <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {detail && <button type="button" data-detail-toggle aria-expanded={open} onClick={() => setOpen(v => !v)} className="text-xs px-2 py-0.5 rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 whitespace-nowrap">{open ? '자세히 접기 ▴' : '자세히 ▾'}</button>}
+            {right}
+          </span>
+        )}
+      </div>
+      {open && detail && <div data-card-detail className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 space-y-2">{detail}</div>}
+    </div>
+  );
+}
+// 자세히: 진료 호출 때 진료실 화면처럼 — 오늘·이전 시력·안압 표, 결과, History 전체(수정), 오늘 검사
+export function CardDetail({ p, history, tests }) {
+  return (
+    <>
+      <MeasureTable today={p.measure} prev={previousMeasure(p, history || {})} />
+      <ResultTable tests={tests} today={p.results} />
+      {p.hx && <HistoryDetail p={p} editable />}
+      <TodayTestsLine p={p} tests={tests} />
+    </>
+  );
+}
+// 참고 줄의 History 요약 (적었을 때만)
+export function HxRef({ p }) {
+  const ctx = useContext(HxContext);
+  if (!p.hx) return null;
+  return <RefItem k="History">{hxSummary(p.hx, ctx.fields) || '특이사항 없음'}</RefItem>;
 }
 
 export function DilationRow({ p, prefs, waitMin, mutatePatients, showDrops = true, compact = false, togglesOnly = false, inline = false, group = false, large = false, crStatusOnly = false, dropsOnly = false }) {

@@ -36,7 +36,7 @@ ok(await m.getByRole('button', { name: '녹내장 가족력 있음' }).count() =
 ok(await m.locator('textarea[aria-label="이전 안과 수술력"]').count() === 1, '안과 수술력은 여러 줄 글');
 await m.getByRole('button', { name: '녹내장 가족력 있음' }).click();
 await m.getByRole('button', { name: '확인', exact: true }).click(); await W();
-ok(/녹내장 가족력\s*있음/.test(await cardOf('최민지').innerText()), '추가한 항목이 카드에 표시');
+ok(/History.*녹내장\s*(있음|\(\+\))/.test(await cardOf('최민지').innerText()), '추가한 항목이 카드에 표시 (10-10: 참고 줄 History 한 줄 요약 "FHx 녹내장(+)")');
 await m.screenshot({ path: `${SP}/r20-hx-modal.png` }).catch(() => {});
 ok(errors.length === 0, `페이지 오류 없음 ${errors.join(' / ')}`);
 await browser.close();

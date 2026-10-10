@@ -20,7 +20,7 @@ ok(await c.getByRole('button', { name: /^OCT/ }).first().isDisabled(), '검사�
 await c.screenshot({ path: `${SP}/r35-hold.png` });
 await back();
 await pick('처치실');
-await card.getByRole('button', { name: '지금 확인' }).click(); await W();
+await page.locator('#treat-check div.bg-white').filter({ has: page.getByText('임수빈', { exact: true }) }).first().getByRole('button', { name: '지금 확인' }).click(); await W(); // 10-10: 시작하면 결과 확인 칸으로
 await back();
 await pick('31번방');
 c = cardOf('임수빈');

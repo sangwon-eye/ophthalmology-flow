@@ -14,6 +14,7 @@ await page.goto(`${BASE}/`); await W();
 await pick('처치실');
 // 검사 지정 대기: 수정
 ok(/흐려 보임/.test(await cardOf('강서윤').innerText()), '검사 지정 대기 카드에 History');
+await cardOf('강서윤').locator('[data-detail-toggle]').first().click(); await W(300); // 10-10: History 전체·[수정]은 [자세히 ▾] 안
 await page.getByRole('button', { name: '강서윤 History 수정' }).click(); await W(300);
 await page.getByLabel('주호소').fill('눈부심');
 await page.getByRole('button', { name: '확인', exact: true }).click(); await W(800);

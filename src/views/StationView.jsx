@@ -1,7 +1,7 @@
 // 시력방·검사실 화면
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, Search, RotateCcw } from 'lucide-react';
-import { inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
+import { treatExamPending, inProgressText, hasVisionValue, resultFieldsOf, pilotSkipVision, hxNeeded, nctNeeded, GAT_ID, VISION_KEY, VISION_TEST, activeVf, applyCheckin, assignAtTreat, byQueue, dropDue, fmtClock, groupPending, hasAnyValue, hasFieldValue, hasIop, machineGroups, moveInQueue, normalizeMeasure, notesOf, orderForPicking, orderState, orderedTests, patchPatient, patientKey, pendingTests, pickDetail, prepBlocked, prepOf, prepPositive, previousMeasure, remainingTests, roomColor, roomTests, sortedTests, testLabelWithOptions, restoreKeys, VISION_TEST_IDS, undoCheckin, updateVf, visionTasksLeft, mainTestIds, prepHolding, treatRoomOf, startStopTest, prepLabel, isTimed, prepStartPatch, prepConfirmPatch, prepCancelPatch, prepGoMode, prepDue, prepWaitMin, withoutPrep, prepRunning, staleMinutes, visionWaiting, roomWaiting, examRooms, earliestExamPatient } from '../core/flow.jsx';
 import { visionNames } from '../core/storage.jsx';
 import { findKioskPatient } from './RoleSelect.jsx';
 import { WIDE_LIST, SectionHead, FuMissingBadge, TwoStepButton, SexAge, ResultModal, ResultLine, PrevVisionBox, DilationRow, DoctorChip, DraggableList, EmptyState, FilterChip, InfoChip, KioskNoteLine, LateChip, MeasureLine, MeasureModal, PatientMemo, PatientRow, RecentDone, RecentRow, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TEST_TILE, TestDetailModal, TestPicker, TestToggle, UndoButton, byName, inSession, useScanner, useSortMode, useUndoToast } from '../ui/common.jsx';
@@ -88,7 +88,9 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
   const notCheckedIn = isVision
     ? patients.filter(p => !p.consultDone && !p.checkin && inSession(p, session) && (!q || (p.name || '').includes(q) || String(p.id).includes(q))).sort(nameSort ? byName : byQueue)
     : [];
-  const roomList = (isVision ? visionWaiting(patients) : roomWaiting(patients, settings, room.id)).sort(byQueue);
+  // 처치실의 '진료 전 검사': 시작한 [끝 · 확인] 방식 시간 재기 검사(예: Schirmer)는 '결과 확인'으로 갔으므로 뺌 (10-10 '시행하면 대기 칸에서 빠짐')
+  const isTreatRoom = room?.builtin === 'treat';
+  const roomList = (isVision ? visionWaiting(patients) : isTreatRoom ? patients.filter(p => !p.consultDone && treatExamPending(p, settings)) : roomWaiting(patients, settings, room.id)).sort(byQueue);
   // 검사실 묶음(시력방·처치실을 뺀 모든 검사실): 윗줄에 같은 묶음의 다른 검사실 대기도 '보기만'으로, 띵동도 묶음 전체
   const isExamRoom = !isVision && room.builtin !== 'treat' && !embedded;
   const groupRooms = isExamRoom ? examRooms(settings) : [];
@@ -499,7 +501,7 @@ function StationScreen({ mode, settings, doctorPrefs, patients, history, mutateP
                       <span className="font-semibold">{testLabelWithOptions(t, p.detail?.[t.id])}</span>
                       <span className="ml-1.5 text-xs">{prepPositive(p, t) ? '검사 취소' : prepOf(p, t)?.startedAt ? `${prepLabel(t)} 중` : `${prepLabel(t)} 전`}</span>
                     </div>
-                  ) : isTimed(t) && !p.done?.[t.id] ? (() => {
+                  ) : isTreatRoom && isTimed(t) && !prepGoMode(t) && !p.done?.[t.id] && prepRunning(p, t) ? null : isTimed(t) && !p.done?.[t.id] ? (() => {
                     const st = prepOf(p, t);
                     const label = prepLabel(t);
                     if (!st?.startedAt) return (

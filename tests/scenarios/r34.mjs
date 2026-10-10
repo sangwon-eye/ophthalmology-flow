@@ -16,8 +16,9 @@ const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 const { errors, ok, W, pick, cardOf } = tester(page);
 await page.goto(`${BASE}/`); await W();
 await pick('처치실');
-const fag = page.locator('div.bg-white').filter({ has: page.getByText('조현우', { exact: true }) }).filter({ hasText: 'skin test' }).first();
-await fag.getByRole('button', { name: 'skin test', exact: true }).click(); await W();
+// 10-10: [시작]을 누르면 결과 확인 칸으로 옮겨 감
+await page.locator('#treat-prep div.bg-white').filter({ has: page.getByText('조현우', { exact: true }) }).first().getByRole('button', { name: '시작', exact: true }).click(); await W();
+const fag = page.locator('#treat-check div.bg-white').filter({ has: page.getByText('조현우', { exact: true }) }).first();
 await fag.screenshot({ path: `${SP}/r34-force.png` });
 await fag.getByRole('button', { name: '지금 확인' }).click(); await W();
 { const l = (await getKey('daily-patients')).value; ok(l.find(p => p.name === '조현우').prep.fag.result === 'neg', 'skin test: 시간 전 [지금 확인] → 검사실로'); }

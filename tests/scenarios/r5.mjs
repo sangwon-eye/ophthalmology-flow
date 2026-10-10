@@ -46,7 +46,9 @@ await pick('시력');
 await cardOf('원성옥').getByRole('button', { name: '지각', exact: true }).click(); await wait();
 await cardOf('원성옥').getByRole('button', { name: '접수', exact: true }).click(); await wait();
 o = await order();
-ok(o[o.length - 1] === '원성옥' && await pressed('원성옥') === 'true', `접수 전 지각 → 접수 후 맨 뒤 (${o.join(',')})`);
+// 10-08 '지각 자리': 먼저 접수한 환자 뒤 — 가상 명단은 08:3x~08:5x 접수라, 시험 브라우저 시계가 그보다 이르면(새벽에 돌릴 때) 먼저 온 환자가 없어 맨 뒤가 아님
+const early = await page.evaluate(() => new Date().toTimeString().slice(0, 5) < '08:56');
+ok((early || o[o.length - 1] === '원성옥') && await pressed('원성옥') === 'true', `접수 전 지각 → 접수 후 먼저 접수한 환자 뒤 (${o.join(',')}${early ? ' · 시험 시각이 이른 아침이라 순서는 확인 안 함' : ''})`);
 await page.screenshot({ path: `${SP}/r5-vision.png` });
 ok(errors.length === 0, '페이지 오류 없음');
 await browser.close();

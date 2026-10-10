@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Plus, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { RESULT_FIELDS, COLOR_MAP, DEFAULT_SETTINGS, INPUT, ROOM_PALETTE, machineGroups, newId, orderForPicking, parseOptions, renameTestOptions, sortedTests, toDraft, holdCallOf } from '../core/flow.jsx';
 import { DEFAULT_HX_FIELDS, hxFieldsOf, visionNames } from '../core/storage.jsx';
-import { DOCTOR_DOTS, DoctorDot, doctorDotColor, ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
+import { DOCTOR_DOTS, DoctorTag, doctorDotColor, ConfirmButton, Field, HX_TYPES, SHELL_WIDTH, ScreenShell, TEST_OPTION_HELP, noDilateTest } from '../ui/common.jsx';
 import { SettingsPasswordCard } from './RoleSelect.jsx';
 import { AccessPasswordCard } from './AccessGate.jsx';
 import { DoctorRoomInput } from './BoardView.jsx';
@@ -462,7 +462,7 @@ export function SettingsView({ settings, doctors, doctorPrefs, mutateSettings, m
           <div className="space-y-2">
             {docDraft.map(name => (
               <div key={name} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 flex-wrap">
-                  <span className="text-slate-700 flex-1 inline-flex items-center gap-2"><DoctorDot color={doctorDotColor({ order: docDraft, prefs: prefDraft }, name)} />{name}</span>
+                  <span className="flex-1"><DoctorTag name={name} color={doctorDotColor({ order: docDraft, prefs: prefDraft }, name)} className="text-sm px-3 py-0.5" /></span>
                   <DoctorRoomInput name={name} value={prefDraft?.[name]?.roomNo} onSave={v => setPref(name, 'roomNo', v)} />
                   <label className="flex items-center gap-1.5 text-xs text-slate-600">
                     초진 예진 기본값

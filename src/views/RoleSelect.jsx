@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Eye, Camera, Stethoscope, Monitor, Settings, ClipboardList, Search, Syringe, ScanBarcode, X, Heart } from 'lucide-react';
 import { resultChecksPending, COLOR_MAP, INPUT, applyCheckin, pilotSkipVision, consultFrontCount, consultQueue, consultWaiting, forcedToday, inConsult, needsTriageAssign, needsTriageExam, patientKey, prepBlocked, prepPositive, preProcPending, realTodayISO, roomColor, roomTests, roomWaiting, sortedTests, todayISO, treatRequested, treatRoomOf, treatWork, treatWorkCount, visionComplete, visionWaiting } from '../core/flow.jsx';
 import { shiftISO, visionNames } from '../core/storage.jsx';
-import { APP_VERSION, DoctorDot, TextSizeControl } from '../ui/common.jsx';
+import { APP_VERSION, DoctorTag, TextSizeControl } from '../ui/common.jsx';
 import { BoardView, consultRoomLabel, patientBoardName } from './BoardView.jsx';
 
 /* ------------------------------------------------------------------ */
@@ -306,7 +306,7 @@ function WaitBelow({ k, count, detail, c }) {
         <span className={`text-3xl font-bold tabular-nums ${count ? c.text : 'text-slate-300'}`}>{count}</span>
         <span className="text-sm text-slate-500">명 대기</span>
       </div>
-      {detail && <div data-count-detail={k} className="text-xs text-slate-500">{detail.map(([d, n], i) => <span key={d} className="whitespace-nowrap">{i ? ' · ' : ''}<span className="inline-block align-middle mr-1"><DoctorDot name={d} /></span>{d} <b className={n ? 'text-slate-800' : 'text-slate-400'}>{n}</b></span>)}</div>}
+      {detail && <div data-count-detail={k} className="text-xs text-slate-500">{detail.map(([d, n], i) => <span key={d} className="whitespace-nowrap">{i ? ' · ' : ''}<DoctorTag name={d} className="px-1.5 py-px mr-1" /><b className={n ? 'text-slate-800' : 'text-slate-400'}>{n}</b></span>)}</div>}
     </div>
   );
 }

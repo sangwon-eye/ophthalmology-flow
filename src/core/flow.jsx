@@ -1753,25 +1753,48 @@ export function treatTimedDue(p, settings, now = Date.now()) {
     .filter(t => isTimed(t) && !prepGoMode(t) && p.assigned?.[t.id] && prepRunning(p, t) && prepDue(prepOf(p, t), t, now));
 }
 // 처치실 할 일 묶음별 환자 (정렬 전)
-export function treatWork(patients, settings, now = Date.now()) {
+// '시행하면 대기 칸에서 빠짐' (10-10 사용자): 처치·검사를 일단 시행(시작)하면 대기 칸에는 없고 '결과 확인'에만
+//  - 확인 시간이 있는 처치(전공의·진료 전·교수님 처치 모두): [처치 완료](시행) 즉시 결과 확인 '확인까지 N분' → 시간이 되면 노란 [확인]
+//  - 검사 준비(예: FAG skin test)·처치실 시간 재기 검사([끝 · 확인] 방식, 예: Schirmer): 시작 즉시 결과 확인
+//  - 바로 넘어감(예: MMP)은 원래 시작하면 결과 확인
+// 저장값은 그대로이고 어느 칸에 보일지만 다름 ([처치 완료 취소]·[시작 취소]면 기록이 시행 전으로 돌아가 원래 칸으로)
+// 처치실에서 [끝 · 확인] 방식 시간 재기 검사 중 시작한 것 (시간 전·후 모두)
+export function treatTimedRunning(p, settings) {
+  return roomTests(settings, treatRoomOf(settings).id).filter(t => isTimed(t) && !prepGoMode(t) && p.assigned?.[t.id] && prepRunning(p, t));
+}
+// 검사 준비 중 시작한 것 (결과 전)
+export function prepStartedTests(p, settings) {
+  return prepPendingTests(p, settings).filter(t => !!prepOf(p, t)?.startedAt);
+}
+// 처치실 '진료 전 검사' 칸에 남는 검사: 시작한 시간 재기 검사는 결과 확인으로 갔으므로 뺌
+export function treatExamPending(p, settings) {
   const treatId = treatRoomOf(settings).id;
+  return roomPending(p, settings, treatId) && pendingTests(p, settings, treatId).some(t => !(isTimed(t) && !prepGoMode(t) && prepRunning(p, t)));
+}
+export function treatWork(patients, settings) {
   return {
     requests: patients.filter(treatRequested),
     triage: patients.filter(needsTriageAssign),
-    procs: patients.filter(p => needsTriageExam(p, settings) || inResidentProcedure(p)),
-    prep: patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).length > 0),
-    check: patients.filter(p => prepChecks(p, settings).length > 0 || treatTimedDue(p, settings, now).length > 0 || (!p.consultDone && checkItems(p).some(c => procCheckDue(c.i, now)))),
-    preProc: patients.filter(p => !p.consultDone && pastVision(p) && preProcPending(p)),
-    exams: patients.filter(p => !p.consultDone && roomPending(p, settings, treatId)),
+    procs: patients.filter(p => needsTriageExam(p, settings) || (!p.consultDone && notPerformed(pendingProcedures(p, 'resident')).length > 0)),
+    prep: patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).some(t => !prepOf(p, t)?.startedAt)),
+    check: patients.filter(p => prepChecks(p, settings).length > 0 || (!p.consultDone && (treatTimedRunning(p, settings).length > 0 || prepStartedTests(p, settings).length > 0 || checkItems(p).length > 0))),
+    preProc: patients.filter(p => !p.consultDone && pastVision(p) && notPerformed(p.preProcs).length > 0),
+    exams: patients.filter(p => !p.consultDone && treatExamPending(p, settings)),
   };
+}
+// 결과 확인 칸 환자 중 지금 확인할 시간이 된 것이 있는지 (요약 줄 '● N 시간 됨', 띵동)
+export function treatCheckDue(p, settings, now = Date.now()) {
+  return treatTimedDue(p, settings, now).length > 0 || prepStartedTests(p, settings).some(t => prepDue(prepOf(p, t), t, now))
+    || prepChecks(p, settings).some(t => prepDue(prepOf(p, t), t, now)) || (!p.consultDone && checkItems(p).some(c => procCheckDue(c.i, now)));
 }
 export function treatWorkCount(work) {
   return Object.values(work).reduce((n, list) => n + list.length, 0);
 }
 // 처치실 띵동: 어느 묶음이든 새 환자, 또는 시간 재기·검사 준비·결과 확인의 '시간 됨'
 export function treatChimeKeys(patients, settings, now = Date.now()) {
-  const work = treatWork(patients, settings, now);
-  const keys = Object.entries(work).flatMap(([name, list]) => list.map(p => `${name}:${patientKey(p)}`));
+  const work = treatWork(patients, settings);
+  // 결과 확인 칸에 들어간 것만으로는 울리지 않음 (누가 처치·시작할 때마다 다른 처치실 PC가 울리지 않게) — 시간이 됐을 때만(아래 due·pchk)
+  const keys = Object.entries(work).filter(([name]) => name !== 'check').flatMap(([name, list]) => list.map(p => `${name}:${patientKey(p)}`));
   patients.forEach(p => {
     const pk = patientKey(p);
     treatTimedDue(p, settings, now).forEach(t => keys.push(`due:${pk}:${t.id}`));

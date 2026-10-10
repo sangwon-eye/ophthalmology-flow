@@ -1,23 +1,26 @@
 // 진료실 화면
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
-import { resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
+import { procCheckDue, resultChecksPending, resultCheckNames, procReconsultPatch, undoProcReconsultPatch, procReconsultLabel, performProcItem, notPerformed, addPostTestsPatch, checkItems, homeBlocked, postTestsPending, VISION_KEY, procLabel, restoreKeys, revisionPatch, applyFollowupToList, markDilateSet, unreleaseRedo, cancelRedoPatch, REDO_SHORT, procDilatePending, procDilatePatch, crActive, dilationState, dropsPending, redoActive, redoPatch, releaseRedo, deleteFollowup, nctMeasured, hxPending, COLOR_MAP, INPUT, activateLinked, allDone, awaitingExplain, buildPatient, byQueue, byConsultQueue, clearOrders, consultWaiting, deactivateLinked, dilateEyeOf, fmtClock, getStage, inConsult, inTreatRoom, markFollowupLater, mergePatientList, moveInQueue, needsDilation, newId, notesOf, orderForPicking, patchPatient, patientKey, pickDetail, pendingProcedures, prepPositiveNames, previousMeasure, procedureStatus, saveFollowup, sortedTests, testLabelWithOptions, unmarkFollowupLater, mainTestIds } from '../core/flow.jsx';
 import { loadEntries } from '../core/storage.jsx';
 import { ChimeControl, useChime } from '../ui/chime.jsx';
-import { DoctorDot, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureList, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
+import { TaskLine, RefLine, RefItem, TwoStepButton, doctorDotColor, doctorTintStyle, DoctorOrderContext, SectionHead, FuMissingBadge, ProcCheckRow, PostTestModal, ResultTable, SexAge, DilationRow, DoctorChip, DraggableList, EmptyState, HistoryLine, MeasureLine, MeasureTable, PatientMemo, PatientRow, ProcedureModal, RecentDone, RecentRow, ScreenShell, StaleChip, SummaryBar, TodayDoneLine, TestDetailEditor, TestCheckModal, UndoButton, VisitTimes, cancelProcedure, useUndoToast } from '../ui/common.jsx';
 
 /* ------------------------------------------------------------------ */
 /* 진료실 화면                                                          */
 /* ------------------------------------------------------------------ */
 export function DoctorPicker({ doctors, value, onChange }) {
+  const order = useContext(DoctorOrderContext);
   if (doctors.length === 0) {
     return <div className="text-sm text-red-600">등록된 교수가 없습니다. 설정 &gt; 교수 관리에서 추가해주세요.</div>;
   }
   return (
     <div className="flex gap-1 bg-white rounded-lg border border-slate-300 p-1 flex-wrap max-w-full">
       {doctors.map(name => (
-        <button key={name} type="button" onClick={() => onChange(name)} className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap inline-flex items-center gap-1.5 ${value === name ? 'bg-amber-600 text-white' : 'text-slate-600'}`}>
-          <DoctorDot name={name} />{name}
+        // 고른 교수님은 진료실 색(진한 주황), 나머지는 그 교수님 색 칸(연하게) — 직원 카드의 교수님 칸과 같은 색 (10-10)
+        <button key={name} type="button" onClick={() => onChange(name)} style={value === name ? undefined : doctorTintStyle(doctorDotColor(order, name))}
+          className={`px-3 py-1.5 rounded-md text-sm font-bold whitespace-nowrap border ${value === name ? 'bg-amber-600 border-amber-600 text-white' : ''}`}>
+          {name}
         </button>
       ))}
     </div>
@@ -48,7 +51,8 @@ export function SectionTitle({ children, hint, muted = false }) {
   );
 }
 
-export function SimpleCard({ p, tone = 'slate', badges, stale = 0, children }) {
+// hideNote: 진료실 메모를 카드가 따로 보여 줄 때(처치실 '진료실 요청'은 할 일 줄에)
+export function SimpleCard({ p, tone = 'slate', badges, stale = 0, hideNote = false, children }) {
   const c = COLOR_MAP[tone] || COLOR_MAP.slate;
   return (
     <div className={`bg-white border ${stale ? 'border-orange-400 ring-2 ring-orange-200' : c.border} rounded-xl px-4 py-3 mb-3`}>
@@ -66,7 +70,7 @@ export function SimpleCard({ p, tone = 'slate', badges, stale = 0, children }) {
         <PatientMemo p={p} />
         <VisitTimes p={p} />
       </div>
-      {p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
+      {!hideNote && p.sendNote?.text && !p.consultDone && <div className="w-full text-sm bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg px-3 py-1.5 mt-1"><span className="font-medium">{p.sendNote.from || '진료실'} 메모</span> {p.sendNote.text}</div>}
       <div className="flex flex-wrap items-center gap-2 mt-2">{children}</div>
     </div>
   );
@@ -560,41 +564,65 @@ export function ConsultView({ patients, allPatients = patients, doctors, doctorP
               {explainList.map(p => {
                 const ps = procedureStatus(p);
                 const early = !!p.explainedEarly;
+                // 할 일 줄 (10-10 사용자): 여기서 할 일(색 표 + 오른쪽 버튼) / 다른 곳에서 진행 중(점선 표, 버튼 없음). 순서: 교수님 처치 → 처치 후 확인 → 다른 곳 진행
+                const resLeft = notPerformed(pendingProcedures(p, 'resident'));
+                const resCheck = (p.procedures || []).filter(i => i.performer === 'resident' && !i.done && i.performedAt);
+                const profLeft = notPerformed(pendingProcedures(p, 'prof'));
+                const doneProcs = (p.procedures || []).filter(i => i.done);
+                const dilAt = procDilatePending(p) ? (profLeft.some(i => i.dilate) || !resLeft.some(i => i.dilate) ? 'prof' : 'res') : '';
+                const dil = <DilationRow compact group p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />;
+                const postNames = allTests.filter(t => (p.postTests || []).includes(t.id) && p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ');
+                const blocked = early && homeBlocked(p, settings);
                 return (
                 <SimpleCard key={patientKey(p)} p={p} tone="emerald" badges={<>
-                  {ps === 'doing' && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300">처치 중</span>}
                   {ps === 'done' && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold border border-green-300">처치 완료</span>}
-                  {resultChecksPending(p, settings) && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300">{resultCheckNames(p, settings)} 결과 확인 전</span>}
-                  {postTestsPending(p) && <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 font-semibold border border-sky-300">검사 중 · {allTests.filter(t => (p.postTests || []).includes(t.id) && p.assigned?.[t.id] && !p.done?.[t.id]).map(t => t.short || t.name).join(', ')}</span>}
                   {early && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold border border-emerald-600">설명 완료{p.fuLater ? ' · FU 나중에' : ''}</span>}
                 </>}>
-                  <TodayDoneLine p={p} tests={allTests} prefs={doctorPrefs} />
-                  <ProcedureList p={p} onCancel={early ? undefined : uid => cancelProcedure(mutatePatients, patientKey(p), uid)} />
-                  {procDilatePending(p) && <DilationRow compact p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />}
-                  {notPerformed(pendingProcedures(p, 'prof')).length > 0 && <>
-                    <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
-                    <button type="button" onClick={() => setPostFor(p)} title="처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 · 재진료</button>
-                  </>}
-                  <ProcCheckRow p={p} mutatePatients={mutatePatients} filter={c => c.list === 'procedures' && c.i.performer === 'prof'} />
-                  {nextVisitNote(p)}
-                  {early ? (
-                    homeBlocked(p, settings)
-                      ? <span className="text-sm text-slate-500">{pendingProcedures(p).length ? '처치가 끝나면 귀가 처리할 수 있어요' : postTestsPending(p) ? '검사가 끝나면 귀가 처리할 수 있어요' : `${resultCheckNames(p, settings)} 결과를 확인하면 귀가 처리할 수 있어요`}</span>
-                      : <button type="button" onClick={() => goHome(p)} className="text-sm px-4 py-2 rounded-lg bg-slate-800 text-white font-medium">귀가</button>
-                  ) : <>
-                    <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">
-                      설명 완료
-                    </button>
-                    <button type="button" onClick={() => completeExplain(null, null, null, false, '', { later: true, patient: p })} title="다음 내원 검사는 관리자 > FU 지정 관리에서 나중에 지정합니다"
-                      className="text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 font-medium">
-                      설명 완료 · FU 나중에
-                    </button>
-                    <button type="button" onClick={() => undoFinishConsult(p)} className="ml-auto text-xs px-2 py-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-1">
-                      <RotateCcw size={12} />진료 완료 취소
-                    </button>
-                  </>}
-                  {/* 진료 후 외래 간호사가 처치를 넣을 때 (진료 호출을 다시 하지 않아도 됨). 드물어서 맨 오른쪽 끝 */}
-                  <button type="button" onClick={() => setProcFor(p)} className={`${early ? 'ml-auto ' : ''}text-sm px-3 py-2 rounded-lg border border-rose-300 text-rose-700 font-medium`}>처치 보내기</button>
+                  {profLeft.length > 0 && (
+                    <TaskLine tag="교수님 처치" tone="rose" what={profLeft.map(x => `${procLabel(x)}${x.note ? ` · ${x.note}` : ''}`).join(', ')}
+                      small={[profLeft.some(i => i.dilate) ? '산동 필요' : '', ...profLeft.filter(i => Number(i.checkMin) > 0).map(i => `확인 ${i.checkMin}분`)].filter(Boolean).join(' · ')}>
+                      {dilAt === 'prof' && dil}
+                      <button type="button" onClick={() => setPostFor(p)} title="처치를 완료하고 재진료(같은 교수님 진료 대기)나 검사(예: 그 눈 WFP)를 고릅니다" className="text-xs text-slate-500 hover:text-slate-800 underline">검사 · 재진료</button>
+                      <button type="button" onClick={() => finishProfProcedure(p)} className="text-sm px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">교수님 처치 완료</button>
+                    </TaskLine>
+                  )}
+                  {checkItems(p).filter(c => c.list === 'procedures' && c.i.performer === 'prof').map(c => {
+                    const due = procCheckDue(c.i);
+                    return (
+                      <TaskLine key={c.i.uid} tag={due ? '처치 후 확인' : '확인 대기'} tone={due ? 'violet' : 'slate'} what={procLabel(c.i)}
+                        small={`${fmtClock(c.i.performedAt)} 시행 · ${due ? `${Math.floor((Date.now() - c.i.performedAt) / 60000)}분 지남` : `확인까지 ${Math.max(0, Math.ceil((c.i.performedAt + (Number(c.i.checkMin) || 0) * 60000 - Date.now()) / 60000))}분`}`}>
+                        <ProcCheckRow short p={p} mutatePatients={mutatePatients} filter={x => x.list === 'procedures' && x.i.uid === c.i.uid} />
+                      </TaskLine>
+                    );
+                  })}
+                  {resLeft.length > 0 && (
+                    <TaskLine wait tag="처치실" what={resLeft.map(procLabel).join(', ')} small="전공의 · 처치실에서 진행 중">{dilAt === 'res' && dil}</TaskLine>
+                  )}
+                  {resCheck.length > 0 && <TaskLine wait tag="처치실" what={resCheck.map(procLabel).join(', ')} small={`${resCheck.map(i => fmtClock(i.performedAt)).join(', ')} 시행 · 처치실에서 확인 (확인해야 귀가)`} />}
+                  {postTestsPending(p) && <TaskLine wait tag="검사실" what={postNames} small="처치 뒤 검사 · 검사실에서 진행 중 (끝나야 귀가)" />}
+                  {resultChecksPending(p, settings) && <TaskLine wait tag="처치실" what={`${resultCheckNames(p, settings)} 결과 확인`} small="처치실에서 확인 (확인해야 귀가)" />}
+                  {/* 마지막 줄: 참고(오늘 검사·한 처치·취소) + 오른쪽 버튼(설명 완료 또는 귀가) · 맨 끝 [처치 보내기](드물어서) */}
+                  <RefLine line={false} right={<>
+                    {early ? (
+                      <button type="button" disabled={blocked} onClick={() => goHome(p)} title={blocked ? (pendingProcedures(p).length ? '처치가 끝나면 누를 수 있어요' : postTestsPending(p) ? '검사가 끝나면 누를 수 있어요' : `${resultCheckNames(p, settings)} 결과를 확인하면 누를 수 있어요`) : undefined}
+                        className={`text-sm px-4 py-2 rounded-lg font-medium ${blocked ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-800 text-white'}`}>귀가</button>
+                    ) : <>
+                      <button type="button" onClick={() => completeExplain(null, null, null, false, '', { later: true, patient: p })} title="다음 내원 검사는 관리자 > FU 지정 관리에서 나중에 지정합니다"
+                        className="text-sm px-3 py-2 rounded-lg border border-emerald-300 bg-white text-emerald-700 font-medium">설명 완료 · FU 나중에</button>
+                      <button type="button" onClick={() => setExplainFor(p)} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">설명 완료</button>
+                    </>}
+                    <button type="button" onClick={() => setProcFor(p)} className="text-sm px-3 py-1.5 rounded-lg border border-rose-300 bg-white text-rose-700 font-medium">처치 보내기</button>
+                  </>}>
+                    <TodayDoneLine inline p={p} tests={allTests} prefs={doctorPrefs} />
+                    {doneProcs.length > 0 && <RefItem k="한 처치">{doneProcs.map(procLabel).join(', ')}</RefItem>}
+                    {nextVisitNote(p)}
+                    {!early && [...profLeft, ...resLeft].map((x, i, all) => (
+                      <TwoStepButton key={x.uid} onConfirm={() => cancelProcedure(mutatePatients, patientKey(p), x.uid)} className="text-xs text-rose-600 underline" armedClassName="text-xs px-2 py-0.5 rounded border border-rose-500 bg-rose-50 text-rose-700 font-medium">
+                        {all.length > 1 ? `${procLabel(x)} 취소` : '처치 취소'}
+                      </TwoStepButton>
+                    ))}
+                    {!early && <button type="button" onClick={() => undoFinishConsult(p)} className="text-xs text-slate-400 hover:text-rose-600 underline flex items-center gap-1"><RotateCcw size={12} />진료 완료 취소</button>}
+                  </RefLine>
                 </SimpleCard>
                 );
               })}

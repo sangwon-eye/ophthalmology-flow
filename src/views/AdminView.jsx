@@ -1,10 +1,10 @@
 // 관리자 화면(명단·FU·통계·안내문)
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, Trash2, Search, RotateCcw, ArrowDown } from 'lucide-react';
 import { fuMissingNow, ageYears, laterEntries, laterFor, applyFollowupToList, unmarkFollowupLater, patchPatient, DILATE_EYE_LABEL, INPUT, ROSTER_HEADERS, VISION_KEY, VISION_TEST_IDS, buildPatient, byQueue, deleteFollowup, dilateEyeOf, editPatientInfo, fillFollowupNames, followupRows, fuVisitDate, getStage, hasAnyValue, hasFollowupApplied, hasVisionValue, makePreProcs, matchDoctor, mergePatientList, needsTestCheck, normalizeTime, orderForPicking, patientKey, pickDetail, previousMeasure, readRoster, removeVisit, sampleRows, saveFollowup, sortedTests, swapLinkOrder, testLabelWithOptions, todayISO, realTodayISO, treatRoomOf, updateTodayTests, mainTestIds, withoutPrep } from '../core/flow.jsx';
 import { isArchivedDate, loadEntries, loadFu, shiftISO, useArchivedPatients, visionNames } from '../core/storage.jsx';
-import { DoctorDot, FuMissingBadge, ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
+import { DoctorOrderContext, doctorDotColor, doctorTintStyle, FuMissingBadge, ConfirmButton, SexAge, DilationRow, EmptyState, Field, KioskNoteEditor, KioskNoteLine, MeasureLine, MeasureModal, PatientMemo, PreProcEditor, SESSION_OPTIONS, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TestDetailModal, TestPicker, byName, inSession, useSortMode } from '../ui/common.jsx';
 import { PatientInfoModal, UploadResult } from './TreatView.jsx';
 import { NOTICE_PRESETS, consultRoomLabel } from './BoardView.jsx';
 import { WAIT_TEXT, WAIT_WINDOW_MIN, estimateWait, shownWait } from '../core/flow.jsx';
@@ -190,12 +190,13 @@ export function roleGuideSheets(settings) {
     { key: 'treat', title: treat, steps: [
       '위쪽 요약 줄의 묶음을 누르면 그곳으로 이동 (주황 = 오래 기다리는 환자)',
       '초진 · 2차 진료: [History 입력] → [검사 지정]',
-      '검사 준비(skin test 등): [시작] → 시간이 되면 [확인]',
+      '검사 준비(skin test 등): [시작] → 맨 위 "결과 확인"으로 → 시간이 되면 [끝 · 확인]',
       '예진이 끝나면 [예진 완료], 전공의 처치가 끝나면 [처치 완료]',
       '진료실 요청: 할 일을 고르고 [확인 완료 · 진료 대기로]',
     ], tips: [
       '진료 전 처치(PRP · YAG): 맨 위 카드에서 [처치 완료]',
-      '처치 후 확인(YAG · Probing 등): [처치 완료] → 시간이 되면 노란 "N분 지남 · 확인"을 눌러야 끝 (결과 확인 칸에도)',
+      '처치 후 확인(YAG · Probing 등): [처치 완료] → 맨 위 "결과 확인"에 "확인 대기" → 시간이 되면 [확인]을 눌러야 끝',
+      '시력 · 안압 · History 전체(수정): 카드 끝 [자세히 ▾]',
       '처치 뒤 검사·다시 진료: [처치 완료] 옆 "검사 · 재진료" → [재진료] · 검사 중 필요한 것 (진료 전 처치는 "검사 추가 후 완료")',
       '잘못 눌렀으면: 알림의 [되돌리기] 또는 아래 "방금 완료한 환자"',
     ] },
@@ -208,7 +209,7 @@ export function roleGuideSheets(settings) {
     ], tips: [
       '잘못 불렀으면: [호출 취소]',
       '진료 후 처치를 넣을 때: 설명 대기 카드의 [처치 보내기]',
-      '처치가 남은 환자: 처치가 끝나면 [귀가] (처치 후 확인 · 처치 뒤 검사가 끝난 뒤)',
+      '처치가 남은 환자: [귀가]는 회색 — 처치 · 처치 후 확인 · 처치 뒤 검사가 끝나면 눌림 (점선 표시 = 다른 곳에서 진행 중)',
       '처치 뒤 검사·다시 진료: [교수님 처치 완료] 옆 "검사 · 재진료" → [재진료]는 진료 대기로 ("YAG 후 재진"), 검사만이면 검사 후 설명 대기로',
       '진료실 앞에 안 온 환자: 카드 끝 [환자 찾기] (복도 끝 모니터에 이름이 크게)',
       '산동이 이미 충분하면: 시각이 찍힌 점안 버튼 한 번 → [지금 완료]',
@@ -430,6 +431,7 @@ function useAllFollowups(active, updateFu) {
 }
 
 export function AdminView({ patients, history, doctors, doctorPrefs, settings, fuMap, mutatePatients, updateFu, mutateDoctors, mutateDoctorPrefs, boardNotices, mutateBoardNotices, onBack, lastSync }) {
+  const doctorOrder = useContext(DoctorOrderContext);
   const [todayDetail, setTodayDetail] = useState(null);
   const todayEdit = patients.find(p => patientKey(p) === todayDetail?.key);
   const todayTest = settings.tests.find(t => t.id === todayDetail?.testId);
@@ -913,13 +915,11 @@ export function AdminView({ patients, history, doctors, doctorPrefs, settings, f
                   <button type="button" onClick={() => swapOrder(p)} className="text-xs px-3 py-1.5 rounded-lg border border-fuchsia-300 text-fuchsia-700">진료 순서 바꾸기</button>
                 )}
                 <button type="button" onClick={() => setInfoEdit(p)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600">정보 수정</button>
-                <span className="inline-flex items-center gap-1.5">
-                  <DoctorDot name={p.doctor} />
-                  <select value={p.doctor} onChange={e => reassignDoctor(p, e.target.value)} className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
-                    {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
-                    {doctors.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </span>
+                {/* 교수님 고르기 칸도 그 교수님 색 (10-10, 직원 카드의 교수님 칸과 같게) */}
+                <select value={p.doctor} onChange={e => reassignDoctor(p, e.target.value)} data-doctor-chip style={doctorTintStyle(doctorDotColor(doctorOrder, p.doctor))} className="text-xs font-bold border rounded-lg px-2 py-1.5">
+                  {!doctors.includes(p.doctor) && <option value={p.doctor}>{p.doctor}</option>}
+                  {doctors.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
                 <button type="button" onClick={() => toggleFirst(patientKey(p), !p.firstVisit)} className={`text-xs px-3 py-1.5 rounded-lg border ${p.firstVisit ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-300 text-slate-500'}`}>
                   {p.firstVisit ? '초진' : '재진'}
                 </button>
