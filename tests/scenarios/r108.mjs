@@ -48,6 +48,9 @@ const list = [
   base(15, '정대현', '이종혁', { assigned: { visionIop: true, sch: true, oct: true }, done: { visionIop: true, oct: true }, prep: { sch: { startedAt: min(3), name: 'Schirmer' } } }),
   base(16, '강서윤', '김선웅', { assigned: { visionIop: true, mmp: true, oct: true }, done: { visionIop: true, oct: true, mmp: true }, prep: { mmp: { startedAt: min(12), go: true, name: 'MMP' } } }),
   base(17, '문가람', '김선웅', { ...seenX(5), assigned: { visionIop: true, oct: true, wfp: true }, done: { visionIop: true, oct: true }, postTests: ['wfp'] }),
+  // 교수님 담당 진료 전 처치(진료실 '진료 전 처치' 칸, 10-10) + 같은 환자의 전공의 진료 전 처치(처치실, 진료실에는 점선)
+  base(18, '배하늘', '김선웅', { assigned: { visionIop: true, oct: true }, preProcs: [{ uid: 'pm18', procId: 'man', name: '만니톨', performer: 'prof', done: false, fromRequest: '31번방' }, { uid: 'pr18', procId: 'prp', name: 'PRP', performer: 'resident', eye: 'OD', done: false }] }),
+  base(19, '임서준', '김선웅', { preProcs: [{ uid: 'pm19', procId: 'man', name: '만니톨', performer: 'prof', done: false, performedAt: min(31), checkMin: 30 }] }),
 ];
 await editKey('daily-patients', () => list);
 const browser = await chromium.launch();
@@ -86,7 +89,7 @@ for (const [w, h] of [[1280, 1000], [960, 900]]) {
   await back(); await pick('진료실'); await W(600);
   await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1500);
   const c = await audit(page, `진료실 ${w}`);
-  ok(c.length === 0, `진료실 설명 대기 ${w}: 같은 말 두 번·줄 넘김 없음${c.length ? `\n      ${c.join('\n      ')}` : ''}`);
+  ok(c.length === 0, `진료실 설명 대기·진료 전 처치 ${w}: 같은 말 두 번·줄 넘김 없음${c.length ? `\n      ${c.join('\n      ')}` : ''}`);
   ok(errors.length === 0, `${w}: 페이지 오류 없음 ${errors.join(' / ')}`);
   await page.close();
 }

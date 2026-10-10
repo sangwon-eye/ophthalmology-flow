@@ -1,6 +1,6 @@
 // 처치실 화면
 import React, { useState, useEffect, useRef } from 'react';
-import { examAsked, treatRequestFrom, consentMissing, testConsentMissing, checkReconsultPatch, undoCheckReconsultPatch, procDilatePatch, markDilateSet, newId, treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
+import { preProcsLeft, examAsked, treatRequestFrom, consentMissing, testConsentMissing, checkReconsultPatch, undoCheckReconsultPatch, procDilatePatch, markDilateSet, newId, treatTimedRunning, prepStartedTests, treatCheckDue, prepCancelPatch, nctMeasured, testLabelWithOptions, procReconsultPatch, undoProcReconsultPatch, performProcItem, notPerformed, addPostTestsPatch, checkItems, procCheckDue, pickDetail, dilationState, treatRequested, pendingProcedures, procDilatePending, procLabel, hxPending, INPUT, VISION_KEY, activeVf, assignAtTreat, byQueue, clearOrders, fmtClock, hasFollowupApplied, inResidentProcedure, needsTriageAssign, needsTriageExam, patchPatient, patientKey, pendingRooms, prepOf, prepPendingTests, prepWaitMin, roomTests, sortedTests, treatRoomOf, mainTestIds, prepGoMode, prepDue, prepChecks, orderForPicking, prepLabel, prepCompletesTest, isTimed, prepRunning, staleMinutes, staleMinOf, prepConfirmPatch, treatWork, treatChimeKeys, restoreKeys } from '../core/flow.jsx';
 import { CONSENT_TITLE, ConsentChips, TestConsentChip, ProcedureModal, TaskLine, RefLine, RefItem, CardDetail, HxRef, TwoStepButton, ProcCheckRow, PostTestModal, ConfirmButton, DilationRow, Field, HistoryDetail, MeasureLine, RecentDone, RecentRow, SORT_OPTIONS, ScreenShell, SegmentedToggle, TestCheckModal, TodayTestsLine, UndoButton, byName, cancelProcedure, useSortMode, useUndoToast, useTestEditing, TestPicker, SummaryBar } from '../ui/common.jsx';
 import { StationView } from './StationView.jsx';
 import { SectionTitle, SimpleCard } from './ConsultView.jsx';
@@ -275,8 +275,8 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
   const finishPreProcs = (p, post = null, uid = null) => {
     const pk = patientKey(p);
     const at = Date.now();
-    // 화면에 보이던 진료 전 처치 중 그 줄의 것만 (시행 전인 것)
-    const visible = notPerformed(p.preProcs);
+    // 화면에 보이던 진료 전 처치 중 그 줄의 것만 (시행 전인 것, 교수님 담당은 진료실에서)
+    const visible = notPerformed(preProcsLeft(p, 'resident'));
     const ids = new Set(visible.filter(i => !uid || i.uid === uid).map(i => i.uid));
     const tests = post ? postIds(post.sel) : [];
     const detail = post ? pickDetail(post.detail, post.sel, allTests) : {};
@@ -480,7 +480,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
             return (
             <SimpleCard key={patientKey(p)} p={p} tone="rose" stale={staleOf(p)}>
               {/* 처치마다 한 줄 · 각자 [처치 완료] (10-10 사용자). 산동 점안 버튼은 첫 줄에만 */}
-              {notPerformed(p.preProcs).map((i, idx) => (
+              {notPerformed(preProcsLeft(p, 'resident')).map((i, idx) => (
                 <TaskLine key={i.uid} tag="진료 전 처치" tone="rose" what={procNames([i])} small={i.fromRequest ? `${i.fromRequest} 요청` : ''}>
                   {idx === 0 && <DilationRow compact group crStatusOnly p={p} prefs={doctorPrefs} waitMin={waitMin} mutatePatients={mutatePatients} />}
                   <button type="button" disabled={noConsent([i])} onClick={() => setPostFor({ p, kind: 'pre', uid: i.uid })} title="처치를 완료하고 검사(예: 그 눈 WFP)를 넣습니다" className="text-xs text-slate-500 hover:text-slate-800 underline disabled:text-slate-300 disabled:no-underline">검사 추가 후 완료</button>
@@ -630,7 +630,7 @@ export function ProcedureRoomView({ patients, settings, doctorPrefs, history, mu
 
       {postFor && (
         <PostTestModal p={postFor.p} tests={allTests} settings={settings} mainIds={mainTestIds(doctorPrefs, postFor.p.doctor)}
-          items={(postFor.kind === 'pre' ? notPerformed(postFor.p.preProcs) : notPerformed(pendingProcedures(postFor.p, 'resident'))).filter(i => !postFor.uid || i.uid === postFor.uid)}
+          items={(postFor.kind === 'pre' ? notPerformed(preProcsLeft(postFor.p, 'resident')) : notPerformed(pendingProcedures(postFor.p, 'resident'))).filter(i => !postFor.uid || i.uid === postFor.uid)}
           reconsultOption={postFor.kind === 'resident' && !!postFor.p.seen}
           onConfirm={(sel, detail, recon) => { const { p, kind, uid } = postFor; setPostFor(null); if (kind === 'pre') finishPreProcs(p, { sel, detail }, uid); else finishResident(p, { sel, detail }, recon, uid); }}
           onCancel={() => setPostFor(null)} />

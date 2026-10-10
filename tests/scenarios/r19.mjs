@@ -1,7 +1,7 @@
 import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES, measureVision } from '../lib.mjs';
-await editKey('settings', s => ({ ...s, procedures: [...s.procedures, { id: 'prp', name: 'PRP', performer: 'prof', dilate: true }] }));
+await editKey('settings', s => ({ ...s, procedures: [...s.procedures, { id: 'prp', name: 'PRP', performer: 'resident', dilate: true }] }));
 await editKey('daily-patients', list => list.map(p => {
-  if (p.name === '원성옥') return { ...p, checkin: '08:30', done: { visionIop: true }, preProcs: [{ uid: 'u1', procId: 'prp', name: 'PRP', performer: 'prof', dilate: true, done: false }], skipVision: true };
+  if (p.name === '원성옥') return { ...p, checkin: '08:30', done: { visionIop: true }, preProcs: [{ uid: 'u1', procId: 'prp', name: 'PRP', performer: 'resident', dilate: true, done: false }], skipVision: true };
   if (p.name === '윤지아') return { ...p, dilateOverride: true };
   return p;
 }));

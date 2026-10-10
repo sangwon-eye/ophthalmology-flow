@@ -282,8 +282,13 @@ export function prepPositiveNames(p) {
 }
 
 // 진료 전 처치 (예: PRP, YAG만 받으러 온 환자): 처치실에서 먼저 하고, 검사가 있으면 그다음 검사실로
-export function preProcPending(p) {
-  return (p.preProcs || []).some(x => !x.done);
+// who: 'prof' = 교수님 담당(예: 만니톨 — 진료실 화면 '진료 전 처치' 칸, 진료 뒤 교수님 처치와 같게 10-10 사용자),
+//      'resident' = 그 밖(처치실). 항목의 performer로 나눔(만들 때 설정 값을 적어 둠), 없으면 예전처럼 처치실
+export function preProcsLeft(p, who) {
+  return (p.preProcs || []).filter(x => !x.done && (!who || (who === 'prof') === (x.performer === 'prof')));
+}
+export function preProcPending(p, who) {
+  return preProcsLeft(p, who).length > 0;
 }
 
 // 남은 검사 (준비 전인 검사 포함, 양성으로 보류된 검사는 뺌)
@@ -425,7 +430,11 @@ export function testConsentCancelPatch(x, testId, seenAt) {
   return { consent: next };
 }
 export function inTreatRoom(p, settings) {
-  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p) || (pastVision(p) && preProcPending(p));
+  return needsTriageAssign(p) || needsTriageExam(p, settings) || inResidentProcedure(p) || treatRequested(p) || (pastVision(p) && preProcPending(p, 'resident'));
+}
+// 진료실 화면 '진료 전 처치' 칸: 교수님 담당 진료 전 처치가 남음 (시행 뒤 확인 대기 포함)
+export function inProfPreProc(p) {
+  return !p.consultDone && pastVision(p) && preProcPending(p, 'prof');
 }
 export function pendingProcedures(p, performer) {
   return (p.procedures || []).filter(x => !x.done && (!performer || x.performer === performer));
@@ -669,7 +678,12 @@ export function getStage(p, settings) {
   if (!visionComplete(p)) return { label: '시력/안압 검사 대기', area: 'vision' };
   if (treatRequested(p)) return { label: `처치실 대기 (${examAsked(p) ? `${p.treatRequest.from || '검사실'} 요청 확인` : '진료실 요청 확인'})`, area: 'treatReq' };
   if (needsTriageAssign(p)) return { label: p.firstVisit ? '처치실 대기 (초진 검사 지정)' : p.hxAssign ? '처치실 대기 (검사 지정)' : '처치실 대기 (2차 진료 추가 검사 확인)', area: 'triage' };
-  if (preProcPending(p)) return { label: `처치실 대기 (진료 전 처치: ${(p.preProcs || []).filter(x => !x.done).map(x => x.name).join(', ')})`, area: 'preProc' };
+  if (preProcPending(p)) {
+    const names = (who) => preProcsLeft(p, who).map(x => x.name).join(', ');
+    if (!preProcPending(p, 'prof')) return { label: `처치실 대기 (진료 전 처치: ${names('resident')})`, area: 'preProc' };
+    if (!preProcPending(p, 'resident')) return { label: `진료실 대기 (진료 전 처치: ${names('prof')})`, area: 'preProc' };
+    return { label: `진료 전 처치 (처치실 ${names('resident')} · 진료실 ${names('prof')})`, area: 'preProc' };
+  }
   if (activeVf(p)) return { label: 'VF 검사 중 · 다른 장비 호출 금지', area: 'exam' };
   const prepNames = prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => t.short || t.name);
   if (prepNames.length) return { label: `처치실 대기 (${prepNames.join(', ')} 검사 준비)`, area: 'prep' };
@@ -1837,7 +1851,7 @@ export function treatWork(patients, settings) {
     procs: patients.filter(p => needsTriageExam(p, settings) || (!p.consultDone && notPerformed(pendingProcedures(p, 'resident')).length > 0)),
     prep: patients.filter(p => !p.consultDone && pastVision(p) && prepPendingTests(p, settings).some(t => !prepOf(p, t)?.startedAt)),
     check: patients.filter(p => prepChecks(p, settings).length > 0 || (!p.consultDone && (treatTimedRunning(p, settings).length > 0 || prepStartedTests(p, settings).length > 0 || checkItems(p).length > 0))),
-    preProc: patients.filter(p => !p.consultDone && pastVision(p) && notPerformed(p.preProcs).length > 0),
+    preProc: patients.filter(p => !p.consultDone && pastVision(p) && notPerformed(preProcsLeft(p, 'resident')).length > 0),
     exams: patients.filter(p => !p.consultDone && treatExamPending(p, settings)),
   };
 }

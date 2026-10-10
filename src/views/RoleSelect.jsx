@@ -102,12 +102,15 @@ export function beep(ok) {
     o.onended = () => ctx.close();
   } catch { /* 소리를 못 내도 접수에는 영향 없음 */ }
 }
-// 접수 안내 문구가 없어도 진료 전 처치 환자에게는 처치실로 가라고 안내
-export function kioskNoteFor(p, settings) {
+// 접수 안내 문구가 없어도 진료 전 처치 환자에게는 처치실로 가라고 안내 (교수님 담당 처치만 남으면 진료실 앞 — 10-10)
+export function kioskNoteFor(p, settings, prefs) {
   if (p.kioskNote) return p.kioskNote;
-  if (!preProcPending(p)) return '';
-  const t = treatRoomOf(settings);
-  return `시력검사 없이 바로 ${t.patientName || t.name}로 오세요`;
+  if (preProcPending(p, 'resident')) {
+    const t = treatRoomOf(settings);
+    return `시력검사 없이 바로 ${t.patientName || t.name}로 오세요`;
+  }
+  if (preProcPending(p, 'prof')) return `시력검사 없이 바로 ${consultRoomLabel(prefs, p.doctor) || '진료실'} 앞으로 오세요`;
+  return '';
 }
 // '로/으로': 받침이 없거나 ㄹ 받침이면 '로' (처치실로, 6번방으로). 숫자로 끝나면 읽는 소리로 (3 삼 → 으로)
 export function withRo(name) {
@@ -128,7 +131,9 @@ export function kioskGuide(p, patients, settings, prefs) {
   if (p.consultDone || p.seen) return { title: '진료가 끝났습니다', note: '간호사 안내를 받으시기 바랍니다' };
   if (inConsult(p)) return toRoomFront;
   if (!visionComplete(p)) return { title: '시력검사 대기 중입니다', note: '큰 복도에서 기다려 주세요' };
-  if (treatRequested(p) || needsTriageAssign(p) || preProcPending(p)) return toTreat;
+  if (treatRequested(p) || needsTriageAssign(p) || preProcPending(p, 'resident')) return toTreat;
+  // 교수님 담당 진료 전 처치(예: 만니톨)는 진료실 간호사가 (10-10)
+  if (preProcPending(p, 'prof')) return { title: '다음은 처치입니다', note: `${room} 앞으로 이동해 주세요` };
   // 남은 검사가 있는 곳 (검사 준비가 남은 검사는 처치실부터, 검사 준비 결과로 취소된 검사는 뺌)
   const roomIds = new Set(settings.rooms.map(r => r.id));
   const places = new Set();
@@ -186,7 +191,7 @@ function useKioskScan({ patients, settings, doctorPrefs, mutatePatients, paused 
     try {
       const saved = await mutatePatients(prev => prev.map(x => (patientKey(x) === pk && !x.checkin
         ? applyCheckin(x, { autoLate: true, graceMin: s.lateGraceMin, skipVisionRoom: skip, list: prev }) : x)));
-      const note = kioskNoteFor(p, s);
+      const note = kioskNoteFor(p, s, prefs);
       // 시범 운영 '시력방 건너뛰기'가 켜져 있으면 처음 찍을 때도 다시 찍었을 때와 같은 '갈 곳' 안내 (직원이 적은 접수 안내가 있으면 그것)
       // (다시 찍기와 같은 명단: 저장된 최신 명단 중 그날 환자, 2차 진료 대기 기록 제외)
       const sameDay = skip && !note && Array.isArray(saved) ? saved.filter(x => x.date === p.date && !x.linkWaiting) : [];

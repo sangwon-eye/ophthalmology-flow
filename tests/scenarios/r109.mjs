@@ -1,6 +1,6 @@
 import { chromium, SP, getKey, editKey, tester, BASE } from '../lib.mjs';
 // 처치마다 따로 완료 (10-10 사용자: 처치 두 개가 한 줄에 묶여 [처치 완료] 하나로 한꺼번에 완료되던 문제, 이름은 모두 가상)
-// - 처치실 처치 대기(전공의) · 진료 전 처치 · 진료실 설명 대기 교수님 처치 모두: 처치마다 한 줄, 각자 [처치 완료]
+// - 처치실 처치 대기(전공의) · 진료 전 처치(교수님 담당은 진료실) · 진료실 설명 대기 교수님 처치 모두: 처치마다 한 줄, 각자 [처치 완료]
 // - 하나를 누르면 그 처치만 시행·완료, 다른 처치는 그대로 남음 ('남은 처치 …' 안내), '검사 · 재진료' 창도 그 처치만
 const today = new Date().toLocaleDateString('sv-SE');
 const now = Date.now();
@@ -43,19 +43,22 @@ ok(r.procedures.find(i => i.uid === 'a1').done && !r.procedures.find(i => i.uid 
 ok(await page.getByText(/남은 처치 PRP · OD/).count() >= 1, "안내: '남은 처치 PRP · OD'");
 ok(await inSec('treat-procs', '서준호').locator('[data-task-line="처치"]').count() === 1, '처치 대기에 PRP 한 줄만 남음');
 
-// 2) 진료 전 처치: 만니톨 · PRP 두 줄, 만니톨만 시행 (확인 30분)
+// 2) 진료 전 처치: PRP(전공의)만 처치실에 한 줄, 만니톨(교수님)은 진료실 진료 전 처치 칸 (10-10)
 c = inSec('treat-preproc', '신종희');
-ok(await c.locator('[data-task-line="진료 전 처치"]').count() === 2, '진료 전 처치 두 개 = 두 줄');
-await c.locator('[data-task-line="진료 전 처치"]').filter({ hasText: '만니톨' }).getByRole('button', { name: '처치 완료', exact: true }).click(); await W(1200);
-r = await rec('신종희');
-const b1 = r.preProcs.find(i => i.uid === 'b1');
-ok(!!b1.performedAt && b1.checkMin === 30 && !r.preProcs.find(i => i.uid === 'b2').performedAt, '만니톨만 시행(확인 대기), PRP는 그대로');
-ok(await inSec('treat-preproc', '신종희').locator('[data-task-line="진료 전 처치"]').count() === 1 && await inSec('treat-check', '신종희').count() === 1, 'PRP는 진료 전 처치에 남고, 만니톨은 결과 확인으로');
+ok(await c.locator('[data-task-line="진료 전 처치"]').count() === 1 && !/만니톨/.test(await c.innerText()), '처치실 진료 전 처치: PRP 한 줄만 (만니톨은 진료실)');
 await back();
 
 // 3) 진료실 설명 대기 교수님 처치: 주사 · 만니톨 두 줄, '검사 · 재진료' 창은 그 처치만
 await pick('진료실'); await W(600);
 await page.getByRole('button', { name: '김선웅', exact: true }).first().click(); await W(1200);
+// 진료실 진료 전 처치: 만니톨 한 줄 + PRP는 처치실 진행 중(점선), 만니톨만 시행 (확인 30분)
+c = inSec('consult-preproc', '신종희');
+ok(await c.locator('[data-task-line="진료 전 처치"]').count() === 1 && await c.locator('[data-task-line="처치실"]').filter({ hasText: 'PRP' }).count() === 1, '진료실 진료 전 처치: 만니톨 한 줄 + 처치실 PRP 진행 중');
+await c.getByRole('button', { name: '처치 완료', exact: true }).click(); await W(1200);
+r = await rec('신종희');
+const b1 = r.preProcs.find(i => i.uid === 'b1');
+ok(!!b1.performedAt && b1.checkMin === 30 && !r.preProcs.find(i => i.uid === 'b2').performedAt, '만니톨만 시행(확인 대기), PRP는 그대로');
+ok(await inSec('consult-preproc', '신종희').locator('[data-task-line="확인 대기"]').count() === 1, "만니톨은 '확인 대기' 줄로");
 c = inSec('consult-explain', '조현우');
 ok(await c.locator('[data-task-line="교수님"]').count() === 2 && await c.getByRole('button', { name: '처치 완료', exact: true }).count() === 2, '교수님 처치 두 개 = 두 줄, [처치 완료] 두 개');
 await c.locator('[data-task-line="교수님"]').filter({ hasText: '주사' }).getByRole('button', { name: '검사 · 재진료' }).click(); await W(400);

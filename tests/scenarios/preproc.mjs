@@ -1,5 +1,5 @@
 import { chromium, SP, getKey, editKey, tester, BASE, DATA, FIXTURES } from '../lib.mjs';
-await editKey('settings', s => ({ ...s, procedures: [...s.procedures, { id: 'prp', name: 'PRP', performer: 'prof' }, { id: 'yag', name: 'YAG', performer: 'resident' }] }));
+await editKey('settings', s => ({ ...s, procedures: [...s.procedures, { id: 'prp', name: 'PRP', performer: 'resident' }, { id: 'yag', name: 'YAG', performer: 'resident' }] }));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 const { errors, ok, W, pick, back, cardOf } = tester(page);

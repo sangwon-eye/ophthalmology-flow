@@ -13,7 +13,7 @@ const item = (uid, procId, name, performer, extra = {}) => ({ uid, procId, name,
 await editKey('daily-patients', list => list.map(p => {
   if (p.name === '송하린') return { ...p, procedures: [item('pb1', 'probe', 'Probing', 'resident'), item('pr1', 'prp', 'PRP', 'prof', { eye: 'OD' })], done: { ...p.done, wfp: true }, assigned: { ...p.assigned, wfp: true } };
   if (p.name === '황도윤') return { ...p, procedures: [item('y1', 'yag', 'YAG', 'prof', { eye: 'OS' })] };
-  if (p.name === '장민호') return { ...p, assigned: { visionIop: true, wfp: true }, done: { visionIop: true, wfp: true }, preProcs: [{ uid: 'pp1', procId: 'prp', name: 'PRP', performer: 'prof', done: false, doneAt: null }] };
+  if (p.name === '장민호') return { ...p, assigned: { visionIop: true, wfp: true }, done: { visionIop: true, wfp: true }, preProcs: [{ uid: 'pp1', procId: 'prp', name: 'PRP', performer: 'resident', done: false, doneAt: null }] };
   return p;
 }));
 const rec = async (n) => (await getKey('daily-patients')).value.find(p => p.name === n);

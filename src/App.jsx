@@ -1,6 +1,6 @@
 // 최상위 App (저장소 동기화와 화면 전환)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { placeConsultArrivals, historyChanges, setHistoryDay, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
+import { placeConsultArrivals, historyChanges, setHistoryDay, REDO_SHORT, dropsPending, redoActive, COLOR_MAP, DEFAULT_SETTINGS, INPUT, PERFORMER_LABEL, activeVf, allDone, awaitingExplain, byQueue, consultWaiting, fmtClock, getStage, inConsult, inProfProcedure, inResidentProcedure, inTreatRoom, needsTriageAssign, needsTriageExam, pastVision, patientKey, pendingProcedures, pendingRooms, pendingTests, preProcPending, preProcsLeft, inProfPreProc, prepOf, prepPendingTests, prepPositiveNames, procedureStatus, realTodayISO, roomColor, setForcedToday, setNoDilateTests, setVisionTestIds, testLabelWithOptions, todayISO, treatRoomOf, visionComplete, fixTreatPreps } from './core/flow.jsx';
 import { hxFieldsOf, loadDaily, loadDoctorPrefs, loadDoctors, loadFu, loadHistory, loadKeySubset, loadSettings, loadTodayOverride, shiftISO, useArchivedPatients, useSharedStore, visionNames } from './core/storage.jsx';
 import { DoctorOrderContext, DoctorChip, SexAge, EmptyState, HxContext, PatientMemo, PatientMemoContext, ScreenShell, noDilateTest, useApplyTextSize } from './ui/common.jsx';
 import { KioskView, QrConsultBoard, PasswordModal, RoleSelect, lockApi } from './views/RoleSelect.jsx';
@@ -22,7 +22,8 @@ export function patientQueueLabels(p, settings, prefs) {
   if (!p.checkin) labels.push('접수 전');
   if (p.checkin && !visionComplete(p)) labels.push(`${visionNames(settings).name} · 검사 대기`);
   if (needsTriageAssign(p)) labels.push(`${treatRoomOf(settings).name} · 초진 검사 지정 대기`);
-  if (pastVision(p) && preProcPending(p)) labels.push(`${treatRoomOf(settings).name} · 진료 전 처치 (${(p.preProcs || []).filter(x => !x.done).map(x => x.name).join(', ')})`);
+  if (pastVision(p) && preProcPending(p, 'resident')) labels.push(`${treatRoomOf(settings).name} · 진료 전 처치 (${preProcsLeft(p, 'resident').map(x => x.name).join(', ')})`);
+  if (pastVision(p) && preProcPending(p, 'prof')) labels.push(`진료실 · 진료 전 처치 (${preProcsLeft(p, 'prof').map(x => x.name).join(', ')})`);
   prepPendingTests(p, settings).filter(() => pastVision(p)).forEach(t => labels.push(`${treatRoomOf(settings).name} · ${t.short || t.name} ${t.prepName || '준비'}${prepOf(p, t)?.startedAt ? ` 중 (${fmtClock(prepOf(p, t).startedAt)} 시작)` : ' 대기'}`));
   if (prepPositiveNames(p).length) labels.push(`${prepPositiveNames(p).join(', ')} 검사 취소`);
   pendingRooms(p, settings).forEach(r => {
@@ -70,8 +71,8 @@ export function matchesDirectoryStatus(p, settings, status, prefs) {
     case 'reception': return !p.checkin && !p.linkWaiting;
     case 'vision': return !!p.checkin && !visionComplete(p);
     case 'exam': return pendingRooms(p, settings).length > 0 || !!activeVf(p);
-    case 'consult': return consultWaiting(p, settings, prefs) || dropsPending(p, prefs, settings.dilationWaitMin) || inConsult(p) || awaitingExplain(p);
-    case 'treatment': return inTreatRoom(p, settings) || inProfProcedure(p);
+    case 'consult': return consultWaiting(p, settings, prefs) || dropsPending(p, prefs, settings.dilationWaitMin) || inConsult(p) || awaitingExplain(p) || inProfPreProc(p);
+    case 'treatment': return inTreatRoom(p, settings) || inProfProcedure(p) || inProfPreProc(p);
     default: return false;
   }
 }

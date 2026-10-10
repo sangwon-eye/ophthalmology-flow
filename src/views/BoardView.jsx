@@ -1,7 +1,7 @@
 // 환자용 화면·QR 접수
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Megaphone, QrCode } from 'lucide-react';
-import { examAsked, inProgressText, boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
+import { examAsked, inProgressText, boardReservation, isReconsult, WAIT_TEXT, shownWait, activeVf, allDone, byQueue, consultQueue, consultFrontCount, consultWaiting, dropsPending, inConsult, pastVision, patientKey, pendingRooms, pendingTests, preProcPending, preProcsLeft, roomPending, prepOf, prepPendingTests, roomColor, treatRoomOf, visionComplete, prepHolding } from '../core/flow.jsx';
 import { loadKey, visionNames } from '../core/storage.jsx';
 import { ScreenShell, TextSizeControl, textScale, useTextSize } from '../ui/common.jsx';
 import { ChimeControl, useChime, useSoundBlocked } from '../ui/chime.jsx';
@@ -410,8 +410,8 @@ function ExamLineCard({ p, lines }) {
 export function ExamBoardList({ patients, settings, compact, wide }) {
   // 처치실에서 먼저 할 일(진료 전 처치, 검사 준비)도 함께 안내
   const treat = treatRoomOf(settings);
-  const treatTodo = (p) => !pastVision(p) ? [] : preProcPending(p)
-    ? (p.preProcs || []).filter(x => !x.done).map(x => x.name)
+  const treatTodo = (p) => !pastVision(p) ? [] : preProcPending(p, 'resident')
+    ? preProcsLeft(p, 'resident').map(x => x.name)
     : prepPendingTests(p, settings).filter(t => !prepOf(p, t)?.startedAt).map(t => `${t.name || t.short} 검사 준비`);
   const list = patients
     .filter(p => !p.consultDone && (pendingRooms(p, settings).length > 0 || treatTodo(p).length > 0))
